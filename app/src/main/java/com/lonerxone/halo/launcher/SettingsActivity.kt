@@ -74,6 +74,40 @@ class SettingsActivity : Activity() {
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)))
         }
 
+        // Updates: right at the top, one button.
+        val rel = latest
+        val newer = rel != null && rel.build > Updater.buildOf(version())
+        val upd = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = round(Color.rgb(17, 17, 19), dpf(24f))
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        upd.addView(text(12f, Palette.WHITE50, bold = true).apply { text = "VERSION ${version()}" })
+        upd.addView(text(16f, Palette.INK, bold = true, lines = 2).apply {
+            text = updateStatus
+            setPadding(0, dp(4), 0, dp(12))
+        })
+        upd.addView(button(
+            when {
+                downloading >= 0f -> "Downloading ${(downloading * 100).toInt()}%"
+                newer && rel != null -> "Download & install ${rel.tag}"
+                else -> "Check for updates"
+            },
+        ) {
+            when {
+                downloading >= 0f -> {}
+                newer && rel != null -> install(rel)
+                else -> check()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        if (rel != null && newer && rel.notes.isNotBlank()) {
+            upd.addView(text(13f, Palette.WHITE70, lines = 8).apply {
+                text = rel.notes.take(500)
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        col.addView(upd, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+
         // Halo
         section(col, "Halo")
         val halo = HaloLink.installed(this)
@@ -92,22 +126,22 @@ class SettingsActivity : Activity() {
         // Home
         section(col, "Home")
         col.addView(group(
-            pictureRow("Hero picture", "Big picture with the wave edge, behind the clock", Prefs.HERO_PIC),
-            pictureRow("Capsule picture", "The tilted pill-shaped photo", Prefs.CAPSULE_PIC),
+            pictureRow("Top picture", "Shown above the black sheet. Leave empty to use your wallpaper", Prefs.HERO_PIC),
             row("Clock style", listOf("Outline", "Solid", "Thin")[Prefs.get(this).getInt(Prefs.CLOCK_STYLE, 0)], trailing = chevron()) {
                 val p = Prefs.get(this)
                 p.edit().putInt(Prefs.CLOCK_STYLE, (p.getInt(Prefs.CLOCK_STYLE, 0) + 1) % 3).apply()
                 render()
             },
-            switchRow("Show wallpaper", "Your wallpaper behind the widgets instead of pure black", Prefs.SHOW_WALLPAPER, false),
         ))
 
         // Apps
         section(col, "Apps")
         col.addView(group(
-            switchRow("Monochrome icons", "White line icons, like Android's themed icons", Prefs.MONO_ICONS, true),
-            row("Dock apps", "Up to 5, in the floating dock", trailing = chevron()) { pickApps(Prefs.DOCK, 5) },
-            row("Favourites", "Up to 4, on the first page", trailing = chevron()) { pickApps(Prefs.FAVORITES, 4) },
+            row("Icon style", listOf("Dark (like iOS)", "White line", "Original")[Icons.style(this)], trailing = chevron()) {
+                Prefs.get(this).edit().putInt(Prefs.ICON_STYLE, (Icons.style(this) + 1) % 3).apply()
+                render()
+            },
+            row("Dock apps", "Up to 5. Or long-press the dock", trailing = chevron()) { pickApps(Prefs.DOCK, 5) },
             row("Hidden apps", "${Prefs.list(this, Prefs.HIDDEN).size} hidden; search still finds them", trailing = chevron()) { pickApps(Prefs.HIDDEN, 0) },
         ))
 
@@ -140,20 +174,6 @@ class SettingsActivity : Activity() {
             text = "Forecast by Open-Meteo.com"
             setPadding(dp(20), dp(8), 0, 0)
         })
-
-        // Updates
-        section(col, "Updates")
-        val rel = latest
-        val newer = rel != null && rel.build > Updater.buildOf(version())
-        col.addView(group(
-            row("Version ${version()}", updateStatus, trailing = chip(if (newer) "New" else "Latest", newer)) {
-                when {
-                    downloading >= 0f -> {}
-                    newer && rel != null -> install(rel)
-                    else -> check()
-                }
-            },
-        ))
 
         // About
         section(col, "About")

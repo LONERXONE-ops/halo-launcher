@@ -33,6 +33,7 @@ object Prefs {
     const val CAPSULE_PIC = "capsule_pic"
     const val CLOCK_STYLE = "clock_style" // 0 outline, 1 solid, 2 thin
     const val MONO_ICONS = "mono_icons"
+    const val ICON_STYLE = "icon_style" // Icons.DARK / MONO / ORIGINAL
     const val SHOW_WALLPAPER = "show_wallpaper"
     const val DOCK = "dock"
     const val FAVORITES = "favorites"

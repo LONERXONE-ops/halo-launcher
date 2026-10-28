@@ -47,7 +47,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         private set
 
     init {
-        setBackgroundColor(Color.argb(242, 6, 6, 7))
+        setBackgroundColor(Color.BLACK)
         isClickable = true
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -64,7 +64,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val pill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = context.glass(dpf(24f))
+            background = context.round(Color.rgb(28, 28, 30), dpf(24f))
             setPadding(dp(16), 0, dp(12), 0)
         }
         pill.addView(ImageView(context).apply {
@@ -91,7 +91,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         })
         usedRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = context.glass(dpf(26f))
+            background = context.round(Color.rgb(18, 18, 20), dpf(26f))
             setPadding(dp(6), dp(12), dp(6), dp(8))
         }
         col.addView(usedRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))

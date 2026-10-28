@@ -21,29 +21,28 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * An app icon with its label and Halo's unread badge. Monochrome glyphs are
- * drawn bare (white line icons); greyscale fallbacks sit in a soft circle so
- * mixed icon styles still look like one set.
+ * An app icon (in the chosen style) with an optional label and Halo's unread
+ * badge.
  */
 @SuppressLint("ViewConstructor")
 class AppIconView(context: Context, val app: App, private val sizeDp: Int, private val showLabel: Boolean, private val labelColor: Int = Palette.INK) : View(context) {
     private var result: Icons.Result? = null
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(40, 255, 255, 255) }
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = labelColor
         textSize = dpf(11.5f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
     }
-    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.INK }
+    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 69, 58) }
     private val badgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK
+        color = Color.WHITE
         textSize = dpf(10f)
         typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
     private val px = dp(sizeDp)
+    private val dst = RectF()
     var badge = 0
         set(v) {
             if (field != v) {
@@ -58,10 +57,9 @@ class AppIconView(context: Context, val app: App, private val sizeDp: Int, priva
     }
 
     fun reload() {
-        val mono = Prefs.get(context).getBoolean(Prefs.MONO_ICONS, true)
-        val size = (px * if (mono) 0.78f else 1f).toInt()
-        Icons.cached(app, mono, size)?.let { result = it; invalidate(); return }
-        Icons.load(context, app, mono, size) { r ->
+        val style = Icons.style(context)
+        Icons.cached(app, style, px)?.let { result = it; invalidate(); return }
+        Icons.load(context, app, style, px) { r ->
             result = r
             invalidate()
         }
@@ -74,24 +72,15 @@ class AppIconView(context: Context, val app: App, private val sizeDp: Int, priva
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
-        val top = 0f
-        val r = result
-        val mono = Prefs.get(context).getBoolean(Prefs.MONO_ICONS, true)
-        if (r != null) {
-            if (mono && !r.glyph) canvas.drawCircle(cx, top + px / 2f, px / 2f, bgPaint)
-            val inner = if (mono && !r.glyph) px * 0.64f else if (mono) px * 0.78f else px.toFloat()
-            val src = r.bitmap
-            val dst = RectF(cx - inner / 2f, top + (px - inner) / 2f, cx + inner / 2f, top + (px + inner) / 2f)
-            canvas.drawBitmap(src, null, dst, iconPaint)
+        result?.let {
+            dst.set(cx - px / 2f, 0f, cx + px / 2f, px.toFloat())
+            canvas.drawBitmap(it.bitmap, null, dst, iconPaint)
         }
-        if (showLabel) {
-            val label = ellipsize(app.label, width - dp(4))
-            canvas.drawText(label, cx, top + px + dp(16), labelPaint)
-        }
+        if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, px + dpf(16f), labelPaint)
         if (badge > 0) {
             val br = dpf(8.5f)
-            val bx = cx + px / 2f - br * 0.5f
-            val by = top + br * 0.6f
+            val bx = cx + px / 2f - br * 0.4f
+            val by = br * 0.5f
             canvas.drawCircle(bx, by, br, badgePaint)
             canvas.drawText(if (badge > 99) "99" else badge.toString(), bx, by + dpf(3.5f), badgeText)
         }
@@ -153,74 +142,6 @@ class StackedClock(context: Context) : View(context) {
                     canvas.drawText(s, 0f, y, fill)
                 }
             }
-        }
-    }
-}
-
-/**
- * Your picture with a soft wave cut along the bottom (the curved block from
- * the references), fading into the black below. Without a picture it shows
- * a quiet graphite gradient with a halo ring.
- */
-class HeroView(context: Context) : View(context) {
-    var picture: Bitmap? = null
-        set(v) {
-            field = v
-            shader = v?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
-            invalidate()
-        }
-    private var shader: BitmapShader? = null
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val shade = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val path = Path()
-    private val m = Matrix()
-
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        val r = dpf(34f)
-        val wf = w.toFloat()
-        val hf = h.toFloat()
-        path.reset()
-        path.moveTo(0f, r)
-        path.quadTo(0f, 0f, r, 0f)
-        path.lineTo(wf - r, 0f)
-        path.quadTo(wf, 0f, wf, r)
-        // Right side runs down to ~62%, then a smooth S-curve sweeps to the bottom-left.
-        path.lineTo(wf, hf * 0.62f - r)
-        path.quadTo(wf, hf * 0.62f, wf - r, hf * 0.62f)
-        path.lineTo(wf * 0.62f, hf * 0.62f)
-        path.cubicTo(wf * 0.48f, hf * 0.62f, wf * 0.46f, hf, wf * 0.30f, hf)
-        path.lineTo(r, hf)
-        path.quadTo(0f, hf, 0f, hf - r)
-        path.close()
-        shade.shader = LinearGradient(0f, 0f, 0f, hf, intArrayOf(Color.argb(0, 0, 0, 0), Color.argb(70, 0, 0, 0), Color.argb(150, 0, 0, 0)), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        val bmp = picture
-        val sh = shader
-        if (bmp != null && sh != null) {
-            val s = max(width.toFloat() / bmp.width, height.toFloat() / bmp.height)
-            m.reset()
-            m.setScale(s, s)
-            m.postTranslate((width - bmp.width * s) / 2f, (height - bmp.height * s) / 2f)
-            sh.setLocalMatrix(m)
-            paint.shader = sh
-        } else {
-            paint.shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(), Color.rgb(44, 44, 48), Color.rgb(14, 14, 16), Shader.TileMode.CLAMP)
-        }
-        canvas.drawPath(path, paint)
-        canvas.drawPath(path, shade)
-        if (bmp == null) {
-            // A halo ring floating top-right, a nod to the logo.
-            ring.strokeWidth = dpf(7f)
-            ring.color = Color.argb(60, 255, 255, 255)
-            val cx = width * 0.74f
-            val cy = height * 0.22f
-            canvas.save()
-            canvas.rotate(-8f, cx, cy)
-            canvas.drawOval(cx - dpf(62f), cy - dpf(16f), cx + dpf(62f), cy + dpf(16f), ring)
-            canvas.restore()
         }
     }
 }
@@ -292,43 +213,132 @@ class MonthView(context: Context) : View(context) {
     }
 }
 
-/** A picture in a capsule (pill) frame, the island's own shape. */
-class CapsuleView(context: Context) : View(context) {
+/**
+ * Your picture, fixed behind the pages and centre-cropped to the screen. The
+ * black sheets cover the lower part, like the poster-style home screens.
+ * With no picture set, it stays clear so your phone's wallpaper shows.
+ */
+class ArtView(context: Context) : View(context) {
     var picture: Bitmap? = null
         set(v) {
             field = v
             shader = v?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
             invalidate()
         }
-    var tilt = -18f
     private var shader: BitmapShader? = null
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val m = Matrix()
+
+    override fun onDraw(canvas: Canvas) {
+        val bmp = picture ?: return
+        val sh = shader ?: return
+        // Fill the top ~60% (what shows above the sheet), anchored to the top.
+        val target = height * 0.62f
+        val s = max(width.toFloat() / bmp.width, target / bmp.height)
+        m.reset()
+        m.setScale(s, s)
+        m.postTranslate((width - bmp.width * s) / 2f, 0f)
+        sh.setLocalMatrix(m)
+        p.shader = sh
+        canvas.drawRect(0f, 0f, width.toFloat(), bmp.height * s, p)
+    }
+}
+
+/**
+ * A solid black sheet with a soft curved top edge (one side higher than the
+ * other), the shape from the poster-style reference. Content sits below the
+ * curve.
+ */
+class SheetView(context: Context, private val highOnLeft: Boolean) : android.widget.LinearLayout(context) {
+    /** How far the low side sits below the high side. */
+    var curve = dpf(96f)
+        set(v) {
+            field = v
+            invalidate()
+        }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val path = Path()
+
+    init {
+        orientation = VERTICAL
+        setWillNotDraw(false)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val a = if (highOnLeft) 0f else curve
+        val b = if (highOnLeft) curve else 0f
+        path.reset()
+        path.moveTo(0f, a)
+        // One smooth S: flat, then sweeping down (or up), then flat again.
+        path.cubicTo(w * 0.52f, a, w * 0.48f, b, w, b)
+        path.lineTo(w, h)
+        path.lineTo(0f, h)
+        path.close()
+        canvas.drawPath(path, fill)
+        super.onDraw(canvas)
+    }
+}
+
+/**
+ * The dock: a solid tab rising out of the bottom edge, like a notch turned
+ * upside down: rounded on top, flaring into the screen edge with concave
+ * curves at its feet.
+ */
+class DockTab(context: Context) : android.widget.LinearLayout(context) {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(28, 28, 30) }
+    private val path = Path()
+    var sideMargin = dpf(22f)
+
+    init {
+        orientation = HORIZONTAL
+        gravity = android.view.Gravity.CENTER
+        setWillNotDraw(false)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val m = sideMargin
+        val r = dpf(30f)
+        val f = dpf(20f)
+        path.reset()
+        path.moveTo(m - f, h)
+        path.quadTo(m, h, m, h - f)
+        path.lineTo(m, r)
+        path.quadTo(m, 0f, m + r, 0f)
+        path.lineTo(w - m - r, 0f)
+        path.quadTo(w - m, 0f, w - m, r)
+        path.lineTo(w - m, h - f)
+        path.quadTo(w - m, h, w - m + f, h)
+        path.close()
+        canvas.drawPath(path, fill)
+        super.onDraw(canvas)
+    }
+}
+
+/** A thin ring that fills clockwise (battery tile). */
+class RingView(context: Context) : View(context) {
+    var fraction = 0f
+        set(v) {
+            field = v.coerceIn(0f, 1f)
+            invalidate()
+        }
+    var color = Palette.INK
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
     private val r = RectF()
 
     override fun onDraw(canvas: Canvas) {
-        canvas.save()
-        canvas.rotate(tilt, width / 2f, height / 2f)
-        val inset = dpf(6f)
-        r.set(inset, height * 0.16f, width - inset, height * 0.84f)
-        val rad = r.height() / 2f
-        val bmp = picture
-        val sh = shader
-        if (bmp != null && sh != null) {
-            val s = max(r.width() / bmp.width, r.height() / bmp.height)
-            m.reset()
-            m.setScale(s, s)
-            m.postTranslate(r.centerX() - bmp.width * s / 2f, r.centerY() - bmp.height * s / 2f)
-            sh.setLocalMatrix(m)
-            p.shader = sh
-        } else {
-            p.shader = LinearGradient(r.left, r.top, r.right, r.bottom, Color.rgb(70, 70, 76), Color.rgb(24, 24, 26), Shader.TileMode.CLAMP)
-        }
-        canvas.drawRoundRect(r, rad, rad, p)
-        rim.strokeWidth = dpf(2f)
-        rim.color = Color.argb(70, 255, 255, 255)
-        canvas.drawRoundRect(r, rad, rad, rim)
-        canvas.restore()
+        val sw = dpf(7f)
+        p.strokeWidth = sw
+        r.set(sw / 2f, sw / 2f, width - sw / 2f, height - sw / 2f)
+        p.color = Color.argb(40, 255, 255, 255)
+        canvas.drawArc(r, 0f, 360f, false, p)
+        p.color = color
+        canvas.drawArc(r, -90f, 360f * fraction, false, p)
     }
 }

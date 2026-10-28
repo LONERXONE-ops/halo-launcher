@@ -6,7 +6,7 @@
 
 <p align="center">
   A black-and-white home screen for Android that works with <a href="https://github.com/LONERXONE-ops/halo">Halo</a>, the dynamic island.<br>
-  Big poster clock, glass widgets, monochrome icons, a floating dock, and your music, badges and notifications straight from the island.
+  Poster-style home, solid black sheet, iOS-style dark icons, a notch-shaped dock, and your music, badges and notifications straight from the island.
 </p>
 
 ---
@@ -23,16 +23,15 @@ For the full experience, install **[Halo](https://github.com/LONERXONE-ops/halo/
 
 ## The home screen
 
+Poster style: your wallpaper (or a picture you pick) across the top, a solid black sheet with a soft curved edge below.
+
 | | |
 |---|---|
-| **Hero** | Your picture with a soft wave edge, the big stacked clock (outline, solid or thin) and the date on top, the weather beside it. |
-| **Music** | A glass card with the cover, song, progress and controls. Fed by Halo, so it works with Spotify, YouTube Music, Boomplay and any player. |
-| **Battery · date · capsule** | A battery pill that fills up (green while charging), a big date tile, and a tilted pill-shaped photo of your choice. |
-| **Favourites** | Four apps with labels and unread badges. |
-| **Page 2** | Halo's notifications and quick switches (flashlight, Do Not Disturb, silent), a month calendar, a note you can write on, app capsules by kind (Entertainment, Social, Tools, Photos), a 3-day forecast, and any Android widgets you add. |
-| **Dock** | A floating glass pill with five apps. |
-| **All apps** | Swipe up: search, most used, and an A–Z grid. Long-press any app for its shortcuts, dock, favourites, hide, info and uninstall. |
-| **Icons** | Monochrome: the white glyphs apps ship for Android's themed icons; apps without one get a soft greyscale version. Or switch to original icons. |
+| **Page 1** | The big stacked clock (outline, solid or thin), the date and weather, and a music player made for the sheet, fed by Halo so it works with any player. |
+| **Page 2** | A few quiet tiles (weather, a month calendar, battery, a note) and any Android widgets you add. |
+| **Dock** | A solid tab rising out of the bottom edge, like a notch turned upside down. Long-press it to change the apps. |
+| **All apps** | Swipe up: search, most used, and an A–Z grid. Long-press any app for its shortcuts, dock, hide, info and uninstall. |
+| **Icons** | Dark by default, like iOS dark mode: each app's own glyph in its brand colour on a dark tile. Or white line icons, or the originals. |
 
 ## Gestures
 

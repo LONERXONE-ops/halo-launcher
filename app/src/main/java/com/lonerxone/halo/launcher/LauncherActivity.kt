@@ -22,7 +22,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
-import android.provider.Settings
 import android.text.format.DateFormat
 import android.util.SizeF
 import android.view.ContextThemeWrapper
@@ -45,49 +44,49 @@ import java.util.Date
 import kotlin.math.abs
 
 /**
- * Halo Launcher's home screen.
+ * Halo Launcher's home screen, poster style: your wallpaper (or a picture
+ * you choose) across the top, a solid black sheet with a curved edge below.
  *
- * Page 1: your picture with a wave edge and the big stacked clock, then the
- * music card (from Halo), battery, date and a capsule photo, and your
- * favourite apps. Page 2: Halo's notifications and quick switches, a month
- * calendar, a note, app capsules by kind, the forecast and any Android
- * widgets you add. A floating glass dock sits on top; swipe up for all apps.
+ * Page 1: the big stacked clock, date and weather, and a music player made
+ * for the sheet. Page 2: a few quiet tiles (weather, calendar, battery,
+ * note) and any Android widgets you add. The dock rises out of the bottom
+ * edge like an upside-down notch. Swipe up for all apps.
  */
 class LauncherActivity : Activity(), Drawer.Host {
 
     private lateinit var root: GestureRoot
-    private lateinit var content: LinearLayout
+    private lateinit var art: ArtView
     private lateinit var pager: HomePager
     private lateinit var drawer: Drawer
     private lateinit var dots: LinearLayout
-    private lateinit var dock: LinearLayout
+    private lateinit var dock: DockTab
     private lateinit var widgetHost: AppWidgetHost
     private val ui = Handler(Looper.getMainLooper())
     private var insetTop = 0
     private var insetBottom = 0
+    private val dockBody get() = dp(92)
 
     // Live views
+    private var sheet1: SheetView? = null
+    private var sheet2: SheetView? = null
     private var clock: StackedClock? = null
-    private var hero: HeroView? = null
     private var dateLine: TextView? = null
-    private var weatherMini: LinearLayout? = null
+    private var tempText: TextView? = null
+    private var tempIcon: ImageView? = null
+    private var weatherDesc: TextView? = null
     private var musicBox: FrameLayout? = null
-    private var batteryText: TextView? = null
-    private var batteryBar: BarView? = null
-    private var batteryIcon: ImageView? = null
-    private var dateDay: TextView? = null
-    private var dateName: TextView? = null
-    private var capsule: CapsuleView? = null
-    private var favorites: LinearLayout? = null
+    private var musicBar: BarView? = null
+    private var musicTick: Runnable? = null
+    private var bigDay: TextView? = null
+    private var bigDayName: TextView? = null
+    private var weatherTile: LinearLayout? = null
     private var monthView: MonthView? = null
     private var monthTitle: TextView? = null
+    private var batteryRing: RingView? = null
+    private var batteryPct: TextView? = null
+    private var batteryState: TextView? = null
     private var noteText: TextView? = null
-    private var haloCard: LinearLayout? = null
-    private var folders: LinearLayout? = null
-    private var forecast: LinearLayout? = null
     private var widgetsBox: LinearLayout? = null
-    private var musicTick: Runnable? = null
-    private var musicBar: BarView? = null
 
     private val appsChanged: () -> Unit = { rebuildApps() }
     private val haloChanged: () -> Unit = { onHalo() }
@@ -186,26 +185,25 @@ class LauncherActivity : Activity(), Drawer.Host {
 
     private fun build() {
         root = GestureRoot(this)
-        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        art = ArtView(this)
+        root.addView(art, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
         pager = HomePager(this)
         pager.addView(buildPage1())
         pager.addView(buildPage2())
         pager.onPageChanged = { p -> updateDots(p) }
         pager.onScrolled = { f -> scrollWallpaper(f) }
-        content.addView(pager, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(pager, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         dots = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        content.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(18)))
-        dock = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = glass(dpf(30f))
-            setPadding(dp(10), 0, dp(10), 0)
+        root.addView(dots, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14), Gravity.BOTTOM))
+
+        dock = DockTab(this)
+        dock.setOnLongClickListener {
+            pickDock()
+            true
         }
-        content.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)).apply {
-            setMargins(dp(18), dp(6), dp(18), dp(10))
-        })
-        root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dockBody, Gravity.BOTTOM))
 
         drawer = Drawer(this, this)
         root.addView(drawer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -214,21 +212,30 @@ class LauncherActivity : Activity(), Drawer.Host {
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
             insetTop = bars.top
             insetBottom = bars.bottom
-            content.setPadding(0, bars.top, 0, bars.bottom)
-            drawer.setPadding(0, bars.top, 0, 0)
+            layoutForInsets()
             insets
         }
         setContentView(root)
         updateDots(0)
     }
 
-    /** Wallpaper or pure black behind everything. */
+    /** The dock reaches into the gesture bar area; everything else keeps clear of it. */
+    private fun layoutForInsets() {
+        val dh = dockBody + insetBottom
+        (dock.layoutParams as FrameLayout.LayoutParams).height = dh
+        dock.setPadding(dp(34), 0, dp(34), insetBottom)
+        dock.requestLayout()
+        (dots.layoutParams as FrameLayout.LayoutParams).bottomMargin = dh + dp(4)
+        dots.requestLayout()
+        sheet1?.setPadding(dp(22), dp(24), dp(22), dh + dp(26))
+        sheet2?.let { it.setPadding(dp(18), dp(20), dp(18), dh + dp(30)) }
+        drawer.setPadding(0, insetTop, 0, 0)
+    }
+
     private fun refreshLook() {
-        val wall = Prefs.get(this).getBoolean(Prefs.SHOW_WALLPAPER, false)
-        root.setBackgroundColor(if (wall) Color.argb(70, 0, 0, 0) else Color.BLACK)
+        root.setBackgroundColor(Color.TRANSPARENT)
         clock?.style = Prefs.get(this).getInt(Prefs.CLOCK_STYLE, 0)
-        hero?.picture = loadPic(Prefs.HERO_PIC)
-        capsule?.picture = loadPic(Prefs.CAPSULE_PIC)
+        art.picture = loadPic(Prefs.HERO_PIC)
         noteText?.text = Prefs.get(this).getString(Prefs.NOTE, "").orEmpty().ifEmpty { "Tap to write a note" }
         rebuildApps()
         rebuildWidgets()
@@ -245,8 +252,8 @@ class LauncherActivity : Activity(), Drawer.Host {
         dots.removeAllViews()
         for (i in 0 until pager.childCount) {
             dots.addView(View(this).apply {
-                background = round(if (i == page) Palette.INK else Color.argb(80, 255, 255, 255), dpf(3f))
-            }, LinearLayout.LayoutParams(if (i == page) dp(16) else dp(6), dp(6)).apply {
+                background = round(if (i == page) Palette.INK else Color.argb(90, 255, 255, 255), dpf(3f))
+            }, LinearLayout.LayoutParams(if (i == page) dp(14) else dp(5), dp(5)).apply {
                 marginStart = dp(3)
                 marginEnd = dp(3)
             })
@@ -254,7 +261,6 @@ class LauncherActivity : Activity(), Drawer.Host {
     }
 
     private fun scrollWallpaper(f: Float) {
-        if (!Prefs.get(this).getBoolean(Prefs.SHOW_WALLPAPER, false)) return
         try {
             val wm = WallpaperManager.getInstance(this)
             val pages = (pager.childCount - 1).coerceAtLeast(1)
@@ -264,25 +270,25 @@ class LauncherActivity : Activity(), Drawer.Host {
         }
     }
 
-    // ----- Page 1 -----
+    private fun solid(color: Int = TILE, radius: Float = dpf(26f)) = round(color, radius)
+
+    // ----- Page 1: clock, date + weather, music -----
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildPage1(): View {
-        val page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), 0)
-        }
-        page.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val top = View(this)
+        top.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
+        page.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.44f))
 
-        // Hero: your picture with the wave edge, the clock on it, the weather beside it.
-        val heroBox = FrameLayout(this)
-        val h = HeroView(this)
-        hero = h
-        h.setOnClickListener { openSettings() }
-        heroBox.addView(h, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val clockCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), 0, 0, dp(16))
+        val sheet = SheetView(this, highOnLeft = true)
+        sheet1 = sheet
+        sheet.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
+
+        // Clock on the left (where the sheet is high), date and weather on the right (lower).
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.BOTTOM
         }
         val c = StackedClock(this)
         clock = c
@@ -290,176 +296,105 @@ class LauncherActivity : Activity(), Drawer.Host {
             it.bounce()
             openClockApp()
         }
-        clockCol.addView(c, LinearLayout.LayoutParams(dp(150), dp(150)))
-        val dl = text(12.5f, Palette.INK, bold = true).apply {
-            letterSpacing = 0.14f
-            setPadding(dp(2), dp(6), 0, 0)
-            setShadowLayer(dpf(6f), 0f, 0f, Color.argb(160, 0, 0, 0))
-        }
-        dateLine = dl
-        clockCol.addView(dl)
-        heroBox.addView(clockCol, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START))
-        val wm = LinearLayout(this).apply {
+        row.addView(c, LinearLayout.LayoutParams(dp(150), dp(150)))
+        row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val right = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
-            setPadding(0, 0, dp(6), dp(14))
+            setPadding(0, 0, 0, dp(10))
             setOnClickListener {
                 it.bounce()
                 pager.snapTo(1)
             }
         }
-        weatherMini = wm
-        heroBox.addView(wm, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END))
-        page.addView(heroBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.45f))
-
-        // Music card + battery / date / capsule column.
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val mb = FrameLayout(this)
-        musicBox = mb
-        row.addView(mb, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.05f))
-        val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        side.addView(batteryWidget(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.8f))
-        side.addView(dateWidget(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(10) })
-        val cap = CapsuleView(this)
-        capsule = cap
-        cap.setOnClickListener { openSettings() }
-        side.addView(cap, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.15f).apply { topMargin = dp(4) })
-        row.addView(side, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = dp(12) })
-        page.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(14) })
-
-        // Favourite apps with labels and badges.
-        val fav = LinearLayout(this).apply {
+        val wRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        favorites = fav
-        page.addView(fav, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(88)).apply { topMargin = dp(12) })
+        val ti = ImageView(this).apply { imageTintList = ColorStateList.valueOf(Palette.INK) }
+        tempIcon = ti
+        wRow.addView(ti, LinearLayout.LayoutParams(dp(22), dp(22)))
+        val tt = text(30f, Palette.INK).apply {
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            setPadding(dp(6), 0, 0, 0)
+        }
+        tempText = tt
+        wRow.addView(tt)
+        right.addView(wRow)
+        val wd = text(12f, Palette.WHITE50, bold = true).apply { setPadding(0, dp(2), 0, 0) }
+        weatherDesc = wd
+        right.addView(wd)
+        val dl = text(12.5f, Palette.INK, bold = true).apply {
+            letterSpacing = 0.14f
+            setPadding(0, dp(10), 0, 0)
+        }
+        dateLine = dl
+        right.addView(dl)
+        row.addView(right)
+        sheet.addView(row)
+
+        val mb = FrameLayout(this)
+        musicBox = mb
+        sheet.addView(mb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(84)).apply { topMargin = dp(22) })
+        page.addView(sheet, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.56f))
         renderMusic()
         return page
     }
 
-    private fun batteryWidget(): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = paper(dpf(30f))
-            setPadding(dp(8), dp(8), dp(14), dp(8))
-            setOnClickListener {
-                it.bounce()
-                try {
-                    startActivity(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
-                } catch (_: Exception) {
-                }
-            }
-        }
-        val pill = FrameLayout(this)
-        val bar = BarView(this).apply {
-            track = Color.argb(30, 0, 0, 0)
-            bar = Color.argb(60, 0, 0, 0)
-        }
-        batteryBar = bar
-        pill.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val t = text(15f, Color.BLACK, bold = true).apply { gravity = Gravity.CENTER }
-        batteryText = t
-        pill.addView(t, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        box.addView(pill, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        val ic = ImageView(this).apply {
-            setImageResource(R.drawable.ic_battery)
-            imageTintList = ColorStateList.valueOf(Color.argb(150, 0, 0, 0))
-        }
-        batteryIcon = ic
-        box.addView(ic, LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginStart = dp(10) })
-        return box
-    }
-
-    private fun dateWidget(): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = glass(dpf(26f))
-            setOnClickListener {
-                it.bounce()
-                openCalendar()
-            }
-        }
-        val d = text(28f, Palette.INK, bold = true).apply { typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
-        val n = text(28f, Palette.WHITE70, bold = false).apply {
-            typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
-            setPadding(dp(8), 0, 0, 0)
-        }
-        dateDay = d
-        dateName = n
-        box.addView(d)
-        box.addView(n)
-        return box
-    }
-
-    // ----- Music (from Halo) -----
+    // ----- Music (from Halo), made for the sheet -----
 
     private fun renderMusic() {
         val box = musicBox ?: return
         box.removeAllViews()
         musicBar = null
         val m = HaloLink.music
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = glass(dpf(28f))
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+        val card = FrameLayout(this).apply {
+            background = solid(TILE, dpf(24f))
             clipToOutline = true
         }
-        // Cover (or a quiet placeholder), rounded, on top.
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
         val cover = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(v: View, o: android.graphics.Outline) {
-                    o.setRoundRect(0, 0, v.width, v.height, dpf(18f))
+                    o.setRoundRect(0, 0, v.width, v.height, dpf(14f))
                 }
             }
             clipToOutline = true
             if (m?.art != null) {
                 setImageBitmap(m.art)
             } else {
-                background = round(Palette.GRAPHITE, dpf(18f))
+                background = round(Color.rgb(44, 44, 46), dpf(14f))
                 setImageResource(R.drawable.ic_music)
                 imageTintList = ColorStateList.valueOf(Palette.WHITE50)
                 scaleType = ImageView.ScaleType.CENTER
             }
-            setOnClickListener {
-                it.bounce()
-                if (!HaloLink.command(this@LauncherActivity, "open_music")) noHalo()
-            }
         }
-        card.addView(cover, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        card.addView(text(14.5f, Palette.INK, bold = true).apply {
-            text = m?.title ?: if (HaloLink.installed(this@LauncherActivity)) "No music playing" else "Music via Halo"
-            setPadding(dp(4), dp(10), 0, 0)
+        row.addView(cover, LinearLayout.LayoutParams(dp(58), dp(58)))
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, dp(8), 0)
+        }
+        texts.addView(text(15f, Palette.INK, bold = true).apply {
+            text = m?.title ?: "Nothing playing"
         })
-        card.addView(text(12f, Palette.WHITE50).apply {
-            text = m?.artist?.ifEmpty { null } ?: if (m == null) "Tap play in any app" else ""
-            setPadding(dp(4), dp(3), 0, 0)
-        })
-        if (m != null && m.durationMs > 0) {
-            val bar = BarView(this).apply {
-                track = Color.argb(46, 255, 255, 255)
-                bar = Palette.INK
-                fraction = m.position() / m.durationMs.toFloat()
+        texts.addView(text(12.5f, Palette.WHITE50).apply {
+            text = m?.artist?.ifEmpty { null } ?: if (m == null) {
+                if (HaloLink.installed(this@LauncherActivity)) "Tap play to resume" else "Install Halo for music here"
+            } else {
+                ""
             }
-            musicBar = bar
-            card.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)).apply {
-                topMargin = dp(8)
-                marginStart = dp(4)
-                marginEnd = dp(4)
-            })
-        }
-        val ctl = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(6), 0, 0)
-        }
+            setPadding(0, dp(3), 0, 0)
+        })
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         fun btn(res: Int, big: Boolean, cmd: String) = ImageView(this).apply {
             setImageResource(res)
             imageTintList = ColorStateList.valueOf(if (big) Color.BLACK else Palette.INK)
-            val pad = if (big) dp(9) else dp(7)
+            val pad = if (big) dp(11) else dp(8)
             setPadding(pad, pad, pad, pad)
             if (big) background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -470,10 +405,33 @@ class LauncherActivity : Activity(), Drawer.Host {
                 if (!HaloLink.command(this@LauncherActivity, cmd)) noHalo()
             }
         }
-        ctl.addView(btn(R.drawable.ic_prev, false, "prev"), LinearLayout.LayoutParams(0, dp(36), 1f))
-        ctl.addView(btn(if (m?.playing == true) R.drawable.ic_pause else R.drawable.ic_play, true, "play_pause"), LinearLayout.LayoutParams(dp(40), dp(40)))
-        ctl.addView(btn(R.drawable.ic_next, false, "next"), LinearLayout.LayoutParams(0, dp(36), 1f))
-        card.addView(ctl)
+        row.addView(btn(R.drawable.ic_prev, false, "prev"), LinearLayout.LayoutParams(dp(38), dp(38)))
+        row.addView(btn(if (m?.playing == true) R.drawable.ic_pause else R.drawable.ic_play, true, "play_pause"), LinearLayout.LayoutParams(dp(46), dp(46)).apply {
+            marginStart = dp(2)
+            marginEnd = dp(2)
+        })
+        row.addView(btn(R.drawable.ic_next, false, "next"), LinearLayout.LayoutParams(dp(38), dp(38)))
+        card.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // Tap the cover or the words to open the player.
+        val open = View.OnClickListener {
+            it.bounce()
+            if (!HaloLink.command(this@LauncherActivity, "open_music")) noHalo()
+        }
+        cover.setOnClickListener(open)
+        texts.setOnClickListener(open)
+        if (m != null && m.durationMs > 0) {
+            val bar = BarView(this).apply {
+                track = Color.argb(30, 255, 255, 255)
+                bar = Palette.INK
+                fraction = m.position() / m.durationMs.toFloat()
+            }
+            musicBar = bar
+            card.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2), Gravity.BOTTOM).apply {
+                marginStart = dp(24)
+                marginEnd = dp(24)
+                bottomMargin = dp(5)
+            })
+        }
         box.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         startMusicTick()
     }
@@ -496,308 +454,211 @@ class LauncherActivity : Activity(), Drawer.Host {
         Toast.makeText(this, if (HaloLink.installed(this)) "Turn on Halo to control music from here" else "Install Halo to see your music here", Toast.LENGTH_SHORT).show()
     }
 
-    // ----- Page 2 -----
+    private fun onHalo() {
+        renderMusic()
+        updateBadges()
+    }
+
+    // ----- Page 2: a few quiet tiles and your widgets -----
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildPage2(): View {
         val scroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
+            isFillViewport = true
         }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(24))
-        }
-        col.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
-        scroll.addView(col)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val h = resources.displayMetrics.heightPixels
+        val top = View(this)
+        top.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
+        col.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (h * 0.30f).toInt()))
 
-        val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        haloCard = hc
-        col.addView(hc)
+        val sheet = SheetView(this, highOnLeft = false)
+        sheet2 = sheet
+        sheet.minimumHeight = (h * 0.70f).toInt()
+        sheet.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
 
-        // Calendar (paper) + note (glass), side by side.
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val cal = LinearLayout(this).apply {
+        // The sheet is high on the right: a big date sits there.
+        val dateCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = paper(dpf(28f))
-            setPadding(dp(12), dp(12), dp(12), dp(10))
+            gravity = Gravity.END
             setOnClickListener {
                 it.bounce()
                 openCalendar()
             }
         }
-        val mt = text(16f, Color.BLACK, bold = true).apply { setPadding(dp(4), 0, 0, dp(4)) }
-        monthTitle = mt
-        cal.addView(mt)
-        val mv = MonthView(this)
-        monthView = mv
-        cal.addView(mv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        row.addView(cal, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.15f))
-        val note = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = glass(dpf(28f))
-            setPadding(dp(14), dp(10), dp(14), dp(14))
-            setOnClickListener { editNote() }
-        }
-        note.addView(text(11.5f, Color.BLACK, bold = true).apply {
-            text = "Note"
-            gravity = Gravity.CENTER
-            background = round(Palette.SILVER, dpf(12f))
-            setPadding(dp(14), dp(4), dp(14), dp(4))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
-        val nt = text(19f, Palette.INK, lines = 6).apply {
-            typeface = Typeface.create("cursive", Typeface.NORMAL)
-            gravity = Gravity.CENTER
-            setLineSpacing(0f, 1.1f)
-        }
-        noteText = nt
-        note.addView(nt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(8) })
-        row.addView(note, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = dp(12) })
-        col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)).apply { topMargin = dp(12) })
+        val bd = text(52f, Palette.INK).apply { typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL) }
+        bigDay = bd
+        dateCol.addView(bd)
+        val bn = text(12f, Palette.WHITE50, bold = true).apply { letterSpacing = 0.18f }
+        bigDayName = bn
+        dateCol.addView(bn)
+        sheet.addView(dateCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.END
+            marginEnd = dp(6)
+        })
 
-        // App capsules by kind.
-        val fd = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        folders = fd
-        col.addView(fd, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        val tile = ((resources.displayMetrics.widthPixels - dp(18) * 2 - dp(12)) / 2)
+        val r1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        r1.addView(weatherTileView(), LinearLayout.LayoutParams(tile, tile))
+        r1.addView(calendarTile(), LinearLayout.LayoutParams(tile, tile).apply { marginStart = dp(12) })
+        sheet.addView(r1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
+        val r2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        r2.addView(batteryTile(), LinearLayout.LayoutParams(tile, tile))
+        r2.addView(noteTile(), LinearLayout.LayoutParams(tile, tile).apply { marginStart = dp(12) })
+        sheet.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
 
-        // Forecast.
-        val fc = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = glass(dpf(28f))
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            setOnClickListener {
-                it.bounce()
-                if (!Weather.hasPlace(this@LauncherActivity)) openSettings() else Weather.refresh(this@LauncherActivity, force = true) { onWeather() }
-            }
-        }
-        forecast = fc
-        col.addView(fc, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
-
-        // Android widgets.
         val wb = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         widgetsBox = wb
-        col.addView(wb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-        col.addView(text(14f, Palette.INK, bold = true).apply {
+        sheet.addView(wb)
+        sheet.addView(text(13f, Palette.WHITE70, bold = true).apply {
             text = "+  Add a widget"
             gravity = Gravity.CENTER
-            background = glass(dpf(24f))
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            background = solid(TILE, dpf(18f))
             setOnClickListener {
                 it.bounce()
                 @Suppress("DEPRECATION")
                 startActivityForResult(Intent(this@LauncherActivity, WidgetPickActivity::class.java), REQ_WIDGET)
             }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { topMargin = dp(12) })
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(16)
+        })
 
-        renderHalo()
+        col.addView(sheet, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        scroll.addView(col)
         onWeather()
         return scroll
     }
 
-    // ----- Halo card: notifications + quick switches -----
-
-    private fun onHalo() {
-        renderMusic()
-        renderHalo()
-        updateBadges()
-    }
-
-    private fun renderHalo() {
-        val hc = haloCard ?: return
-        hc.removeAllViews()
-        if (!HaloLink.installed(this)) {
-            hc.addView(glassRow(R.drawable.ic_halo, "Get Halo", "The island for your camera. It feeds music, badges and notifications into this launcher.") {
-                openUrl("https://github.com/LONERXONE-ops/halo/releases/latest")
-            })
-            return
-        }
-        val q = HaloLink.quick
-        if (q.isNotEmpty()) {
-            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for (it in q) {
-                chips.addView(text(13f, Color.BLACK, bold = true).apply {
-                    text = it.label + "  ✕"
-                    background = round(Palette.INK, dpf(16f))
-                    setPadding(dp(14), dp(8), dp(14), dp(8))
-                    setOnClickListener { v ->
-                        v.bounce()
-                        HaloLink.command(this@LauncherActivity, "quick", it.id)
-                    }
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
-            }
-            hc.addView(android.widget.HorizontalScrollView(this).apply {
-                isHorizontalScrollBarEnabled = false
-                addView(chips)
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(12) })
-        }
-        val card = LinearLayout(this).apply {
+    private fun weatherTileView(): View {
+        val t = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(dpf(28f))
-            setPadding(dp(16), dp(14), dp(16), dp(10))
-        }
-        val head = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        head.addView(ImageView(this).apply { setImageResource(R.drawable.ic_halo) }, LinearLayout.LayoutParams(dp(22), dp(22)))
-        head.addView(text(15f, Palette.INK, bold = true).apply {
-            text = "Notifications"
-            setPadding(dp(10), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(text(12f, Palette.INK, bold = true).apply {
-            text = "Open"
-            background = round(Palette.GRAPHITE, dpf(12f))
-            setPadding(dp(12), dp(5), dp(12), dp(5))
-            setOnClickListener {
-                it.bounce()
-                if (!HaloLink.command(this@LauncherActivity, "open_panel")) noHalo()
-            }
-        })
-        card.addView(head)
-        val notes = HaloLink.notes
-        if (!HaloLink.alive()) {
-            card.addView(text(13f, Palette.WHITE50, lines = 3).apply {
-                text = "Turn on Halo (Accessibility and notification access) to see your notifications here."
-                setPadding(0, dp(10), 0, dp(6))
-            })
-        } else if (notes.isEmpty()) {
-            card.addView(text(13f, Palette.WHITE50).apply {
-                text = "You're all caught up"
-                setPadding(0, dp(10), 0, dp(6))
-            })
-        }
-        for (n in notes.take(4)) {
-            val r = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(10), 0, dp(4))
-                setOnClickListener {
-                    it.bounce()
-                    HaloLink.command(this@LauncherActivity, "open_notif", n.key)
-                }
-            }
-            val app = AppRepo.apps.firstOrNull { it.pkg == n.app }
-            if (app != null) r.addView(AppIconView(this, app, 30, false), LinearLayout.LayoutParams(dp(40), dp(32)))
-            val texts = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(10), 0, 0, 0)
-            }
-            texts.addView(text(13.5f, Palette.INK, bold = true).apply { text = n.title.ifEmpty { n.appName } })
-            texts.addView(text(12.5f, Palette.WHITE70).apply {
-                text = n.text
-                setPadding(0, dp(2), 0, 0)
-            })
-            r.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val ago = android.text.format.DateUtils.getRelativeTimeSpanString(n.time, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS, android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE)
-            r.addView(text(11f, Palette.WHITE50).apply { text = ago })
-            card.addView(r)
-        }
-        hc.addView(card)
-    }
-
-    private fun glassRow(icon: Int, title: String, sub: String, onClick: () -> Unit): View {
-        val r = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = glass(dpf(26f))
+            background = solid()
             setPadding(dp(16), dp(14), dp(16), dp(14))
             setOnClickListener {
                 it.bounce()
-                onClick()
+                if (!Weather.hasPlace(this@LauncherActivity)) openSettings() else Weather.refresh(this@LauncherActivity, force = true) { onWeather() }
             }
         }
-        r.addView(ImageView(this).apply { setImageResource(icon) }, LinearLayout.LayoutParams(dp(36), dp(36)))
+        weatherTile = t
+        return t
+    }
+
+    private fun calendarTile(): View {
         val t = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), 0, 0, 0)
+            background = solid(Palette.PAPER)
+            setPadding(dp(12), dp(12), dp(12), dp(8))
+            setOnClickListener {
+                it.bounce()
+                openCalendar()
+            }
         }
-        t.addView(text(15f, Palette.INK, bold = true).apply { text = title })
-        t.addView(text(12.5f, Palette.WHITE70, lines = 3).apply {
-            text = sub
-            setPadding(0, dp(2), 0, 0)
+        val mt = text(13f, Color.BLACK, bold = true).apply { setPadding(dp(4), 0, 0, dp(2)) }
+        monthTitle = mt
+        t.addView(mt)
+        val mv = MonthView(this)
+        monthView = mv
+        t.addView(mv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        return t
+    }
+
+    private fun batteryTile(): View {
+        val t = FrameLayout(this).apply {
+            background = solid()
+            setOnClickListener {
+                it.bounce()
+                try {
+                    startActivity(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
+                } catch (_: Exception) {
+                }
+            }
+        }
+        val ring = RingView(this)
+        batteryRing = ring
+        t.addView(ring, FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val p = text(24f, Palette.INK).apply { typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
+        batteryPct = p
+        col.addView(p)
+        val s = text(10.5f, Palette.WHITE50, bold = true).apply { letterSpacing = 0.1f }
+        batteryState = s
+        col.addView(s)
+        t.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        return t
+    }
+
+    private fun noteTile(): View {
+        val t = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = solid()
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setOnClickListener { editNote() }
+        }
+        t.addView(text(11f, Palette.WHITE50, bold = true).apply {
+            text = "NOTE"
+            letterSpacing = 0.18f
         })
-        r.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        return r
+        val nt = text(18f, Palette.INK, lines = 5).apply {
+            typeface = Typeface.create("cursive", Typeface.NORMAL)
+            setLineSpacing(0f, 1.05f)
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        noteText = nt
+        t.addView(nt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6) })
+        return t
     }
 
     // ----- Weather -----
 
     private fun onWeather() {
         val w = Weather.now
-        weatherMini?.let { box ->
-            box.removeAllViews()
-            if (w != null) {
-                val top = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                }
-                top.addView(ImageView(this).apply {
-                    setImageResource(Weather.icon(w.code, w.isDay))
-                    imageTintList = ColorStateList.valueOf(Palette.INK)
-                }, LinearLayout.LayoutParams(dp(22), dp(22)))
-                top.addView(text(26f, Palette.INK).apply {
-                    text = "${w.temp}°"
-                    typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-                    setPadding(dp(6), 0, 0, 0)
-                })
-                box.addView(top)
-                box.addView(text(11.5f, Palette.WHITE70, bold = true).apply {
-                    text = listOf(Weather.describe(w.code), w.city).filter { it.isNotBlank() }.joinToString(" · ")
-                    setPadding(0, dp(2), 0, 0)
-                })
-            }
+        if (w != null) {
+            tempIcon?.setImageResource(Weather.icon(w.code, w.isDay))
+            tempText?.text = "${w.temp}°"
+            weatherDesc?.text = listOf(Weather.describe(w.code), w.city).filter { it.isNotBlank() }.joinToString(" · ")
+        } else {
+            tempIcon?.setImageDrawable(null)
+            tempText?.text = ""
+            weatherDesc?.text = ""
         }
-        val fc = forecast ?: return
-        fc.removeAllViews()
+        val t = weatherTile ?: return
+        t.removeAllViews()
         if (w == null) {
-            fc.addView(ImageView(this).apply {
+            t.addView(ImageView(this).apply {
                 setImageResource(R.drawable.w_sun)
-                imageTintList = ColorStateList.valueOf(Palette.WHITE70)
-            }, LinearLayout.LayoutParams(dp(34), dp(34)))
-            fc.addView(text(14f, Palette.WHITE70, lines = 2).apply {
-                text = if (Weather.hasPlace(this@LauncherActivity)) "Loading the weather…" else "Tap to set your city for the weather"
-                setPadding(dp(14), 0, 0, 0)
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                imageTintList = ColorStateList.valueOf(Palette.WHITE50)
+            }, LinearLayout.LayoutParams(dp(28), dp(28)))
+            t.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+            t.addView(text(13f, Palette.WHITE70, lines = 3).apply {
+                text = if (Weather.hasPlace(this@LauncherActivity)) "Loading…" else "Tap to set your city"
+            })
             return
-        }
-        val now = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val t = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
         }
         t.addView(ImageView(this).apply {
             setImageResource(Weather.icon(w.code, w.isDay))
             imageTintList = ColorStateList.valueOf(Palette.INK)
-        }, LinearLayout.LayoutParams(dp(30), dp(30)))
-        t.addView(text(38f, Palette.INK).apply {
+        }, LinearLayout.LayoutParams(dp(28), dp(28)))
+        t.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        t.addView(text(40f, Palette.INK).apply {
             text = "${w.temp}°"
             typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            setPadding(dp(8), 0, 0, 0)
         })
-        now.addView(t)
-        now.addView(text(13f, Palette.WHITE70, bold = true).apply {
+        t.addView(text(12.5f, Palette.WHITE70, bold = true).apply {
             text = Weather.describe(w.code)
             setPadding(0, dp(4), 0, 0)
         })
-        if (w.city.isNotBlank()) now.addView(text(12f, Palette.WHITE50).apply { text = w.city })
-        fc.addView(now, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        for (d in w.days.drop(1).take(3)) {
-            val c = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-            }
-            c.addView(text(11.5f, Palette.WHITE70, bold = true).apply { text = d.dayName })
-            c.addView(ImageView(this).apply {
-                setImageResource(Weather.icon(d.code, true))
-                imageTintList = ColorStateList.valueOf(Palette.INK)
-            }, LinearLayout.LayoutParams(dp(22), dp(22)).apply {
-                topMargin = dp(6)
-                bottomMargin = dp(6)
-            })
-            c.addView(text(12f, Palette.INK, bold = true).apply { text = "${d.max}°" })
-            c.addView(text(11.5f, Palette.WHITE50).apply { text = "${d.min}°" })
-            fc.addView(c, LinearLayout.LayoutParams(dp(52), ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
+        val today = w.days.firstOrNull()
+        t.addView(text(11.5f, Palette.WHITE50).apply {
+            text = listOfNotNull(w.city.ifBlank { null }, today?.let { "H ${it.max}°  L ${it.min}°" }).joinToString(" · ")
+            setPadding(0, dp(2), 0, 0)
+        })
     }
 
     // ----- Time and battery -----
@@ -805,17 +666,11 @@ class LauncherActivity : Activity(), Drawer.Host {
     private fun onMinute() {
         clock?.invalidate()
         val now = Date()
-        dateLine?.text = DateFormat.format("EEE, d MMMM", now).toString().uppercase()
-        dateDay?.text = DateFormat.format("dd", now)
-        dateName?.text = DateFormat.format("EEE", now).toString().uppercase()
-        monthTitle?.text = DateFormat.format("MMMM yyyy", now)
+        dateLine?.text = DateFormat.format("EEE, d MMM", now).toString().uppercase()
+        bigDay?.text = DateFormat.format("d", now)
+        bigDayName?.text = DateFormat.format("EEEE", now).toString().uppercase()
+        monthTitle?.text = DateFormat.format("MMMM", now)
         monthView?.invalidate()
-        renderHaloTimes()
-    }
-
-    private fun renderHaloTimes() {
-        // Relative times in the Halo card age with the clock.
-        if (pager.current == 1) renderHalo()
     }
 
     private fun onBattery(i: Intent) {
@@ -824,45 +679,19 @@ class LauncherActivity : Activity(), Drawer.Host {
         if (level < 0) return
         val pct = level * 100 / scale
         val charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-        batteryText?.text = "$pct%"
-        batteryBar?.fraction = pct / 100f
-        batteryBar?.bar = if (charging) Color.argb(110, 52, 199, 89) else Color.argb(60, 0, 0, 0)
-        batteryIcon?.setImageResource(if (charging) R.drawable.ic_bolt else R.drawable.ic_battery)
+        batteryRing?.color = if (charging) Palette.GREEN else Palette.INK
+        batteryRing?.fraction = pct / 100f
+        batteryPct?.text = "$pct%"
+        batteryState?.text = if (charging) "CHARGING" else "BATTERY"
     }
 
-    // ----- Apps: dock, favourites, capsules -----
+    // ----- Apps: the dock -----
 
     private fun rebuildApps() {
-        val apps = AppRepo.apps
-        if (apps.isEmpty()) return
-        val hidden = Prefs.list(this, Prefs.HIDDEN).toSet()
-
+        if (AppRepo.apps.isEmpty()) return
         dock.removeAllViews()
         for (a in dockApps()) {
-            dock.addView(iconView(a, 48, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-
-        favorites?.let { row ->
-            row.removeAllViews()
-            for (a in favoriteApps()) {
-                row.addView(iconView(a, 50, true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            }
-        }
-
-        folders?.let { box ->
-            box.removeAllViews()
-            val groups = apps.filter { it.key !in hidden }.groupBy { AppRepo.group(it) }
-            val order = listOf("Entertainment", "Social", "Tools", "Photos").filter { (groups[it]?.size ?: 0) > 0 }
-            var line: LinearLayout? = null
-            for ((n, g) in order.withIndex()) {
-                if (n % 2 == 0) {
-                    line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                    box.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (n > 0) topMargin = dp(10) })
-                }
-                line?.addView(capsuleFolder(g, groups[g].orEmpty()), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    if (n % 2 == 1) marginStart = dp(12)
-                })
-            }
+            dock.addView(iconView(a, 50, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         drawer.refresh()
         updateBadges()
@@ -875,80 +704,6 @@ class LauncherActivity : Activity(), Drawer.Host {
             appMenu(a, it)
             true
         }
-    }
-
-    /** A capsule with the group's top apps; tap for the whole group. */
-    private fun capsuleFolder(name: String, apps: List<App>): View {
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        val pill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = glass(dpf(30f))
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-        val top = apps.sortedByDescending { AppRepo.launches(this, it) }.take(3)
-        for (a in top) pill.addView(iconView(a, 40, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        if (apps.size > 3) {
-            pill.addView(text(12f, Palette.INK, bold = true).apply {
-                text = "+${apps.size - 3}"
-                gravity = Gravity.CENTER
-                background = round(Palette.GRAPHITE, dpf(18f))
-            }, LinearLayout.LayoutParams(dp(36), dp(36)))
-        }
-        pill.setOnClickListener { openFolder(name, apps) }
-        col.addView(pill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
-        col.addView(text(11.5f, Palette.WHITE70, bold = true).apply {
-            text = name.uppercase()
-            letterSpacing = 0.12f
-            setPadding(0, dp(6), 0, 0)
-            setOnClickListener { openFolder(name, apps) }
-        })
-        return col
-    }
-
-    private fun openFolder(name: String, apps: List<App>) {
-        val sheet = FrameLayout(this).apply {
-            setBackgroundColor(Color.argb(170, 0, 0, 0))
-            alpha = 0f
-        }
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = glass(dpf(32f)).apply { setColor(Color.argb(235, 22, 22, 24)) }
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            isClickable = true
-        }
-        card.addView(text(20f, Palette.INK, bold = true).apply {
-            text = name
-            setPadding(dp(4), 0, 0, dp(12))
-        })
-        val grid = android.widget.GridLayout(this).apply { columnCount = 4 }
-        for (a in apps) {
-            grid.addView(iconView(a, 50, true).apply {
-                setOnClickListener {
-                    root.removeView(sheet)
-                    launch(a, it)
-                }
-            }, android.widget.GridLayout.LayoutParams().apply {
-                width = 0
-                columnSpec = android.widget.GridLayout.spec(android.widget.GridLayout.UNDEFINED, 1f)
-                setMargins(0, dp(6), 0, dp(10))
-            })
-        }
-        card.addView(ScrollView(this).apply { addView(grid) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        sheet.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
-            setMargins(dp(20), insetTop + dp(40), dp(20), insetBottom + dp(40))
-        })
-        sheet.setOnClickListener {
-            sheet.animate().alpha(0f).setDuration(150).withEndAction { root.removeView(sheet) }.start()
-        }
-        root.addView(sheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        card.scaleX = 0.92f
-        card.scaleY = 0.92f
-        sheet.animate().alpha(1f).setDuration(180).start()
-        card.animate().scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).start()
     }
 
     private fun dockApps(): List<App> {
@@ -972,13 +727,10 @@ class LauncherActivity : Activity(), Drawer.Host {
         return (picks + AppRepo.apps.filter { it !in picks }).take(5)
     }
 
-    private fun favoriteApps(): List<App> {
-        val saved = Prefs.list(this, Prefs.FAVORITES).mapNotNull { AppRepo.byKey(it) }
-        if (saved.isNotEmpty()) return saved.take(4)
-        val dockKeys = dockApps().map { it.key }.toSet()
-        val known = listOf("com.whatsapp", "com.google.android.youtube", "com.spotify.music", "com.instagram.android", "com.twitter.android", "com.zhiliaoapp.musically")
-        val byKnown = known.mapNotNull { p -> AppRepo.apps.firstOrNull { it.pkg == p } }
-        return (byKnown + AppRepo.apps.sortedByDescending { AppRepo.launches(this, it) }).filter { it.key !in dockKeys }.distinctBy { it.key }.take(4)
+    private fun pickDock() {
+        root.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        if (Prefs.list(this, Prefs.DOCK).isEmpty()) Prefs.setList(this, Prefs.DOCK, dockApps().map { it.key })
+        startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", 5))
     }
 
     private fun updateBadges() {
@@ -986,7 +738,7 @@ class LauncherActivity : Activity(), Drawer.Host {
             if (v is AppIconView) v.badge = HaloLink.badges[v.app.pkg] ?: 0
             if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
         }
-        walk(content)
+        walk(dock)
         drawer.updateBadges()
     }
 
@@ -1001,13 +753,15 @@ class LauncherActivity : Activity(), Drawer.Host {
     }
 
     override fun onDrawerProgress(progress: Float) {
-        content.alpha = 1f - progress * 0.7f
         val s = 1f - progress * 0.05f
-        content.scaleX = s
-        content.scaleY = s
+        for (v in listOf(pager, dock, dots)) {
+            v.alpha = 1f - progress * 0.8f
+            v.scaleX = s
+            v.scaleY = s
+        }
     }
 
-    /** Long-press: app shortcuts, then dock / favourites / hide / info / uninstall. */
+    /** Long-press: app shortcuts, then dock / hide / info / uninstall. */
     override fun appMenu(app: App, anchor: View) {
         anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         val menu = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
@@ -1025,12 +779,9 @@ class LauncherActivity : Activity(), Drawer.Host {
             emptyList()
         }
         shortcuts.forEachIndexed { i, s -> menu.menu.add(0, 100 + i, i, s.shortLabel ?: s.longLabel ?: "Shortcut") }
-        val dockKeys = Prefs.list(this, Prefs.DOCK)
-        val favKeys = Prefs.list(this, Prefs.FAVORITES)
         val inDock = dockApps().any { it.key == app.key }
-        val inFav = favoriteApps().any { it.key == app.key }
         menu.menu.add(1, 1, 10, if (inDock) "Remove from dock" else "Add to dock")
-        menu.menu.add(1, 2, 11, if (inFav) "Remove from favourites" else "Add to favourites")
+        menu.menu.add(1, 6, 11, "Change dock apps")
         menu.menu.add(1, 3, 12, "Hide app")
         menu.menu.add(1, 4, 13, "App info")
         menu.menu.add(1, 5, 14, "Uninstall")
@@ -1042,7 +793,7 @@ class LauncherActivity : Activity(), Drawer.Host {
                     Toast.makeText(this, "Couldn't open that shortcut", Toast.LENGTH_SHORT).show()
                 }
                 1 -> {
-                    val cur = if (dockKeys.isEmpty()) dockApps().map { it.key }.toMutableList() else dockKeys
+                    val cur = Prefs.list(this, Prefs.DOCK).ifEmpty { dockApps().map { it.key }.toMutableList() }
                     if (inDock) cur.remove(app.key) else {
                         if (cur.size >= 5) cur.removeAt(cur.size - 1)
                         cur.add(app.key)
@@ -1050,20 +801,12 @@ class LauncherActivity : Activity(), Drawer.Host {
                     Prefs.setList(this, Prefs.DOCK, cur)
                     rebuildApps()
                 }
-                2 -> {
-                    val cur = if (favKeys.isEmpty()) favoriteApps().map { it.key }.toMutableList() else favKeys
-                    if (inFav) cur.remove(app.key) else {
-                        if (cur.size >= 4) cur.removeAt(cur.size - 1)
-                        cur.add(app.key)
-                    }
-                    Prefs.setList(this, Prefs.FAVORITES, cur)
-                    rebuildApps()
-                }
+                6 -> pickDock()
                 3 -> {
                     val h = Prefs.list(this, Prefs.HIDDEN)
                     if (app.key !in h) h.add(app.key)
                     Prefs.setList(this, Prefs.HIDDEN, h)
-                    Toast.makeText(this, "${app.label} hidden. Search finds it; unhide in Settings.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "${app.label} hidden. Search still finds it.", Toast.LENGTH_LONG).show()
                     rebuildApps()
                 }
                 4 -> try {
@@ -1109,7 +852,7 @@ class LauncherActivity : Activity(), Drawer.Host {
             val info = awm.getAppWidgetInfo(id) ?: continue
             val hDp = Prefs.get(this).getInt("wh_$id", (info.minHeight / resources.displayMetrics.density).toInt().coerceIn(90, 420))
             val frame = FrameLayout(this).apply {
-                background = glass(dpf(28f))
+                background = solid()
                 clipToOutline = true
                 setPadding(dp(6), dp(6), dp(6), dp(6))
             }
@@ -1122,7 +865,7 @@ class LauncherActivity : Activity(), Drawer.Host {
             frame.addView(ImageView(this).apply {
                 setImageResource(R.drawable.ic_more)
                 imageTintList = ColorStateList.valueOf(Palette.WHITE70)
-                background = round(Color.argb(150, 0, 0, 0), dpf(12f))
+                background = round(Color.argb(170, 0, 0, 0), dpf(12f))
                 setPadding(dp(4), dp(4), dp(4), dp(4))
                 setOnClickListener { widgetMenu(id, it) }
             }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END))
@@ -1205,13 +948,6 @@ class LauncherActivity : Activity(), Drawer.Host {
         }
     }
 
-    private fun openUrl(u: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)))
-        } catch (_: Exception) {
-        }
-    }
-
     private fun openSettings() {
         startActivity(Intent(this, SettingsActivity::class.java))
     }
@@ -1264,7 +1000,7 @@ class LauncherActivity : Activity(), Drawer.Host {
         })
 
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
-            if (drawer.isOpen || childCount > 2) return false
+            if (drawer.isOpen) return false
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.x
@@ -1279,14 +1015,15 @@ class LauncherActivity : Activity(), Drawer.Host {
                     val dy = e.y - downY
                     if (abs(dy) > slop * 1.5f && abs(dy) > abs(dx) * 1.3f) {
                         val inDock = downY > dock.top - dp(24)
-                        val allowed = pager.current == 0 || inDock || (dy > 0 && !(pager.page(1) as ScrollView).canScrollVertically(-1))
+                        val page2AtTop = !(pager.page(1) as ScrollView).canScrollVertically(-1)
+                        val allowed = pager.current == 0 || inDock || (dy > 0 && page2AtTop)
                         if (!allowed) return false
                         if (dy < 0) {
                             mode = 1
                             drawer.visibility = View.VISIBLE
                             drawer.refresh()
                             return true
-                        } else if (downY < height * 0.6f || inDock) {
+                        } else if (downY < height * 0.7f || inDock) {
                             mode = 2
                             swipeDown()
                             return true
@@ -1319,5 +1056,7 @@ class LauncherActivity : Activity(), Drawer.Host {
     companion object {
         const val WIDGET_HOST_ID = 4207
         private const val REQ_WIDGET = 31
+        /** Solid tile colour on the black sheet. */
+        val TILE = Color.rgb(28, 28, 30)
     }
 }

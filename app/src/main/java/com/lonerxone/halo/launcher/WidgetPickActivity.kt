@@ -73,7 +73,7 @@ class WidgetPickActivity : Activity() {
             })
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = glass(dpf(24f))
+                background = round(Color.rgb(28, 28, 30), dpf(24f))
             }
             for (info in list) {
                 val row = LinearLayout(this).apply {
