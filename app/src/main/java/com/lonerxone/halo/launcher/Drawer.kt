@@ -191,7 +191,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val a = shown[position]
             val old = convertView as? AppIconView
-            val v = if (old != null && old.app.key == a.key) old else iconFor(a)
+            val v = if (old != null && old.app.key == a.key && old.isCurrent()) old else iconFor(a)
             v.badge = HaloLink.badges[a.pkg] ?: 0
             return v
         }

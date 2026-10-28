@@ -82,6 +82,63 @@ object Glass {
     const val SCALE_F = 4f
 
     private var loadedKey = ""
+    private var wallColorCache: Int? = null
+    private var wallColorId = -1
+    private var wallCheckedAt = 0L
+
+    /**
+     * Your wallpaper's main colour. Android shares this with every app (no
+     * special access), so even when the wallpaper itself is out of reach the
+     * glass and Tinted icons can match it.
+     */
+    fun wallColor(c: Context): Int? {
+        // A picture you chose wins.
+        val pic = backdrop
+        if (pic != null) return average(pic)
+        val t = System.currentTimeMillis()
+        if (t - wallCheckedAt < 5000 && wallColorId != -1) return wallColorCache
+        wallCheckedAt = t
+        val id = wallpaperId(c)
+        if (id == wallColorId) return wallColorCache
+        val col = try {
+            android.app.WallpaperManager.getInstance(c).getWallpaperColors(android.app.WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb()
+        } catch (_: Throwable) {
+            null
+        }
+        wallColorCache = col
+        wallColorId = id
+        return col
+    }
+
+    private var avgOf: Bitmap? = null
+    private var avg = 0
+
+    private fun average(b: Bitmap): Int {
+        if (avgOf === b) return avg
+        val s = Bitmap.createScaledBitmap(b, 8, 8, true)
+        var r = 0L
+        var g = 0L
+        var bl = 0L
+        var best = 0
+        var bestSat = -1f
+        val hsv = FloatArray(3)
+        for (y in 0 until 8) for (x in 0 until 8) {
+            val p = s.getPixel(x, y)
+            r += Color.red(p)
+            g += Color.green(p)
+            bl += Color.blue(p)
+            Color.colorToHSV(p, hsv)
+            val score = hsv[1] * hsv[2]
+            if (score > bestSat) {
+                bestSat = score
+                best = p
+            }
+        }
+        // The most colourful patch if there is one, else the average.
+        avg = if (bestSat > 0.18f) best else Color.rgb((r / 64).toInt(), (g / 64).toInt(), (bl / 64).toInt())
+        avgOf = b
+        return avg
+    }
     private var pendingKey = ""
 
     /**
@@ -394,9 +451,17 @@ class GlassDrawable(
             fallback.color = Color.argb((255 * darkness).toInt(), 10, 10, 12)
             canvas.drawRoundRect(rect, radius, radius, fallback)
         } else {
-            // No picture to bend (the phone's wallpaper is out of reach): smoked glass.
+            // No picture to bend (the phone's wallpaper is out of reach): smoked
+            // glass, see-through and tinted with the wallpaper's colour.
             fallback.shader = null
-            fallback.color = Color.argb((120 + 90 * darkness).toInt().coerceAtMost(235), 22, 22, 26)
+            val wc = Glass.wallColor(host.context) ?: Color.rgb(22, 22, 26)
+            val a = (96 + 110 * darkness).toInt().coerceAtMost(220)
+            fallback.color = Color.argb(
+                a,
+                (Color.red(wc) * 0.18f + 18 * 0.82f).toInt(),
+                (Color.green(wc) * 0.18f + 18 * 0.82f).toInt(),
+                (Color.blue(wc) * 0.18f + 22 * 0.82f).toInt(),
+            )
             canvas.drawRoundRect(rect, radius, radius, fallback)
         }
         // A crisp hairline that's bright where the light hits.

@@ -27,6 +27,8 @@
          wallpaper so the glass can bend it (Android 13+ only shares it with
          "All files access"; Halo Launcher reads nothing else). -->
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <!-- The Timer widget asks your clock app to run the countdown. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />

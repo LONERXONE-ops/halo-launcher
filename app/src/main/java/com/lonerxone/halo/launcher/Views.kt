@@ -63,13 +63,24 @@ class AppIconView(
             }
         }
 
+    private var styleUsed = -1
+    private var accentUsed = 0
+
     init {
         contentDescription = app.label
         reload()
     }
 
+    /** Still drawn in the current icon style (and tint)? */
+    fun isCurrent(): Boolean {
+        val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
+        return style == styleUsed && (style != Icons.TINTED || accentUsed == Icons.accent(context))
+    }
+
     fun reload() {
         val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
+        styleUsed = style
+        accentUsed = if (style == Icons.TINTED) Icons.accent(context) else 0
         Icons.cached(app, style, px)?.let { result = it; invalidate(); return }
         fade = 0f
         Icons.load(context, app, style, px) { r ->
@@ -285,8 +296,28 @@ class DockBar(context: Context) : LinearLayout(context) {
         restyle()
     }
 
+    /** One UI 9-style dock styles: glass, solid, clear, or tinted with the wallpaper's colour. */
     fun restyle() {
-        background = surface(dpf(34f), 0.22f)
+        val r = dpf(34f)
+        background = when (Prefs.get(context).getInt(Prefs.DOCK_STYLE, GLASS)) {
+            SOLID -> context.round(Palette.TILE, r)
+            CLEAR -> null
+            TINTED -> {
+                val wc = Glass.wallColor(context) ?: Palette.GRAPHITE
+                context.round(Color.argb(150, (Color.red(wc) * 0.45f).toInt(), (Color.green(wc) * 0.45f).toInt(), (Color.blue(wc) * 0.45f).toInt()), r).apply {
+                    setStroke(dp(1), Color.argb(50, 255, 255, 255))
+                }
+            }
+            else -> if (Glass.enabled(context)) GlassDrawable(this, r, 0.22f) else context.round(Palette.TILE, r)
+        }
+    }
+
+    companion object {
+        const val GLASS = 0
+        const val SOLID = 1
+        const val CLEAR = 2
+        const val TINTED = 3
+        val NAMES = listOf("Glass", "Solid", "Clear", "Tinted")
     }
 
     /** Icon size for this many apps. */

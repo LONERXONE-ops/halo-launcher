@@ -31,6 +31,7 @@ interface WidgetActions {
     fun refreshWeather()
     fun openUsageAccess()
     fun launchPackage(pkg: String, from: View)
+    fun pickPhoto()
 }
 
 class WidgetSpec(val id: String, val name: String, val about: String, val defaultSize: Int)
@@ -48,6 +49,8 @@ object HomeWidgets {
         WidgetSpec("agenda", "Up next", "Today's date and your next events; Large lists the whole day.", MEDIUM),
         WidgetSpec("screen", "Screen time", "Time on your phone today; bigger sizes list your top apps.", SMALL),
         WidgetSpec("note", "Note", "A note to yourself, always in view.", SMALL),
+        WidgetSpec("photo", "Photo", "A picture you love, edge to edge (like Nothing's Collector and iOS Photos).", SMALL),
+        WidgetSpec("timer", "Timer", "One tap starts a countdown (like Nothing's Glyph Timer); your clock app rings when it's done.", SMALL),
     )
 
     fun spec(id: String) = ALL.first { it.id == id }
@@ -59,6 +62,8 @@ object HomeWidgets {
         "agenda" -> AgendaWidget(c, a)
         "screen" -> ScreenTimeWidget(c, a)
         "note" -> NoteWidget(c, a)
+        "photo" -> PhotoWidget(c, a)
+        "timer" -> TimerWidget(c, a)
         else -> null
     }?.also { it.size = sizeOf(c, id) }
 
@@ -72,6 +77,15 @@ object HomeWidgets {
     fun order(c: Context): List<String> {
         val saved = Prefs.list(c, Prefs.W_ORDER).filter { id -> ALL.any { it.id == id } }
         return saved + ALL.map { it.id }.filter { it !in saved }
+    }
+
+    /** Put [id] where [target] is (dragging in edit mode). */
+    fun place(c: Context, id: String, target: String) {
+        val o = order(c).toMutableList()
+        val j = o.indexOf(target)
+        if (j < 0 || !o.remove(id)) return
+        o.add(j, id)
+        Prefs.setList(c, Prefs.W_ORDER, o)
     }
 
     fun move(c: Context, id: String, by: Int) {
@@ -498,6 +512,166 @@ class NoteWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Note") {
             else -> 5
         }
         note.textSize = if (size == HomeWidgets.LARGE) 17f else 15f
+    }
+}
+
+@SuppressLint("ViewConstructor")
+class PhotoWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Photo") {
+    override val id = "photo"
+    private val image = ImageView(c).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP
+    }
+    private val hint = small(Palette.INK, 13f, 3)
+
+    init {
+        // The photo fills the whole card, corner to corner.
+        setPadding(0, 0, 0, 0)
+        removeView(header)
+        header.removeView(titleView)
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, dpf(26f))
+            }
+        }
+        val frame = FrameLayout(c)
+        frame.addView(image, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(LinearLayout(c).apply {
+            orientation = VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            addView(titleView)
+            addView(View(c), LayoutParams(1, 0, 1f))
+            addView(hint)
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(frame, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setOnClickListener { actions.pickPhoto() }
+        refresh()
+    }
+
+    override fun refresh() {
+        val f = Prefs.picFile(context, KEY)
+        val bmp = if (f.exists() && Prefs.get(context).getLong(KEY, 0L) != 0L) {
+            try {
+                android.graphics.BitmapFactory.decodeFile(f.absolutePath)
+            } catch (_: Throwable) {
+                null
+            }
+        } else {
+            null
+        }
+        image.setImageBitmap(bmp)
+        titleView.visibility = if (bmp == null) VISIBLE else GONE
+        hint.visibility = if (bmp == null) VISIBLE else GONE
+        hint.text = "Tap to pick a photo"
+    }
+
+    companion object {
+        const val KEY = "w_photo"
+    }
+}
+
+/**
+ * Countdown in one tap. The phone's clock app runs the real timer (so it
+ * rings even if the launcher is closed); this shows it counting down.
+ */
+@SuppressLint("ViewConstructor")
+class TimerWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Timer") {
+    override val id = "timer"
+    private val time = big()
+    private val sub = small()
+    private val chips = LinearLayout(c).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    private val ticker = object : Runnable {
+        override fun run() {
+            refresh()
+            if (running()) postDelayed(this, 1000L)
+        }
+    }
+
+    init {
+        spacer()
+        addView(time)
+        addView(sub.apply { setPadding(0, dp(4), 0, 0) })
+        addView(chips, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+        setOnClickListener {
+            if (running()) {
+                Prefs.get(context).edit().remove(END).apply()
+                refresh()
+            } else {
+                start(Prefs.get(context).getInt(LAST, 5))
+            }
+        }
+        refresh()
+    }
+
+    private fun running() = Prefs.get(context).getLong(END, 0L) > System.currentTimeMillis()
+
+    private fun start(min: Int) {
+        val end = System.currentTimeMillis() + min * 60_000L
+        Prefs.get(context).edit().putLong(END, end).putInt(LAST, min).apply()
+        try {
+            context.startActivity(
+                android.content.Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
+                    .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, min * 60)
+                    .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Halo Launcher")
+                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (_: Exception) {
+            android.widget.Toast.makeText(context, "No clock app to run the timer", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        bounce()
+        refresh()
+        removeCallbacks(ticker)
+        postDelayed(ticker, 1000L)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        removeCallbacks(ticker)
+        if (running()) postDelayed(ticker, 1000L)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ticker)
+        super.onDetachedFromWindow()
+    }
+
+    override fun refresh() {
+        time.textSize = bigSize()
+        val p = Prefs.get(context)
+        val end = p.getLong(END, 0L)
+        val left = end - System.currentTimeMillis()
+        chips.removeAllViews()
+        if (left > 0) {
+            val s = (left + 999) / 1000
+            time.text = if (s >= 3600) String.format(java.util.Locale.US, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) else String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
+            sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
+            return
+        }
+        val last = p.getInt(LAST, 5)
+        time.text = String.format(java.util.Locale.US, "%02d:00", last)
+        sub.text = "Tap to start"
+        val choices = when (size) {
+            HomeWidgets.SMALL -> listOf(5, 10, 25)
+            else -> listOf(1, 3, 5, 10, 25, 60)
+        }
+        for (m in choices) {
+            chips.addView(context.text(12f, if (m == last) android.graphics.Color.BLACK else Palette.INK, bold = true).apply {
+                text = if (m >= 60) "${m / 60}h" else "${m}m"
+                gravity = Gravity.CENTER
+                setPadding(0, dp(6), 0, dp(6))
+                background = context.round(if (m == last) Palette.INK else android.graphics.Color.argb(46, 255, 255, 255), dpf(14f))
+                setOnClickListener { start(m) }
+            }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (chips.childCount > 0) marginStart = dp(6) })
+        }
+    }
+
+    companion object {
+        const val END = "timer_end"
+        const val LAST = "timer_last"
     }
 }
 

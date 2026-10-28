@@ -28,10 +28,11 @@ Your picture (or your wallpaper) fills the whole screen, and everything on it si
 | | |
 |---|---|
 | **Page 1** | The stacked clock (varsity, dot matrix, bold or thin; digits roll up each minute), the date and weather, and the music player: blurred cover washed in the song's colour, with progress and time. Fed by Halo, works with any player. |
-| **Page 2** | Halo Launcher's own widgets, built on Apple's widget rules (one idea each, live data, dot-matrix numbers): weather, battery in dots, steps toward your goal, today's events, screen time with your top apps, and a note. Each comes in **Small, Medium and Large**, and bigger sizes show more (weather adds the next hours, then the next days; the agenda lists the whole day; screen time lists your apps). **Long-press a widget** to resize it or move it. Plus any Android widget. |
-| **Dock** | A floating pane of glass just above the bottom edge, 4 to 6 apps; the icons resize to fit. Long-press it to change the apps. |
+| **Edit mode** | Long-press the wallpaper (or hold any widget) and everything jiggles, like iOS. Drag widgets, the dock's apps, and page 1's clock and music player to new places; the rest slide out of the way. Tap a widget's size pill for Small, Medium or Large, the minus to remove, **+** to add. Done, Home or a tap on empty space to finish. |
+| **Page 2** | Halo Launcher's own widgets, built on Apple's widget rules (one idea each, live data, dot-matrix numbers): weather, battery in dots, steps toward your goal, today's events, screen time with your top apps, a note, a photo and a one-tap timer. Each comes in **Small, Medium and Large**, and bigger sizes show more (weather adds the next hours, then the next days; the agenda lists the whole day; screen time lists your apps). Plus any Android widget, also movable and resizable. |
+| **Dock** | Floats just above the bottom edge, 4 to 6 apps; the icons resize to fit. Four styles, after One UI 9: glass, solid, clear, or tinted with your wallpaper's colour. |
 | **All apps** | Swipe up: search, most used, and an A–Z grid that ripples in. Long-press any app for its shortcuts, dock, hide, info and uninstall. |
-| **Icons** | iOS-style dark icons: each app's own symbol in its brand colour on a dark tile, worked out from the real icon so it works with Samsung's icons too. Or white line icons, or the originals. iOS-style red badges. |
+| **Icons** | iOS-style dark icons: each app's own symbol in its brand colour on a dark tile, worked out from the real icon so it works with Samsung's icons too. Or iOS 26's Clear (white symbols on frosted glass) and Tinted (every symbol in one colour, from your wallpaper or your pick), white line icons, or the originals. iOS-style red badges. |
 | **Settings** | A page per topic with live examples on your real background: the theme in glass and solid, your clock in every style, your apps in every icon style, every widget at its size. Going back always returns you to where you were. |
 
 ## Gestures
@@ -39,7 +40,7 @@ Your picture (or your wallpaper) fills the whole screen, and everything on it si
 - **Swipe up**: all apps
 - **Swipe down**: Halo's notification center (or Android's shade)
 - **Double-tap**: lock the screen, through Halo, so fingerprint unlock still works
-- **Long-press** an empty spot: settings
+- **Long-press** the wallpaper: edit the home screen (Settings is in the edit bar)
 - **Back** from an app: you land exactly where you were, app list and scroll included
 - **Home** while home: closes the app list, then back to page 1
 

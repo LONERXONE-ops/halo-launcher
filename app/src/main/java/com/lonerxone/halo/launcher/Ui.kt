@@ -93,6 +93,13 @@ object Prefs {
     const val W_ORDER = "w_order"
     /** Dock icon count chosen by the user is just the dock list length; this is whether labels show. */
     const val DOCK_LABELS = "dock_labels"
+    /** Page 1's order: "clock|music" or "music|clock". */
+    const val P1_ORDER = "p1_order"
+    const val MUSIC_OFF = "music_off"
+    /** 0 glass, 1 solid, 2 clear (no background), 3 tinted with your wallpaper's colour. */
+    const val DOCK_STYLE = "dock_style"
+    /** Colour for Tinted icons (0 = from the wallpaper). */
+    const val ICON_TINT = "icon_tint"
 
     fun get(c: Context): SharedPreferences = c.getSharedPreferences("halo_launcher", Context.MODE_PRIVATE)
 
@@ -106,12 +113,24 @@ object Prefs {
         get(c).edit().putString(key, v.joinToString("|")).apply()
     }
 
-    fun widgetOn(c: Context, id: String) = id !in get(c).getString(WIDGETS_OFF, "")!!.split(',')
+    /** Widgets that start switched off (newer ones, so an update doesn't crowd your page). */
+    private val OFF_BY_DEFAULT = setOf("photo", "timer")
+    private const val WIDGETS_ON = "widgets_on"
+
+    fun widgetOn(c: Context, id: String): Boolean =
+        if (id in OFF_BY_DEFAULT) id in get(c).getString(WIDGETS_ON, "")!!.split(',') else id !in get(c).getString(WIDGETS_OFF, "")!!.split(',')
 
     fun setWidget(c: Context, id: String, on: Boolean) {
         val off = get(c).getString(WIDGETS_OFF, "")!!.split(',').filter { it.isNotBlank() }.toMutableSet()
-        if (on) off.remove(id) else off.add(id)
-        get(c).edit().putString(WIDGETS_OFF, off.joinToString(",")).apply()
+        val onSet = get(c).getString(WIDGETS_ON, "")!!.split(',').filter { it.isNotBlank() }.toMutableSet()
+        if (on) {
+            off.remove(id)
+            onSet.add(id)
+        } else {
+            off.add(id)
+            onSet.remove(id)
+        }
+        get(c).edit().putString(WIDGETS_OFF, off.joinToString(",")).putString(WIDGETS_ON, onSet.joinToString(",")).apply()
     }
 
     fun animations(c: Context) = get(c).getBoolean(ANIMATIONS, true)

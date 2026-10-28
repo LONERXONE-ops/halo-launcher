@@ -59,6 +59,9 @@ class SettingsActivity : Activity() {
             "weather" -> Page.WEATHER
             "clock" -> Page.CLOCK
             "theme" -> Page.THEME
+            "look" -> Page.LOOK
+            "dock" -> Page.DOCK
+            "icons" -> Page.ICONS
             else -> Page.MENU
         }
         if (AppRepo.apps.isEmpty()) {
@@ -186,8 +189,8 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
             nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
             nav(R.drawable.ic_clock, "Clock", StackedClock.NAMES[clockStyle()]) { go(Page.CLOCK) },
-            nav(R.drawable.ic_apps, "Icons", listOf("Dark", "White line", "Original")[Icons.style(this)]) { go(Page.ICONS) },
-            nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps") { go(Page.DOCK) },
+            nav(R.drawable.ic_apps, "Icons", Icons.NAMES.getOrElse(Icons.style(this)) { "Dark" }) { go(Page.ICONS) },
+            nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(Prefs.get(this).getInt(Prefs.DOCK_STYLE, 0)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
         ))
         section(col, "Use")
@@ -380,29 +383,79 @@ class SettingsActivity : Activity() {
     }
 
     private fun iconsPage(col: LinearLayout) {
-        note(col, "How app icons look in the dock and the app list. Here are your own apps in each style.")
+        note(col, "How app icons look in the dock and the app list. Here are your own apps in each style, on your background.")
         val samples = sampleApps()
-        val names = listOf("Dark" to "Like iOS dark mode: each app's symbol in its own colour on a dark tile.", "White line" to "Just the white symbol, like Android's themed icons.", "Original" to "Icons as the apps made them.")
-        for ((i, pair) in names.withIndex()) {
+        val about = listOf(
+            "Like iOS dark mode: each app's symbol in its own colour on a dark tile.",
+            "Just the white symbol, like Android's themed icons.",
+            "Icons as the apps made them.",
+            "Like iOS 26 Clear: white symbols on frosted glass.",
+            "Like iOS 26 Tinted: every symbol in one colour, from your wallpaper or one you pick.",
+        )
+        for (i in listOf(Icons.DARK, Icons.CLEAR, Icons.TINTED, Icons.MONO, Icons.ORIGINAL)) {
             val card = choiceCard(Icons.style(this) == i) {
                 Prefs.get(this).edit().putInt(Prefs.ICON_STYLE, i).apply()
                 render()
             }
             card.gravity = Gravity.START
-            card.addView(text(15f, Palette.INK, bold = true).apply { text = pair.first })
-            card.addView(text(12.5f, Palette.GREY, lines = 2).apply {
-                text = pair.second
+            card.addView(text(15f, Palette.INK, bold = true).apply { text = Icons.NAMES[i] })
+            card.addView(text(12.5f, Palette.GREY, lines = 3).apply {
+                text = about[i]
                 setPadding(0, dp(3), 0, dp(10))
             })
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            // Clear and Tinted are made to sit on a picture, so show them on yours.
+            val stage = FrameLayout(this).apply {
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: android.graphics.Outline) {
+                        o.setRoundRect(0, 0, v.width, v.height, dpf(16f))
+                    }
+                }
+            }
+            stage.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(4), dp(6), dp(4), dp(4))
+            }
             for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(row)
+            stage.addView(row)
+            card.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            if (i == Icons.TINTED && Icons.style(this) == Icons.TINTED) {
+                val picked = Prefs.get(this).getInt(Prefs.ICON_TINT, 0)
+                val swatches = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(12), 0, 0)
+                }
+                val colours = listOf(0, 0xFFFFB340.toInt(), 0xFFFF6B6B.toInt(), 0xFF64D2FF.toInt(), 0xFF7CE38B.toInt(), 0xFFBF8CFF.toInt(), 0xFFFFFFFF.toInt())
+                for (col0 in colours) {
+                    val shown = if (col0 == 0) Icons.autoAccent(this) else col0
+                    swatches.addView(View(this).apply {
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                            setColor(shown)
+                            setStroke(dp(if (picked == col0) 3 else 1), if (picked == col0) Palette.INK else Color.argb(60, 255, 255, 255))
+                        }
+                        contentDescription = if (col0 == 0) "From wallpaper" else "Colour"
+                        setOnClickListener {
+                            it.bounce()
+                            Prefs.get(this@SettingsActivity).edit().putInt(Prefs.ICON_TINT, col0).apply()
+                            render()
+                        }
+                    }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(10) })
+                }
+                card.addView(swatches)
+                card.addView(text(11.5f, Palette.GREY).apply {
+                    text = "First dot: from your wallpaper"
+                    setPadding(0, dp(6), 0, 0)
+                })
+            }
             col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
     }
 
     private fun dockPage(col: LinearLayout) {
-        note(col, "The dock floats just above the bottom edge on a pane of glass. 4 to 6 apps; the icons resize so any number fits. You can also long-press the dock on the home screen.")
+        note(col, "The dock floats just above the bottom edge. 4 to 6 apps; the icons resize so any number fits. On the home screen, long-press to edit: drag dock apps to reorder them, tap the minus to remove one, or + to add.")
         val frame = FrameLayout(this).apply {
             clipToOutline = true
             outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -422,6 +475,21 @@ class SettingsActivity : Activity() {
             bottomMargin = dp(12)
         })
         col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(14) })
+        section(col, "Style")
+        val cur = Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)
+        val styles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((i, name) in DockBar.NAMES.withIndex()) {
+            styles.addView(chip(name, i == cur).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(9), 0, dp(9))
+                pressable()
+                setOnClickListener {
+                    Prefs.get(this@SettingsActivity).edit().putInt(Prefs.DOCK_STYLE, i).apply()
+                    render()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
+        }
+        col.addView(styles, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) })
         col.addView(button("Choose dock apps") {
             if (keys.isEmpty()) Prefs.setList(this, Prefs.DOCK, apps.map { it.key })
             startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", LauncherActivity.DOCK_MAX))
@@ -443,6 +511,9 @@ class SettingsActivity : Activity() {
                 }
             }
             override fun launchPackage(pkg: String, from: View) {}
+            override fun pickPhoto() {
+                Toast.makeText(this@SettingsActivity, "Tap the Photo widget on your home screen to pick a photo", Toast.LENGTH_SHORT).show()
+            }
         }
         val unit = (resources.displayMetrics.widthPixels - dp(32) - dp(24) - dp(12)) / 2
         val order = HomeWidgets.order(this)
@@ -526,7 +597,7 @@ class SettingsActivity : Activity() {
         val down = Prefs.get(this).getInt(Prefs.SWIPE_DOWN, 0)
         col.addView(group(
             info(R.drawable.ic_arrow_up, "Swipe up", "All your apps, with search"),
-            info(R.drawable.ic_touch, "Long-press", "These settings (or an app's shortcuts on an icon)"),
+            info(R.drawable.ic_touch, "Long-press", "Edit the home screen: drag anything, resize widgets, remove things. On an app icon: its shortcuts"),
             info(R.drawable.ic_home, "Home button", "Back to page 1 and closes the app list"),
         ))
         section(col, "Swipe down opens")

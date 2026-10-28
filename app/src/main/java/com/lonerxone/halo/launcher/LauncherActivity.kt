@@ -48,10 +48,13 @@ import kotlin.math.abs
  * on Liquid Glass that bends that picture, or on solid tiles if you prefer.
  *
  * Page 1: the stacked clock, the date and weather, and the music player.
- * Page 2: the date, Halo's own widgets (resizable, reorderable), then any
- * Android widgets. The dock floats above the bottom edge.
+ * Page 2: Halo's own widgets, then any Android widgets.
+ * The dock floats above the bottom edge.
+ *
+ * Long-press anything to edit (iOS style): everything jiggles and can be
+ * dragged to a new place, resized or removed.
  */
-class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
+class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
 
     private lateinit var root: GestureRoot
     private lateinit var bg: BackgroundView
@@ -77,8 +80,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     private var weatherDesc: TextView? = null
     private var music: MusicCard? = null
     private var musicTick: Runnable? = null
-    private var dayName: TextView? = null
-    private var dayBig: TextView? = null
+    private var clockRow: LinearLayout? = null
+    private lateinit var editor: Editor
+    private lateinit var overlayLayer: FrameLayout
+    private lateinit var editBar: LinearLayout
     private var widgetGrid: LinearLayout? = null
     private val widgets = ArrayList<BaseWidget>()
     private var androidWidgets: LinearLayout? = null
@@ -165,6 +170,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         // Nothing is reset here: coming back from an app (back gesture)
         // returns you exactly where you were, drawer and scroll included.
         drawer.hideKeyboard()
+        editor.exit()
     }
 
     override fun onDestroy() {
@@ -184,6 +190,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         super.onNewIntent(intent)
         if (!alreadyHome) return
         when {
+            editor.editing -> editor.exit()
             drawer.isOpen -> drawer.close()
             pager.current != 0 -> pager.snapTo(0)
             else -> (pager.page(1) as? ScrollView)?.smoothScrollTo(0, 0)
@@ -194,6 +201,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         when {
+            editor.editing -> editor.exit()
             drawer.isOpen -> drawer.close()
             pager.current != 0 -> pager.snapTo(0)
         }
@@ -210,6 +218,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     // =====================================================================
 
     private fun build() {
+        editor = Editor(this)
         root = GestureRoot(this)
         bg = BackgroundView(this)
         root.addView(bg, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -225,7 +234,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
 
         dock = DockBar(this)
         dock.setOnLongClickListener {
-            pickDock()
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            editor.enter()
             true
         }
         root.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dockBody, Gravity.BOTTOM).apply {
@@ -235,6 +245,16 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
 
         drawer = Drawer(this, this)
         root.addView(drawer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        editBar = buildEditBar()
+        root.addView(editBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
+
+        // Whatever is being dragged floats here, above everything.
+        overlayLayer = FrameLayout(this).apply {
+            clipChildren = false
+            isClickable = false
+        }
+        root.addView(overlayLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         root.setOnApplyWindowInsetsListener { _, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -262,6 +282,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         page1?.setPadding(dp(20), insetTop + dp(26), dp(20), above + dp(30))
         page2Col?.setPadding(dp(16), insetTop + dp(22), dp(16), above + dp(36))
         drawer.setPadding(0, insetTop, 0, 0)
+        editBar.setPadding(dp(16), insetTop + dp(8), dp(16), dp(8))
     }
 
     private fun refreshLook() {
@@ -304,9 +325,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     /** The home screen settles in: clock, weather, player, then the dock icons one by one. */
     private fun animateIn() {
         if (!Prefs.animations(this)) return
+        if (editor.editing) return
         clock?.enter(0)
         sideInfo?.enter(70)
-        music?.enter(140)
+        if (!musicOff()) music?.enter(140)
         for (i in 0 until dock.childCount) dock.getChildAt(i).enter(180L + i * 40L, dpf(16f))
         if (pager.current == 1) widgetGrid?.let { g -> for (i in 0 until g.childCount) g.getChildAt(i).enter(i * 60L) }
     }
@@ -323,6 +345,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP
         }
+        clockRow = row
         val c = StackedClock(this)
         clock = c
         c.setOnClickListener {
@@ -363,15 +386,46 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         weatherDesc = wd
         right.addView(wd)
         row.addView(right)
-        page.addView(row)
-
-        // The middle stays open: the picture is the point.
-        page.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
 
         val m = MusicCard(this) { cmd -> if (!HaloLink.command(this, cmd)) noHalo() }
         music = m
-        page.addView(m, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(112)))
+        rebuildPage1()
         return page
+    }
+
+    private fun musicOff() = Prefs.get(this).getBoolean(Prefs.MUSIC_OFF, false)
+
+    private fun page1Order(): MutableList<String> {
+        val o = Prefs.get(this).getString(Prefs.P1_ORDER, "clock|music")!!.split('|').filter { it == "clock" || it == "music" }.distinct().toMutableList()
+        for (id in listOf("clock", "music")) if (id !in o) o += id
+        return o
+    }
+
+    /** Page 1: the clock block and the music player, top and bottom, in your order; the picture shows between. */
+    private fun rebuildPage1() {
+        val page = page1 ?: return
+        page.removeAllViews()
+        val items = page1Order().filter { it != "music" || !musicOff() }
+        items.forEachIndexed { i, id ->
+            if (i == 1) page.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+            val h = dp(if (id == "clock") 176 else 112)
+            val cell = if (editor.draggingId == id) {
+                Cell(this, editor, "p1", id, null)
+            } else {
+                val v: View = if (id == "clock") clockRow!! else music!!
+                (v.parent as? ViewGroup)?.removeView(v)
+                Cell(this, editor, "p1", id, v, removable = id == "music").apply {
+                    onRemove = {
+                        val before = editor.positions("p1")
+                        Prefs.get(this@LauncherActivity).edit().putBoolean(Prefs.MUSIC_OFF, true).apply()
+                        rebuildPage1()
+                        editor.glide("p1", before)
+                    }
+                }
+            }
+            page.addView(cell, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h))
+        }
+        if (items.size == 1) page.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
     }
 
     private fun onHalo() {
@@ -412,35 +466,18 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         page2Col = col
         col.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
 
-        val dateCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
-            setOnClickListener {
-                it.bounce()
-                openCalendar()
-            }
-        }
-        val dn = text(10.5f, Palette.SILVER, caps = true)
-        dayName = dn
-        dateCol.addView(dn)
-        val db = text(40f, Palette.INK).apply {
-            typeface = Fonts.light(this@LauncherActivity)
-            setPadding(0, dp(2), 0, 0)
-        }
-        dayBig = db
-        dateCol.addView(db)
-        col.addView(dateCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.END
-            marginEnd = dp(6)
-        })
-
+        col.clipChildren = false
         val grid = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            clipChildren = false
         }
         widgetGrid = grid
-        col.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        col.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        val aw = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val aw = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+        }
         androidWidgets = aw
         col.addView(aw)
 
@@ -459,14 +496,13 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
             }
             buttons += this
         }
-        add.addView(pill("+  Widget") {
-            @Suppress("DEPRECATION")
-            startActivityForResult(Intent(this@LauncherActivity, WidgetPickActivity::class.java), REQ_WIDGET)
-        })
-        add.addView(pill("Edit") { openSettingsPage("widgets") }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        lateinit var addPill: TextView
+        addPill = pill("+  Widget") { addMenu(addPill) }
+        add.addView(addPill)
+        add.addView(pill("Edit") { editor.enter() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         col.addView(add, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
         col.addView(text(11f, Palette.SILVER).apply {
-            text = "Long-press a widget to resize or move it"
+            text = "Long-press anything to move it, resize it or remove it"
             gravity = Gravity.CENTER
             setPadding(0, dp(12), 0, 0)
         })
@@ -482,6 +518,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     /**
      * Lays Halo's widgets out on an iOS-style grid. One unit is half the width
      * (minus the gap): Small = 1x1 (two side by side), Medium = 2x1, Large = 2x2.
+     * Each sits in a Cell, so in edit mode it can be dragged, resized or removed.
      */
     private fun rebuildWidgets() {
         val grid = widgetGrid ?: return
@@ -489,85 +526,81 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         widgets.clear()
         val gap = dp(12)
         val unit = (resources.displayMetrics.widthPixels - dp(32) - gap) / 2
-        var pending: BaseWidget? = null
-        fun flushSmall(a: BaseWidget, b: BaseWidget?) {
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        var pending: Cell? = null
+        fun newRow(h: Int) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            clipChildren = false
+        }.also { grid.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = gap }) }
+        fun flushSmall(a: Cell, b: Cell?) {
+            val row = newRow(unit)
             row.addView(a, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             row.addView(b ?: View(this), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = gap })
-            grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, unit).apply { topMargin = gap })
         }
         for (id in HomeWidgets.order(this)) {
             if (!Prefs.widgetOn(this, id)) continue
-            val w = HomeWidgets.create(this, id, this) ?: continue
-            widgets += w
-            w.setOnLongClickListener {
-                editWidget(w)
-                true
+            val size = HomeWidgets.sizeOf(this, id)
+            val cell = if (editor.draggingId == id) {
+                Cell(this, editor, "w", id, null)
+            } else {
+                val w = HomeWidgets.create(this, id, this) ?: continue
+                widgets += w
+                Cell(this, editor, "w", id, w, sizeLabel = HomeWidgets.SIZE_NAMES[size]).apply {
+                    onRemove = { changeWidgets { Prefs.setWidget(this@LauncherActivity, id, false) } }
+                    onSize = { changeWidgets { HomeWidgets.setSize(this@LauncherActivity, id, (size + 1) % 3) } }
+                }
             }
-            if (w.size == HomeWidgets.SMALL) {
+            if (size == HomeWidgets.SMALL) {
                 val p = pending
-                if (p == null) pending = w else {
-                    flushSmall(p, w)
+                if (p == null) pending = cell else {
+                    flushSmall(p, cell)
                     pending = null
                 }
             } else {
                 pending?.let { flushSmall(it, null); pending = null }
-                val h = if (w.size == HomeWidgets.LARGE) unit * 2 + gap else unit
-                grid.addView(w, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h).apply { topMargin = gap })
+                newRow(if (size == HomeWidgets.LARGE) unit * 2 + gap else unit)
+                    .addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             }
         }
         pending?.let { flushSmall(it, null) }
     }
 
-    /** Long-press a widget: pick its size, move it, or take it off the page. */
-    private fun editWidget(w: BaseWidget) {
-        w.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-        w.animate().scaleX(0.96f).scaleY(0.96f).setDuration(140).withEndAction {
-            w.animate().scaleX(1f).scaleY(1f).setDuration(220).start()
-        }.start()
-        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), w)
-        HomeWidgets.SIZE_NAMES.forEachIndexed { i, name ->
-            m.menu.add(0, 10 + i, i, name).apply {
-                isCheckable = true
-                isChecked = w.size == i
-            }
-        }
-        m.menu.setGroupCheckable(0, true, true)
-        val order = HomeWidgets.order(this).filter { Prefs.widgetOn(this, it) }
-        val at = order.indexOf(w.id)
-        if (at > 0) m.menu.add(1, 2, 10, "Move up")
-        if (at in 0 until order.size - 1) m.menu.add(1, 3, 11, "Move down")
-        m.menu.add(1, 4, 12, "Remove from home")
-        m.menu.add(1, 5, 13, "Edit widgets")
+    /** Make a change to the widgets, then let everything glide to its new place. */
+    private fun changeWidgets(change: () -> Unit) {
+        val before = editor.positions("w")
+        change()
+        rebuildWidgets()
+        editor.glide("w", before)
+    }
+
+    /** "+": switch a built-in widget back on, bring back the music player, or add an Android widget. */
+    private fun addMenu(anchor: View) {
+        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
+        val off = HomeWidgets.ALL.filter { !Prefs.widgetOn(this, it.id) }
+        off.forEachIndexed { i, spec -> m.menu.add(0, 100 + i, i, spec.name) }
+        if (musicOff()) m.menu.add(1, 2, 50, "Music player")
+        m.menu.add(1, 1, 60, "Android widget…")
         m.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                in 10..12 -> HomeWidgets.setSize(this, w.id, item.itemId - 10)
-                2 -> HomeWidgets.move(this, w.id, stepsTo(w.id, -1))
-                3 -> HomeWidgets.move(this, w.id, stepsTo(w.id, 1))
-                4 -> Prefs.setWidget(this, w.id, false)
-                5 -> {
-                    openSettingsPage("widgets")
-                    return@setOnMenuItemClickListener true
+                1 -> {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent(this, WidgetPickActivity::class.java), REQ_WIDGET)
+                }
+                2 -> {
+                    Prefs.get(this).edit().putBoolean(Prefs.MUSIC_OFF, false).apply()
+                    pager.snapTo(0)
+                    rebuildPage1()
+                    music?.enter(0)
+                }
+                else -> {
+                    val spec = off.getOrNull(item.itemId - 100) ?: return@setOnMenuItemClickListener true
+                    pager.snapTo(1)
+                    changeWidgets { Prefs.setWidget(this, spec.id, true) }
+                    widgets.firstOrNull { it.id == spec.id }?.let { w -> (w.parent as? View)?.enter(0, dpf(18f)) }
                 }
             }
-            rebuildWidgets()
-            widgets.firstOrNull { it.id == w.id }?.enter(0, dpf(12f))
             true
         }
         m.show()
-    }
-
-    /** How far to move in the full order so the widget passes the next one that's switched on. */
-    private fun stepsTo(id: String, dir: Int): Int {
-        val all = HomeWidgets.order(this)
-        var i = all.indexOf(id)
-        var steps = 0
-        while (true) {
-            i += dir
-            steps += dir
-            if (i !in all.indices) return steps - dir
-            if (Prefs.widgetOn(this, all[i])) return steps
-        }
     }
 
     private fun refreshWidgets(onlyId: String?) {
@@ -600,8 +633,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         clock?.tick()
         val now = Date()
         dateLine?.text = DateFormat.format("EEE d MMM", now)
-        dayName?.text = DateFormat.format("EEEE", now)
-        dayBig?.text = DateFormat.format("d MMM", now)
         refreshWidgets("agenda")
         refreshWidgets("battery")
         refreshWidgets("screen")
@@ -611,14 +642,52 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
 
     private fun rebuildApps() {
         if (AppRepo.apps.isEmpty()) return
-        dock.removeAllViews()
-        val apps = dockApps()
-        val size = dock.iconFor(apps.size)
-        for (a in apps) {
-            dock.addView(iconView(a, size, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { gravity = Gravity.CENTER_VERTICAL })
-        }
+        rebuildDock()
         drawer.refresh()
         updateBadges()
+    }
+
+    /** The dock's apps, each in a Cell so edit mode can drag or remove it; in edit mode a + slot to add one. */
+    private fun rebuildDock() {
+        if (AppRepo.apps.isEmpty()) return
+        dock.removeAllViews()
+        val apps = dockApps()
+        val plus = editor.editing && apps.size < DOCK_MAX
+        val size = dock.iconFor(apps.size + if (plus) 1 else 0)
+        for (a in apps) {
+            val cell = if (editor.draggingId == a.key) {
+                Cell(this, editor, "dock", a.key, null).apply { background = null }
+            } else {
+                Cell(this, editor, "dock", a.key, iconView(a, size, false), longPressEdits = false, minusFromCentre = dp(size) / 2).apply {
+                    onRemove = {
+                        val before = editor.positions("dock")
+                        Prefs.setList(this@LauncherActivity, Prefs.DOCK, dockApps().map { it.key }.filter { it != a.key })
+                        rebuildDock()
+                        editor.glide("dock", before)
+                    }
+                }
+            }
+            dock.addView(cell, LinearLayout.LayoutParams(0, dp(size + 14), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
+        }
+        if (plus) {
+            dock.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_plus)
+                imageTintList = ColorStateList.valueOf(Palette.INK)
+                val pad = dp(size) / 4
+                setPadding(pad, pad, pad, pad)
+                background = round(Color.argb(40, 255, 255, 255), dpf(size * 0.27f))
+                pressable()
+                setOnClickListener {
+                    it.bounce()
+                    pickDock()
+                }
+                enter(0, dpf(8f))
+            }, LinearLayout.LayoutParams(dp(size), dp(size)).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginStart = dp(6)
+                marginEnd = dp(6)
+            })
+        }
     }
 
     private fun iconView(a: App, size: Int, label: Boolean): AppIconView = AppIconView(this, a, size, label).apply {
@@ -657,7 +726,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     }
 
     private fun updateBadges() {
-        for (i in 0 until dock.childCount) (dock.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
+        for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
         drawer.updateBadges()
     }
 
@@ -699,6 +768,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         val inDock = dockApps().any { it.key == app.key }
         menu.menu.add(1, 1, 10, if (inDock) "Remove from dock" else "Add to dock")
         menu.menu.add(1, 6, 11, "Change dock apps")
+        menu.menu.add(1, 7, 15, "Edit home screen")
         menu.menu.add(1, 3, 12, "Hide app")
         menu.menu.add(1, 4, 13, "App info")
         menu.menu.add(1, 5, 14, "Uninstall")
@@ -719,6 +789,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
                     rebuildApps()
                 }
                 6 -> pickDock()
+                7 -> {
+                    if (drawer.isOpen) drawer.close()
+                    editor.enter()
+                }
                 3 -> {
                     val h = Prefs.list(this, Prefs.HIDDEN)
                     if (app.key !in h) h.add(app.key)
@@ -794,6 +868,41 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         }
     }
 
+    override fun pickPhoto() {
+        val i = if (android.os.Build.VERSION.SDK_INT >= 33) Intent(MediaStore.ACTION_PICK_IMAGES).setType("image/*") else Intent(Intent.ACTION_GET_CONTENT).setType("image/*")
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_PHOTO)
+        } catch (_: Exception) {
+            Toast.makeText(this, "No photo picker found", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Saves the picked photo (scaled to a sensible size) for the Photo widget. */
+    private fun savePhoto(uri: Uri) {
+        Thread {
+            val ok = try {
+                val bmp = android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { dec, info, _ ->
+                    dec.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    val longest = maxOf(info.size.width, info.size.height)
+                    if (longest > 1400) {
+                        val f = 1400f / longest
+                        dec.setTargetSize((info.size.width * f).toInt(), (info.size.height * f).toInt())
+                    }
+                }
+                Prefs.picFile(this, PhotoWidget.KEY).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                Prefs.get(this).edit().putLong(PhotoWidget.KEY, System.currentTimeMillis()).apply()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+            runOnUiThread {
+                if (!ok) Toast.makeText(this, "Couldn't open that photo", Toast.LENGTH_SHORT).show()
+                refreshWidgets("photo")
+            }
+        }.start()
+    }
+
     override fun launchPackage(pkg: String, from: View) {
         AppRepo.apps.firstOrNull { it.pkg == pkg }?.let { AppRepo.launch(this, it, from) }
     }
@@ -806,6 +915,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_PHOTO && resultCode == RESULT_OK) {
+            data?.data?.let { savePhoto(it) }
+            return
+        }
         if (requestCode == REQ_WIDGET && resultCode == RESULT_OK) {
             val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
             if (id > 0) {
@@ -818,6 +931,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         }
     }
 
+    /** Heights an Android widget can take (dp); edit mode's size pill steps through them. */
+    private val awHeights = listOf(110, 180, 260, 340)
+    private val awNames = listOf("Short", "Medium", "Tall", "Taller")
+
     private fun rebuildAndroidWidgets() {
         val box = androidWidgets ?: return
         box.removeAllViews()
@@ -826,6 +943,12 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
             val id = idStr.toIntOrNull() ?: continue
             val info = awm.getAppWidgetInfo(id) ?: continue
             val hDp = Prefs.get(this).getInt("wh_$id", (info.minHeight / resources.displayMetrics.density).toInt().coerceIn(90, 420))
+            val step = awHeights.indexOfFirst { it >= hDp - 20 }.let { if (it < 0) awHeights.size - 1 else it }
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(hDp)).apply { topMargin = dp(12) }
+            if (editor.draggingId == idStr) {
+                box.addView(Cell(this, editor, "aw", idStr, null), lp)
+                continue
+            }
             val frame = FrameLayout(this).apply {
                 background = surface(dpf(24f))
                 clipToOutline = true
@@ -837,14 +960,25 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
                 null
             } ?: continue
             frame.addView(hv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            frame.addView(ImageView(this).apply {
-                setImageResource(R.drawable.ic_more)
-                imageTintList = ColorStateList.valueOf(Palette.SILVER)
-                background = round(Color.argb(170, 0, 0, 0), dpf(12f))
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-                setOnClickListener { widgetMenu(id, it) }
-            }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END))
-            box.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(hDp)).apply { topMargin = dp(12) })
+            val cell = Cell(this, editor, "aw", idStr, frame, sizeLabel = awNames[step]).apply {
+                onRemove = {
+                    val before = editor.positions("aw")
+                    try {
+                        widgetHost.deleteAppWidgetId(id)
+                    } catch (_: Exception) {
+                    }
+                    Prefs.setList(this@LauncherActivity, Prefs.WIDGETS, Prefs.list(this@LauncherActivity, Prefs.WIDGETS).filter { it != idStr })
+                    rebuildAndroidWidgets()
+                    editor.glide("aw", before)
+                }
+                onSize = {
+                    val before = editor.positions("aw")
+                    Prefs.get(this@LauncherActivity).edit().putInt("wh_$id", awHeights[(step + 1) % awHeights.size]).apply()
+                    rebuildAndroidWidgets()
+                    editor.glide("aw", before)
+                }
+            }
+            box.addView(cell, lp)
             frame.post {
                 try {
                     val d = resources.displayMetrics.density
@@ -855,29 +989,76 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         }
     }
 
-    private fun widgetMenu(id: Int, anchor: View) {
-        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
-        m.menu.add(0, 1, 0, "Taller")
-        m.menu.add(0, 2, 1, "Shorter")
-        m.menu.add(0, 3, 2, "Remove")
-        m.setOnMenuItemClickListener { item ->
-            val p = Prefs.get(this)
-            val cur = p.getInt("wh_$id", 160)
-            when (item.itemId) {
-                1 -> p.edit().putInt("wh_$id", (cur + 40).coerceAtMost(520)).apply()
-                2 -> p.edit().putInt("wh_$id", (cur - 40).coerceAtLeast(70)).apply()
-                3 -> {
-                    try {
-                        widgetHost.deleteAppWidgetId(id)
-                    } catch (_: Exception) {
-                    }
-                    Prefs.setList(this, Prefs.WIDGETS, Prefs.list(this, Prefs.WIDGETS).filter { it != id.toString() })
-                }
-            }
-            rebuildAndroidWidgets()
-            true
+    // =====================================================================
+    // Edit mode (Editor.Host)
+    // =====================================================================
+
+    override val overlay: FrameLayout get() = overlayLayer
+
+    override fun rebuildZone(zone: String) {
+        when (zone) {
+            "w" -> rebuildWidgets()
+            "aw" -> rebuildAndroidWidgets()
+            "p1" -> rebuildPage1()
+            "dock" -> rebuildDock()
         }
-        m.show()
+    }
+
+    override fun moveItem(zone: String, id: String, targetId: String) {
+        fun MutableList<String>.place(): MutableList<String> {
+            val j = indexOf(targetId)
+            if (j >= 0 && remove(id)) add(j, id)
+            return this
+        }
+        when (zone) {
+            "w" -> HomeWidgets.place(this, id, targetId)
+            "aw" -> Prefs.setList(this, Prefs.WIDGETS, Prefs.list(this, Prefs.WIDGETS).place())
+            "dock" -> Prefs.setList(this, Prefs.DOCK, dockApps().map { it.key }.toMutableList().place())
+            "p1" -> Prefs.get(this).edit().putString(Prefs.P1_ORDER, page1Order().place().joinToString("|")).apply()
+        }
+    }
+
+    override fun scrollerFor(zone: String): ScrollView? = if (zone == "w" || zone == "aw") pager.page(1) as? ScrollView else null
+
+    override fun onEditingChanged(on: Boolean) {
+        if (on && drawer.isOpen) drawer.close()
+        editBar.animate().cancel()
+        if (on) {
+            editBar.visibility = View.VISIBLE
+            editBar.alpha = 0f
+            editBar.translationY = -dpf(20f)
+            editBar.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.2f, 1f)).start()
+        } else {
+            editBar.animate().alpha(0f).translationY(-dpf(20f)).setDuration(180).withEndAction { editBar.visibility = View.GONE }.start()
+        }
+        dots.animate().alpha(if (on) 0f else 1f).setDuration(200).start()
+        rebuildDock()
+    }
+
+    /** The bar across the top in edit mode: add, background, settings, Done. */
+    private fun buildEditBar(): LinearLayout {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+        }
+        fun pill(label: String, primary: Boolean = false, onClick: (View) -> Unit) = text(13f, if (primary) Color.BLACK else Palette.INK, bold = true).apply {
+            text = label
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = if (primary) round(Palette.INK, dpf(20f)) else surface(dpf(20f), 0.3f)
+            pressable()
+            setOnClickListener {
+                it.bounce()
+                onClick(it)
+            }
+        }
+        bar.addView(pill("+") { addMenu(it) })
+        bar.addView(pill("Background") { openSettingsPage("look") }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        bar.addView(pill("Settings") { openSettings() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        bar.addView(pill("Done", primary = true) { editor.exit() })
+        return bar
     }
 
     // =====================================================================
@@ -932,17 +1113,32 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                doubleTap()
+                if (!editor.editing) doubleTap()
+                return true
+            }
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                // Tapping empty space finishes editing, like iOS.
+                if (editor.editing) editor.exit()
                 return true
             }
             override fun onLongPress(e: MotionEvent) {
+                // Long-press the wallpaper: edit the home screen.
                 performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                openSettings()
+                editor.enter()
             }
         })
 
+        /** While something is being dragged, every touch goes to the editor. */
+        override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+            if (editor.isDragging) {
+                editor.onTouch(e)
+                return true
+            }
+            return super.dispatchTouchEvent(e)
+        }
+
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
-            if (drawer.isOpen) return false
+            if (drawer.isOpen || editor.editing) return false
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.x
@@ -1006,5 +1202,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
         const val WIDGET_HOST_ID = 4207
         const val DOCK_MAX = 6
         private const val REQ_WIDGET = 31
+        private const val REQ_PHOTO = 32
     }
 }
