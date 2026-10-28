@@ -87,6 +87,12 @@ object Prefs {
     const val WIDGETS_OFF = "widgets_off"
     const val STEP_GOAL = "step_goal"
     const val ANIMATIONS = "animations"
+    /** Glass.THEME_GLASS or Glass.THEME_SOLID. */
+    const val THEME = "theme"
+    /** Order of the built-in widgets ("|" list of ids). */
+    const val W_ORDER = "w_order"
+    /** Dock icon count chosen by the user is just the dock list length; this is whether labels show. */
+    const val DOCK_LABELS = "dock_labels"
 
     fun get(c: Context): SharedPreferences = c.getSharedPreferences("halo_launcher", Context.MODE_PRIVATE)
 

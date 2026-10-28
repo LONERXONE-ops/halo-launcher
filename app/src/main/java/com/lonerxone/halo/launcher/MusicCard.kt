@@ -43,8 +43,13 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
     private val remain = context.text(10.5f, Palette.SILVER, bold = true)
     private var key: String? = null
 
+    /** Glass or solid, following the theme. */
+    fun restyle() {
+        background = surface(dpf(28f), 0.24f)
+    }
+
     init {
-        background = context.round(Palette.TILE, dpf(28f))
+        restyle()
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(v: View, o: Outline) {
                 o.setRoundRect(0, 0, v.width, v.height, dpf(28f))

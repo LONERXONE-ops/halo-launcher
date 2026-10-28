@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -243,111 +244,56 @@ class StackedClock(context: Context) : View(context) {
 }
 
 /**
- * Your picture, fixed behind the pages and filling the top of the screen.
- * With no picture set it stays clear so your phone's wallpaper shows.
+ * The background behind both pages: your picture (or your wallpaper, when
+ * Android lets us read it) drawn exactly where the glass panes sample it,
+ * with a soft shade at the top and bottom so white text always reads. With
+ * nothing to draw it stays clear and the phone's own wallpaper shows.
  */
-class ArtView(context: Context) : View(context) {
-    var picture: Bitmap? = null
-        set(v) {
-            field = v
-            shader = v?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
-            invalidate()
-        }
-    private var shader: BitmapShader? = null
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val m = Matrix()
-    /** Small parallax from page swipes (0..1). */
-    var drift = 0f
-        set(v) {
-            field = v
-            invalidate()
-        }
+class BackgroundView(context: Context) : View(context) {
+    private val p = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val shade = Paint()
+    private val loc = IntArray(2)
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        shade.shader = LinearGradient(
+            0f, 0f, 0f, h.toFloat(),
+            intArrayOf(Color.argb(110, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(0, 0, 0, 0), Color.argb(140, 0, 0, 0)),
+            floatArrayOf(0f, 0.3f, 0.6f, 1f), Shader.TileMode.CLAMP,
+        )
+    }
 
     override fun onDraw(canvas: Canvas) {
-        val bmp = picture ?: return
-        val sh = shader ?: return
-        val target = height * 0.66f
-        val s = max(width * 1.08f / bmp.width, target / bmp.height)
-        m.reset()
-        m.setScale(s, s)
-        val spare = bmp.width * s - width
-        m.postTranslate(-spare * (0.5f + (drift - 0.5f) * 0.6f), 0f)
-        sh.setLocalMatrix(m)
-        p.shader = sh
-        canvas.drawRect(0f, 0f, width.toFloat(), bmp.height * s, p)
+        val bmp = Glass.backdrop
+        if (bmp != null) {
+            getLocationInWindow(loc)
+            canvas.drawBitmap(bmp, -loc[0].toFloat(), -loc[1].toFloat(), p)
+        }
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
     }
 }
 
 /**
- * A solid black sheet with one smooth curve along its top. Page 1's curve
- * runs high-left to low-right and page 2's low-left to high-right, from the
- * same height, so side by side they make one continuous wave.
+ * The dock: a floating pane of glass (or a solid tile) holding 4 to 6 apps.
+ * Icons grow or shrink so any count fits with even spacing.
  */
-class SheetView(context: Context, private val highOnLeft: Boolean) : LinearLayout(context) {
-    var curve = dpf(84f)
-        set(v) {
-            field = v
-            invalidate()
-        }
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
-    private val path = Path()
-
-    init {
-        orientation = VERTICAL
-        setWillNotDraw(false)
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val a = if (highOnLeft) 0f else curve
-        val b = if (highOnLeft) curve else 0f
-        path.reset()
-        path.moveTo(0f, a)
-        // Flat at both ends (so the pages meet without a kink), sweeping in the middle.
-        path.cubicTo(w * 0.5f, a, w * 0.5f, b, w, b)
-        path.lineTo(w, h)
-        path.lineTo(0f, h)
-        path.close()
-        canvas.drawPath(path, fill)
-        super.onDraw(canvas)
-    }
-}
-
-/**
- * The dock: a solid tab rising out of the bottom edge, like a notch turned
- * upside down: rounded on top, flaring into the screen edge with concave
- * curves at its feet.
- */
-class DockTab(context: Context) : LinearLayout(context) {
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(24, 24, 26) }
-    private val path = Path()
-    var sideMargin = dpf(18f)
-
+class DockBar(context: Context) : LinearLayout(context) {
     init {
         orientation = HORIZONTAL
         gravity = android.view.Gravity.CENTER
-        setWillNotDraw(false)
+        clipChildren = false
+        clipToPadding = false
+        restyle()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val m = sideMargin
-        val r = dpf(30f)
-        val f = dpf(18f)
-        path.reset()
-        path.moveTo(m - f, h)
-        path.quadTo(m, h, m, h - f)
-        path.lineTo(m, r)
-        path.quadTo(m, 0f, m + r, 0f)
-        path.lineTo(w - m - r, 0f)
-        path.quadTo(w - m, 0f, w - m, r)
-        path.lineTo(w - m, h - f)
-        path.quadTo(w - m, h, w - m + f, h)
-        path.close()
-        canvas.drawPath(path, fill)
-        super.onDraw(canvas)
+    fun restyle() {
+        background = surface(dpf(34f), 0.22f)
+    }
+
+    /** Icon size for this many apps. */
+    fun iconFor(count: Int): Int = when {
+        count <= 4 -> 56
+        count == 5 -> 52
+        else -> 46
     }
 }
 

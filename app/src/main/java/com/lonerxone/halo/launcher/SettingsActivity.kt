@@ -3,6 +3,7 @@ package com.lonerxone.halo.launcher
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.WallpaperManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -10,6 +11,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.Settings
@@ -35,7 +37,7 @@ import android.widget.Toast
  */
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
-        MENU("Settings"), LOOK("Home screen"), CLOCK("Clock"), ICONS("Icons"), DOCK("Dock"),
+        MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock"), ICONS("Icons"), DOCK("Dock"),
         WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), ABOUT("About"),
     }
 
@@ -46,6 +48,8 @@ class SettingsActivity : Activity() {
     private var latest: Updater.Release? = null
     private var updateStatus = "Not checked yet"
     private var downloading = -1f
+    /** Where you were on each page, so going back never jumps to the top. */
+    private val scrollMemory = HashMap<Page, Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,6 +58,7 @@ class SettingsActivity : Activity() {
             "widgets" -> Page.WIDGETS
             "weather" -> Page.WEATHER
             "clock" -> Page.CLOCK
+            "theme" -> Page.THEME
             else -> Page.MENU
         }
         if (AppRepo.apps.isEmpty()) {
@@ -65,6 +70,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        ensureBackdrop()
         render()
     }
 
@@ -81,7 +87,11 @@ class SettingsActivity : Activity() {
 
     private fun render() {
         val same = shown == page
-        val keepY = if (same) scroll?.scrollY ?: 0 else 0
+        shown?.let { old -> scroll?.let { scrollMemory[old] = it.scrollY } }
+        // Same page: stay put. Back to the menu: return to where you were.
+        // A new page opens at its top.
+        val keepY = if (same || page == Page.MENU) scrollMemory[page] ?: 0 else 0
+        if (!same && page != Page.MENU) scrollMemory.remove(page)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(40))
@@ -89,6 +99,7 @@ class SettingsActivity : Activity() {
         header(col)
         when (page) {
             Page.MENU -> menuPage(col)
+            Page.THEME -> themePage(col)
             Page.LOOK -> lookPage(col)
             Page.CLOCK -> clockPage(col)
             Page.ICONS -> iconsPage(col)
@@ -111,15 +122,14 @@ class SettingsActivity : Activity() {
         }
         setContentView(sv)
         scroll = sv
-        if (same) {
-            sv.post { sv.scrollTo(0, keepY) }
-        } else if (Prefs.animations(this)) {
+        if (keepY > 0) sv.post { sv.scrollTo(0, keepY) }
+        if (!same && Prefs.animations(this)) {
             // Pages slide in; their cards follow one after another.
             val dir = if (page == Page.MENU) -1f else 1f
             col.translationX = dpf(36f) * dir
             col.alpha = 0f
             col.animate().translationX(0f).alpha(1f).setDuration(320).setInterpolator(DecelerateInterpolator(2.2f)).start()
-            for (i in 0 until col.childCount) col.getChildAt(i).enter(60L + i * 35L, dpf(14f))
+            if (page != Page.MENU) for (i in 0 until col.childCount) col.getChildAt(i).enter(60L + i * 35L, dpf(14f))
         }
         shown = page
     }
@@ -173,7 +183,8 @@ class SettingsActivity : Activity() {
         col.addView(updateCard())
         section(col, "Look")
         col.addView(group(
-            nav(R.drawable.ic_image, "Home screen", "Top picture, motion") { go(Page.LOOK) },
+            nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
+            nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
             nav(R.drawable.ic_clock, "Clock", StackedClock.NAMES[clockStyle()]) { go(Page.CLOCK) },
             nav(R.drawable.ic_apps, "Icons", listOf("Dark", "White line", "Original")[Icons.style(this)]) { go(Page.ICONS) },
             nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps") { go(Page.DOCK) },
@@ -231,21 +242,83 @@ class SettingsActivity : Activity() {
     // Pages
     // =====================================================================
 
+    private fun themePage(col: LinearLayout) {
+        note(col, "Liquid Glass bends the picture behind it like a real lens: frosted in the middle, refracting at the edges, light catching the rim. Solid uses plain dark tiles.")
+        if (Build.VERSION.SDK_INT < 33) note(col, "Your Android version gets frosted glass; the full lens needs Android 13 or newer.")
+        val cur = Prefs.get(this).getInt(Prefs.THEME, Glass.THEME_GLASS)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((i, name) in listOf("Liquid Glass", "Solid").withIndex()) {
+            val card = choiceCard(cur == i) {
+                Prefs.get(this).edit().putInt(Prefs.THEME, i).apply()
+                render()
+            }
+            card.setPadding(dp(8), dp(8), dp(8), dp(12))
+            card.addView(preview(glass = i == Glass.THEME_GLASS, small = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)))
+            card.addView(text(14f, Palette.INK, bold = true).apply {
+                text = name
+                gravity = Gravity.CENTER
+                setPadding(0, dp(10), 0, 0)
+            })
+            row.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i == 1) marginStart = dp(12) })
+        }
+        col.addView(row)
+        if (Glass.backdrop == null) {
+            section(col, "")
+            note(col, "Glass needs a picture to bend. Pick a background, or let Halo Launcher read your wallpaper.")
+            col.addView(button("Choose background") { go(Page.LOOK) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        }
+    }
+
     private fun lookPage(col: LinearLayout) {
-        note(col, "Your wallpaper fills the top of the screen. Pick a picture to show there instead; it stays still while the pages move.")
-        col.addView(preview(), LinearLayout.LayoutParams(dp(170), dp(330)).apply {
+        note(col, "The picture behind your whole home screen; the glass bends it. With none chosen, Halo Launcher uses your phone's wallpaper.")
+        col.addView(preview(glass = Glass.enabled(this), small = false), LinearLayout.LayoutParams(dp(190), dp(380)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(6)
             bottomMargin = dp(18)
         })
-        col.addView(group(
-            pictureRow("Top picture", "Shown above the black sheet. Empty = your wallpaper", Prefs.HERO_PIC),
-            switchRow("Motion", "Things glide in, icons ripple, digits roll. Off for a calmer screen", Prefs.ANIMATIONS, true),
-        ))
+        val hasPic = Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L
+        val rows = mutableListOf(pictureRow("Background picture", "Tap to choose. Empty = your wallpaper", Prefs.HERO_PIC))
+        if (hasPic) {
+            rows += row("Use as phone wallpaper too", "So your lock screen and recents match", chevron()) { setPhoneWallpaper() }
+        } else if (!Glass.canReadWallpaper(this)) {
+            rows += row("Let the glass see your wallpaper", "Android 13+ only shares the wallpaper with apps that have \"All files access\". Halo Launcher only reads the wallpaper.", chevron()) {
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+            }
+        }
+        rows += switchRow("Motion", "Things glide in, icons ripple, digits roll. Off for a calmer screen", Prefs.ANIMATIONS, true)
+        col.addView(group(*rows.toTypedArray()))
     }
 
-    /** A small live model of the home screen. */
-    private fun preview(): View {
+    /** Sets the chosen picture as the phone's wallpaper (home and lock). */
+    private fun setPhoneWallpaper() {
+        Toast.makeText(this, "Setting wallpaper…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val ok = try {
+                val bmp = android.graphics.BitmapFactory.decodeFile(Prefs.picFile(this, Prefs.HERO_PIC).absolutePath)
+                WallpaperManager.getInstance(this).setBitmap(bmp, null, true, WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK)
+                true
+            } catch (_: Throwable) {
+                false
+            }
+            runOnUiThread { Toast.makeText(this, if (ok) "Wallpaper set" else "Couldn't set the wallpaper", Toast.LENGTH_SHORT).show() }
+        }.start()
+    }
+
+    /** Makes sure the background is loaded here too (for the previews). */
+    private fun ensureBackdrop() {
+        val b = windowManager.currentWindowMetrics.bounds
+        Glass.load(this, b.width(), b.height()) { render() }
+    }
+
+    /**
+     * A small live model of the home screen on your real background: the
+     * clock, a music card and the dock, in glass or solid.
+     */
+    private fun preview(glass: Boolean, small: Boolean): View {
         val f = FrameLayout(this).apply {
             background = round(Color.rgb(40, 40, 44), dpf(26f))
             clipToOutline = true
@@ -255,25 +328,31 @@ class SettingsActivity : Activity() {
                 }
             }
         }
-        val art = ArtView(this)
-        art.picture = loadPic(Prefs.HERO_PIC)
-        f.addView(art, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        if (art.picture == null) {
-            f.addView(text(10f, Palette.SILVER, caps = true).apply {
-                text = "Your wallpaper"
+        f.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(16), dp(10), dp(10))
+        }
+        col.addView(StackedClock(this).apply { style = clockStyle() }, LinearLayout.LayoutParams(dp(if (small) 58 else 72), dp(if (small) 62 else 76)))
+        col.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
+        val musicPane = View(this)
+        musicPane.background = if (glass) GlassDrawable(musicPane, dpf(14f), bendPx = dpf(8f)) else round(Palette.TILE, dpf(14f))
+        col.addView(musicPane, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 40 else 50)))
+        val dock = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        dock.background = if (glass) GlassDrawable(dock, dpf(18f), darkness = 0.22f, bendPx = dpf(8f)) else round(Palette.TILE, dpf(18f))
+        val apps = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(if (small) 4 else 5)
+        for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 38 else 46)).apply { topMargin = dp(8) })
+        f.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        if (Glass.backdrop == null) {
+            f.addView(text(10f, Palette.SILVER, caps = true, lines = 2).apply {
+                text = "No background yet"
                 gravity = Gravity.CENTER
-            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(130)))
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
-        val sheet = SheetView(this, highOnLeft = true).apply {
-            curve = dpf(34f)
-            setPadding(dp(12), dp(8), dp(12), 0)
-        }
-        val clock = StackedClock(this).apply { style = clockStyle() }
-        sheet.addView(clock, LinearLayout.LayoutParams(dp(72), dp(76)))
-        sheet.addView(View(this).apply { background = round(Palette.TILE, dpf(12f)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(10) })
-        f.addView(sheet, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200), Gravity.BOTTOM))
-        val dock = DockTab(this).apply { sideMargin = dpf(10f) }
-        f.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40), Gravity.BOTTOM))
         return f
     }
 
@@ -323,22 +402,34 @@ class SettingsActivity : Activity() {
     }
 
     private fun dockPage(col: LinearLayout) {
-        note(col, "The dock rises out of the bottom edge like a notch turned upside down. Up to 5 apps. You can also long-press the dock on the home screen.")
-        val frame = FrameLayout(this).apply { background = round(Color.BLACK, dpf(20f)) }
-        val dock = DockTab(this).apply { setPadding(dp(30), dp(6), dp(30), dp(10)) }
+        note(col, "The dock floats just above the bottom edge on a pane of glass. 4 to 6 apps; the icons resize so any number fits. You can also long-press the dock on the home screen.")
+        val frame = FrameLayout(this).apply {
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) {
+                    o.setRoundRect(0, 0, v.width, v.height, dpf(24f))
+                }
+            }
+        }
+        frame.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val dock = DockBar(this).apply { setPadding(dp(8), 0, dp(8), 0) }
         val keys = Prefs.list(this, Prefs.DOCK)
-        val apps = keys.mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }
-        for (a in apps.take(5)) dock.addView(AppIconView(this, a, 48, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        frame.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(92), Gravity.BOTTOM))
-        col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(130)).apply { bottomMargin = dp(14) })
+        val apps = keys.mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(LauncherActivity.DOCK_MAX)
+        for (a in apps) dock.addView(AppIconView(this, a, dock.iconFor(apps.size) - 4, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { gravity = Gravity.CENTER_VERTICAL })
+        frame.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(80), Gravity.BOTTOM).apply {
+            leftMargin = dp(10)
+            rightMargin = dp(10)
+            bottomMargin = dp(12)
+        })
+        col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(14) })
         col.addView(button("Choose dock apps") {
             if (keys.isEmpty()) Prefs.setList(this, Prefs.DOCK, apps.map { it.key })
-            startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", 5))
+            startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", LauncherActivity.DOCK_MAX))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
     }
 
     private fun widgetsPage(col: LinearLayout) {
-        note(col, "Page 2's widgets, live. Switch off what you don't need; each shows one thing and keeps itself up to date. Android widgets can be added from page 2 too.")
+        note(col, "Page 2's widgets, live. Pick a size for each (Small, Medium or Large; bigger sizes show more), move them up or down, or switch them off. On the home screen, long-press a widget to do the same.")
         val actions = object : WidgetActions {
             override fun askPermission(permission: String) = requestPermissions(arrayOf(permission), 6)
             override fun openSettingsPage(page: String) = go(Page.WEATHER)
@@ -353,19 +444,70 @@ class SettingsActivity : Activity() {
             }
             override fun launchPackage(pkg: String, from: View) {}
         }
-        for (spec in HomeWidgets.ALL) {
+        val unit = (resources.displayMetrics.widthPixels - dp(32) - dp(24) - dp(12)) / 2
+        val order = HomeWidgets.order(this)
+        for ((index, id) in order.withIndex()) {
+            val spec = HomeWidgets.spec(id)
             val on = Prefs.widgetOn(this, spec.id)
+            val size = HomeWidgets.sizeOf(this, spec.id)
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = round(Color.rgb(10, 10, 11), dpf(26f))
                 setPadding(dp(12), dp(12), dp(12), dp(6))
             }
+            // The widget, live, on your background, at its size.
+            val stage = FrameLayout(this).apply {
+                clipToOutline = true
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(v: View, o: android.graphics.Outline) {
+                        o.setRoundRect(0, 0, v.width, v.height, dpf(20f))
+                    }
+                }
+            }
+            stage.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             val w = HomeWidgets.create(this, spec.id, actions)
             if (w != null) {
-                val wrap: View = if (spec.wide) w else SquareFrame(this).apply { addView(w) }
-                box.addView(wrap, LinearLayout.LayoutParams(if (spec.wide) ViewGroup.LayoutParams.MATCH_PARENT else dp(160), if (spec.wide) dp(150) else ViewGroup.LayoutParams.WRAP_CONTENT))
-                wrap.alpha = if (on) 1f else 0.35f
+                val wW = if (size == HomeWidgets.SMALL) unit else ViewGroup.LayoutParams.MATCH_PARENT
+                val wH = if (size == HomeWidgets.LARGE) unit * 2 + dp(12) else unit
+                stage.addView(w, FrameLayout.LayoutParams(wW, wH).apply {
+                    setMargins(dp(10), dp(10), dp(10), dp(10))
+                })
+                w.alpha = if (on) 1f else 0.35f
             }
+            box.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+            // Size: Small / Medium / Large, like iOS.
+            val sizes = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(2), dp(12), dp(2), 0)
+            }
+            for ((i, name) in HomeWidgets.SIZE_NAMES.withIndex()) {
+                sizes.addView(chip(name, i == size).apply {
+                    pressable()
+                    setOnClickListener {
+                        HomeWidgets.setSize(this@SettingsActivity, spec.id, i)
+                        render()
+                    }
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
+            }
+            sizes.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            fun arrow(icon: Int, enabled: Boolean, by: Int) = ImageView(this).apply {
+                setImageResource(icon)
+                imageTintList = ColorStateList.valueOf(if (enabled) Palette.INK else Palette.DIM)
+                setPadding(dp(7), dp(7), dp(7), dp(7))
+                background = round(Palette.GRAPHITE, dpf(16f))
+                isEnabled = enabled
+                setOnClickListener {
+                    it.bounce()
+                    HomeWidgets.move(this@SettingsActivity, spec.id, by)
+                    render()
+                }
+            }
+            sizes.addView(arrow(R.drawable.ic_arrow_up, index > 0, -1), LinearLayout.LayoutParams(dp(32), dp(32)))
+            sizes.addView(arrow(R.drawable.ic_arrow_down, index < order.size - 1, 1), LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(6) })
+            box.addView(sizes)
+
             val sw = Switch(this).apply {
                 tint(this)
                 isChecked = on
@@ -635,6 +777,8 @@ class SettingsActivity : Activity() {
             setOnLongClickListener {
                 Prefs.get(this@SettingsActivity).edit().remove(key).apply()
                 Prefs.picFile(this@SettingsActivity, key).delete()
+                Glass.invalidate()
+                ensureBackdrop()
                 render()
                 true
             }
@@ -736,12 +880,14 @@ class SettingsActivity : Activity() {
                 }
                 Prefs.picFile(this, key).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
                 Prefs.get(this).edit().putLong(key, System.currentTimeMillis()).apply()
+                Glass.invalidate()
                 true
             } catch (_: Throwable) {
                 false
             }
             runOnUiThread {
                 if (!ok) Toast.makeText(this, "Couldn't open that picture", Toast.LENGTH_SHORT).show()
+                ensureBackdrop()
                 render()
             }
         }.start()

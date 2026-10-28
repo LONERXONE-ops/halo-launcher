@@ -6,7 +6,7 @@
 
 <p align="center">
   A black-and-white home screen for Android that works with <a href="https://github.com/LONERXONE-ops/halo">Halo</a>, the dynamic island.<br>
-  Poster-style home, solid black sheet, iOS-style dark icons, a notch-shaped dock, and your music, badges and notifications straight from the island.
+  Real Liquid Glass over your own picture, iOS-style dark icons, resizable widgets, a floating dock, and your music, badges and notifications straight from the island.
 </p>
 
 ---
@@ -23,16 +23,16 @@ For the full experience, install **[Halo](https://github.com/LONERXONE-ops/halo/
 
 ## The home screen
 
-Poster style: your wallpaper (or a picture you pick) across the top, and one black sheet with a single wave running across both pages.
+Your picture (or your wallpaper) fills the whole screen, and everything on it sits on **Liquid Glass**: panes that bend the picture behind them like a lens, frosted in the middle, refracting toward the rim with a hint of colour fringing, light catching the top-left edge. It runs as a GPU shader on Android 13+ (frosted glass on older phones). Prefer plain dark tiles? Switch the theme to **Solid** in Settings → Theme.
 
 | | |
 |---|---|
 | **Page 1** | The stacked clock (varsity, dot matrix, bold or thin; digits roll up each minute), the date and weather, and the music player: blurred cover washed in the song's colour, with progress and time. Fed by Halo, works with any player. |
-| **Page 2** | Halo Launcher's own widgets, built on Apple's widget rules (one idea each, live data, dot-matrix numbers): weather with the next hours, battery in dots, steps toward your goal, today's events, screen time with your top apps, and a note. Plus any Android widget. |
-| **Dock** | A solid tab rising out of the bottom edge, like a notch turned upside down. Long-press it to change the apps. |
+| **Page 2** | Halo Launcher's own widgets, built on Apple's widget rules (one idea each, live data, dot-matrix numbers): weather, battery in dots, steps toward your goal, today's events, screen time with your top apps, and a note. Each comes in **Small, Medium and Large**, and bigger sizes show more (weather adds the next hours, then the next days; the agenda lists the whole day; screen time lists your apps). **Long-press a widget** to resize it or move it. Plus any Android widget. |
+| **Dock** | A floating pane of glass just above the bottom edge, 4 to 6 apps; the icons resize to fit. Long-press it to change the apps. |
 | **All apps** | Swipe up: search, most used, and an A–Z grid that ripples in. Long-press any app for its shortcuts, dock, hide, info and uninstall. |
 | **Icons** | iOS-style dark icons: each app's own symbol in its brand colour on a dark tile, worked out from the real icon so it works with Samsung's icons too. Or white line icons, or the originals. iOS-style red badges. |
-| **Settings** | A page per topic with live examples: your real clock in every style, your own apps in every icon style, the actual widgets, the dock. |
+| **Settings** | A page per topic with live examples on your real background: the theme in glass and solid, your clock in every style, your apps in every icon style, every widget at its size. Going back always returns you to where you were. |
 
 ## Gestures
 
@@ -40,7 +40,8 @@ Poster style: your wallpaper (or a picture you pick) across the top, and one bla
 - **Swipe down**: Halo's notification center (or Android's shade)
 - **Double-tap**: lock the screen, through Halo, so fingerprint unlock still works
 - **Long-press** an empty spot: settings
-- **Home** while home: back to page 1
+- **Back** from an app: you land exactly where you were, app list and scroll included
+- **Home** while home: closes the app list, then back to page 1
 
 ## Works with Halo
 

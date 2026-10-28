@@ -46,8 +46,16 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     var isOpen = false
         private set
 
+    /** Liquid Glass over your picture, or solid black. */
+    fun restyle() {
+        background = if (Glass.enabled(context)) GlassDrawable(this, dpf(34f), darkness = 0.62f, bendPx = dpf(22f)) else android.graphics.drawable.ColorDrawable(Color.BLACK)
+        usedRow.background = if (Glass.enabled(context)) GlassDrawable(usedRow, dpf(26f), darkness = 0.2f) else context.round(Color.rgb(18, 18, 20), dpf(26f))
+        pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(24f), darkness = 0.2f, bendPx = dpf(10f)) else context.round(Color.rgb(28, 28, 30), dpf(24f))
+    }
+
+    private val pill: LinearLayout
+
     init {
-        setBackgroundColor(Color.BLACK)
         isClickable = true
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -61,7 +69,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             bottomMargin = dp(14)
         })
 
-        val pill = LinearLayout(context).apply {
+        pill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = context.round(Color.rgb(28, 28, 30), dpf(24f))
@@ -94,6 +102,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             background = context.round(Color.rgb(18, 18, 20), dpf(26f))
             setPadding(dp(6), dp(12), dp(6), dp(8))
         }
+        restyle()
         col.addView(usedRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         col.addView(context.text(10.5f, Palette.GREY, caps = true).apply {
             text = "ALL APPS"
@@ -200,6 +209,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val h = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         translationY = h * (1f - p.coerceIn(0f, 1f))
         visibility = if (p <= 0.001f) View.INVISIBLE else View.VISIBLE
+        // The glass re-samples the picture as the sheet slides.
+        if (background is GlassDrawable) invalidateGlass()
         host.onDrawerProgress(p)
     }
 
@@ -230,11 +241,11 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         animateTo(1f)
     }
 
+    /** Closes, keeping your place in the list for next time (search is cleared). */
     fun close() {
         isOpen = false
         hideKeyboard()
-        search.setText("")
-        grid.setSelection(0)
+        if (!search.text.isNullOrEmpty()) search.setText("")
         animateTo(0f)
     }
 
@@ -253,7 +264,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         isOpen = target > 0.5f
     }
 
-    private fun hideKeyboard() {
+    fun hideKeyboard() {
         context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
         search.clearFocus()
     }
