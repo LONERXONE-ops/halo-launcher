@@ -1,0 +1,139 @@
+package com.lonerxone.halo.launcher
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.os.Build
+import android.os.SystemClock
+
+/**
+ * The bridge to Halo (the island app). Both apps are signed with the same key
+ * and share a signature permission, so only Halo can talk to the launcher and
+ * only the launcher can drive Halo.
+ *
+ * Halo -> launcher: STATE broadcasts with music, unread badges, recent
+ * notifications and what's switched on (flashlight, DND...).
+ * Launcher -> Halo: COMMAND broadcasts: play/pause/next/prev, open the
+ * notification center, open one notification, lock the screen, switch
+ * something off, or "send me your state".
+ */
+object HaloLink {
+    const val HALO = "com.lonerxone.halo"
+    const val PERMISSION = "com.lonerxone.halo.permission.LINK"
+    const val ACTION_STATE = "com.lonerxone.halo.action.STATE"
+    const val ACTION_COMMAND = "com.lonerxone.halo.action.COMMAND"
+
+    class Music(
+        val title: String,
+        val artist: String,
+        val app: String,
+        val playing: Boolean,
+        val art: Bitmap?,
+        val accent: Int,
+        val durationMs: Long,
+        val positionMs: Long,
+        val positionAt: Long,
+        val speed: Float,
+    ) {
+        fun position(): Long {
+            if (!playing || positionAt <= 0L) return positionMs
+            return (positionMs + (SystemClock.elapsedRealtime() - positionAt) * speed).toLong().coerceIn(0L, if (durationMs > 0) durationMs else Long.MAX_VALUE)
+        }
+    }
+
+    class Note(val key: String, val app: String, val appName: String, val title: String, val text: String, val time: Long)
+    class Quick(val id: String, val label: String)
+
+    var music: Music? = null
+        private set
+    var badges: Map<String, Int> = emptyMap()
+        private set
+    var notes: List<Note> = emptyList()
+        private set
+    var quick: List<Quick> = emptyList()
+        private set
+    private var lastState = 0L
+
+    /** Halo answered recently, so it's running and its accessibility service can act. */
+    fun alive(): Boolean = SystemClock.elapsedRealtime() - lastState < 10 * 60_000L && lastState > 0L
+
+    fun installed(c: Context): Boolean = try {
+        c.packageManager.getPackageInfo(HALO, 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private val listeners = mutableListOf<() -> Unit>()
+    fun addListener(l: () -> Unit) { listeners += l }
+    fun removeListener(l: () -> Unit) { listeners -= l }
+
+    private val receiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != ACTION_STATE) return
+            read(intent)
+            for (l in listeners.toList()) l()
+        }
+    }
+    private var registered = false
+
+    fun start(c: Context) {
+        if (!registered) {
+            registered = true
+            val f = IntentFilter(ACTION_STATE)
+            if (Build.VERSION.SDK_INT >= 33) {
+                c.applicationContext.registerReceiver(receiver, f, PERMISSION, null, Context.RECEIVER_EXPORTED)
+            } else {
+                c.applicationContext.registerReceiver(receiver, f, PERMISSION, null)
+            }
+        }
+        command(c, "request_state")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun read(i: Intent) {
+        lastState = SystemClock.elapsedRealtime()
+        val title = i.getStringExtra("m_title")
+        music = if (title.isNullOrEmpty()) null else Music(
+            title = title,
+            artist = i.getStringExtra("m_artist").orEmpty(),
+            app = i.getStringExtra("m_app").orEmpty(),
+            playing = i.getBooleanExtra("m_playing", false),
+            art = if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra("m_art", Bitmap::class.java) else i.getParcelableExtra("m_art"),
+            accent = i.getIntExtra("m_accent", Palette.GRAPHITE),
+            durationMs = i.getLongExtra("m_dur", 0L),
+            positionMs = i.getLongExtra("m_pos", 0L),
+            positionAt = i.getLongExtra("m_pos_at", 0L),
+            speed = i.getFloatExtra("m_speed", 1f),
+        )
+        val b = HashMap<String, Int>()
+        val pk = i.getStringArrayExtra("b_pkg") ?: emptyArray()
+        val ct = i.getIntArrayExtra("b_count") ?: IntArray(0)
+        for (n in pk.indices) if (n < ct.size) b[pk[n]] = ct[n]
+        badges = b
+        val keys = i.getStringArrayExtra("n_key") ?: emptyArray()
+        val apps = i.getStringArrayExtra("n_app") ?: emptyArray()
+        val names = i.getStringArrayExtra("n_app_name") ?: emptyArray()
+        val titles = i.getStringArrayExtra("n_title") ?: emptyArray()
+        val texts = i.getStringArrayExtra("n_text") ?: emptyArray()
+        val times = i.getLongArrayExtra("n_time") ?: LongArray(0)
+        notes = keys.indices.map { n ->
+            Note(keys[n], apps.getOrElse(n) { "" }, names.getOrElse(n) { "" }, titles.getOrElse(n) { "" }, texts.getOrElse(n) { "" }, times.getOrElse(n) { 0L })
+        }
+        val qid = i.getStringArrayExtra("q_id") ?: emptyArray()
+        val qlabel = i.getStringArrayExtra("q_label") ?: emptyArray()
+        quick = qid.indices.map { n -> Quick(qid[n], qlabel.getOrElse(n) { qid[n] }) }
+    }
+
+    /** Sends a command to Halo; returns false when Halo isn't installed. */
+    fun command(c: Context, cmd: String, arg: String? = null): Boolean {
+        if (!installed(c)) return false
+        val i = Intent(ACTION_COMMAND).setPackage(HALO).putExtra("cmd", cmd)
+        if (arg != null) i.putExtra("arg", arg)
+        c.sendBroadcast(i, PERMISSION)
+        return true
+    }
+}

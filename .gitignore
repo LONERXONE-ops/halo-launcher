@@ -1,0 +1,5 @@
+app/halo.keystore
+build/
+app/build/
+.gradle/
+local.properties

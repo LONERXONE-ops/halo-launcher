@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Halo Launcher: a halo over an app grid. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.19048" android:scaleY="0.19048" android:translateX="5.238" android:translateY="1.429">
+        <group android:rotation="-7" android:pivotX="256" android:pivotY="140">
+            <path android:strokeColor="#FFFFFFFF" android:strokeWidth="76" android:strokeAlpha="0.08" android:pathData="M138,140 a118,36 0 1,0 236,0 a118,36 0 1,0 -236,0" />
+        </group>
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="54" android:strokeAlpha="0.08" android:pathData="M178,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M294,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M178,338 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M262,390 a52,52 0 1,0 104,0 a52,52 0 1,0 -104,0z" />
+        <group android:rotation="-7" android:pivotX="256" android:pivotY="140">
+            <path android:strokeColor="#FFFFFFFF" android:strokeWidth="62" android:strokeAlpha="0.16" android:pathData="M138,140 a118,36 0 1,0 236,0 a118,36 0 1,0 -236,0" />
+        </group>
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="42" android:strokeAlpha="0.16" android:pathData="M178,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M294,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M178,338 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M262,390 a52,52 0 1,0 104,0 a52,52 0 1,0 -104,0z" />
+        <group android:rotation="-7" android:pivotX="256" android:pivotY="140">
+            <path android:strokeColor="#FFFFFFFF" android:strokeWidth="50" android:strokeAlpha="1" android:pathData="M138,140 a118,36 0 1,0 236,0 a118,36 0 1,0 -236,0" />
+        </group>
+        <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="26" android:strokeAlpha="1" android:pathData="M178,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M294,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M178,338 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M262,390 a52,52 0 1,0 104,0 a52,52 0 1,0 -104,0z" />
+        <group android:rotation="-7" android:pivotX="256" android:pivotY="140">
+            <path android:strokeColor="#FF000000" android:strokeWidth="38" android:strokeAlpha="1" android:pathData="M138,140 a118,36 0 1,0 236,0 a118,36 0 1,0 -236,0" />
+        </group>
+        <path android:fillColor="#FFFFFFFF" android:strokeColor="#FF000000" android:strokeWidth="13" android:strokeAlpha="1" android:pathData="M178,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M294,222 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M178,338 h40 a32,32 0 0 1 32,32 v40 a32,32 0 0 1 -32,32 h-40 a32,32 0 0 1 -32,-32 v-40 a32,32 0 0 1 32,-32z M262,390 a52,52 0 1,0 104,0 a52,52 0 1,0 -104,0z" />
+        <group android:rotation="-7" android:pivotX="256" android:pivotY="140">
+            <path android:strokeColor="#FFFFFFFF" android:strokeWidth="20" android:strokeAlpha="1" android:pathData="M138,140 a118,36 0 1,0 236,0 a118,36 0 1,0 -236,0" />
+        </group>
+        <path android:strokeColor="#FF000000" android:strokeWidth="11" android:strokeLineCap="round" android:pathData="M300,378 l26,26 M326,378 l-26,26" />
+    </group>
+</vector>

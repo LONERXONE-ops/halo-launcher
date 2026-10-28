@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+    <g id="ring"><ellipse cx="256" cy="140" rx="118" ry="36" transform="rotate(-7 256 140)" fill="none"/></g>
+    <g id="tiles">
+      <rect x="146" y="222" width="104" height="104" rx="32"/>
+      <rect x="262" y="222" width="104" height="104" rx="32"/>
+      <rect x="146" y="338" width="104" height="104" rx="32"/>
+      <rect x="262" y="338" width="104" height="104" rx="52"/>
+    </g>
+  </defs>
+  <rect width="512" height="512" fill="#000"/>
+  <g filter="url(#glow)" opacity="0.9">
+    <use href="#ring" stroke="#fff" stroke-width="48"/>
+    <use href="#tiles" fill="#fff" stroke="#fff" stroke-width="28"/>
+  </g>
+  <use href="#ring" stroke="#fff" stroke-width="50"/>
+  <use href="#tiles" fill="#fff" stroke="#fff" stroke-width="26"/>
+  <use href="#ring" stroke="#000" stroke-width="38"/>
+  <use href="#tiles" fill="#fff" stroke="#000" stroke-width="13"/>
+  <use href="#ring" stroke="#fff" stroke-width="20"/>
+  <g stroke="#000" stroke-width="11" stroke-linecap="round" fill="none">
+    <path d="M300 378 l26 26 M326 378 l-26 26"/>
+  </g>
+</svg>
