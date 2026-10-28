@@ -18,7 +18,8 @@ import java.net.URLEncoder
  */
 object Weather {
     class Day(val code: Int, val max: Int, val min: Int, val dayName: String)
-    class Now(val temp: Int, val code: Int, val isDay: Boolean, val city: String, val days: List<Day>)
+    class Hour(val label: String, val code: Int, val temp: Int, val isDay: Boolean)
+    class Now(val temp: Int, val code: Int, val isDay: Boolean, val city: String, val days: List<Day>, val hours: List<Hour> = emptyList())
 
     var now: Now? = null
         private set
@@ -89,6 +90,7 @@ object Weather {
             try {
                 val url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                     "&current=temperature_2m,weather_code,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min" +
+                    "&hourly=temperature_2m,weather_code,is_day&forecast_hours=7" +
                     "&timezone=auto&forecast_days=4" + if (f) "&temperature_unit=fahrenheit" else ""
                 val json = get(url)
                 if (city.isEmpty()) city = reverseName(lat, lon)
@@ -137,7 +139,27 @@ object Weather {
             }
             Day(codes.getInt(n), Math.round(max.getDouble(n)).toInt(), Math.round(min.getDouble(n)).toInt(), name)
         }
+        val hours = ArrayList<Hour>()
+        o.optJSONObject("hourly")?.let { hr ->
+            val ht = hr.optJSONArray("time")
+            val htemp = hr.optJSONArray("temperature_2m")
+            val hcode = hr.optJSONArray("weather_code")
+            val hday = hr.optJSONArray("is_day")
+            val hfIn = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.US)
+            val hfOut = java.text.SimpleDateFormat(if (android.text.format.DateFormat.is24HourFormat(App0.ctx ?: return@let)) "HH:mm" else "ha", java.util.Locale.getDefault())
+            if (ht != null && htemp != null && hcode != null) {
+                for (n in 1 until ht.length()) {
+                    val label = try {
+                        hfOut.format(hfIn.parse(ht.getString(n))!!).lowercase()
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    hours += Hour(label, hcode.getInt(n), Math.round(htemp.getDouble(n)).toInt(), (hday?.optInt(n, 1) ?: 1) == 1)
+                }
+            }
+        }
         return Now(
+            hours = hours,
             temp = Math.round(cur.getDouble("temperature_2m")).toInt(),
             code = cur.getInt("weather_code"),
             isDay = cur.optInt("is_day", 1) == 1,

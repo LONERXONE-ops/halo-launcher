@@ -1,5 +1,6 @@
 package com.lonerxone.halo.launcher
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Color
@@ -7,31 +8,63 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.TextView
 
 /**
- * Halo's palette, shared with the island: black, white and greys. Glass
- * cards are graphite and see-through; "paper" cards are near-white with
- * black ink, for contrast (the pale tiles in the reference designs).
+ * Halo's palette: black, white and opaque greys (no see-through white, as the
+ * widget guidelines advise), with one accent, red, used sparingly: badges,
+ * low battery, "now" in the agenda.
  */
 object Palette {
-    const val INK = 0xFFFFFFFF.toInt()
+    const val INK = 0xFFF5F5F7.toInt()
     const val SILVER = 0xFFC9C9CE.toInt()
     const val GREY = 0xFF8E8E93.toInt()
-    const val GRAPHITE = 0xFF2A2A2D.toInt()
+    const val DIM = 0xFF5A5A5F.toInt()
+    const val GRAPHITE = 0xFF2C2C2E.toInt()
+    const val TILE = 0xFF141416.toInt()
+    const val TILE2 = 0xFF1C1C1E.toInt()
     const val PAPER = 0xFFECECEE.toInt()
+    const val RED = 0xFFFF3B30.toInt()
     const val GREEN = 0xFF34C759.toInt()
-    val GLASS = Color.argb(150, 26, 26, 28)
+    // Older names, kept for the screens that use them.
+    val WHITE70 = SILVER
+    val WHITE50 = GREY
+    val GLASS = TILE
     val GLASS_STROKE = Color.argb(30, 255, 255, 255)
-    val WHITE70 = Color.argb(178, 255, 255, 255)
-    val WHITE50 = Color.argb(128, 255, 255, 255)
+}
+
+/**
+ * Bundled fonts (SIL Open Font License, see docs/licenses):
+ * Inter for text, Doto (dot matrix, the Nothing-style numbers), Graduate
+ * (varsity poster clock) and Anton (bold condensed clock).
+ */
+object Fonts {
+    private val cache = HashMap<String, Typeface>()
+
+    private fun load(c: Context, name: String, fallback: Typeface): Typeface = cache.getOrPut(name) {
+        try {
+            Typeface.createFromAsset(c.applicationContext.assets, "fonts/$name.ttf")
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
+    fun regular(c: Context) = load(c, "inter_regular", Typeface.DEFAULT)
+    fun semibold(c: Context) = load(c, "inter_semibold", Typeface.DEFAULT_BOLD)
+    fun light(c: Context) = load(c, "inter_light", Typeface.DEFAULT)
+    fun dots(c: Context) = load(c, "doto_black", Typeface.MONOSPACE)
+    fun varsity(c: Context) = load(c, "graduate", Typeface.DEFAULT_BOLD)
+    fun bold(c: Context) = load(c, "anton", Typeface.DEFAULT_BOLD)
 }
 
 object Prefs {
     const val HERO_PIC = "hero_pic"
     const val CAPSULE_PIC = "capsule_pic"
-    const val CLOCK_STYLE = "clock_style" // 0 outline, 1 solid, 2 thin
+    const val CLOCK_STYLE = "clock_style" // StackedClock.VARSITY / DOTS / BOLD / THIN
     const val MONO_ICONS = "mono_icons"
     const val ICON_STYLE = "icon_style" // Icons.DARK / MONO / ORIGINAL
     const val SHOW_WALLPAPER = "show_wallpaper"
@@ -50,6 +83,10 @@ object Prefs {
     const val FAHRENHEIT = "fahrenheit"
     const val LAUNCHES = "launches"
     const val SHOW_LABELS = "labels"
+    /** Built-in widgets switched off (comma list of ids). */
+    const val WIDGETS_OFF = "widgets_off"
+    const val STEP_GOAL = "step_goal"
+    const val ANIMATIONS = "animations"
 
     fun get(c: Context): SharedPreferences = c.getSharedPreferences("halo_launcher", Context.MODE_PRIVATE)
 
@@ -62,6 +99,16 @@ object Prefs {
     fun setList(c: Context, key: String, v: List<String>) {
         get(c).edit().putString(key, v.joinToString("|")).apply()
     }
+
+    fun widgetOn(c: Context, id: String) = id !in get(c).getString(WIDGETS_OFF, "")!!.split(',')
+
+    fun setWidget(c: Context, id: String, on: Boolean) {
+        val off = get(c).getString(WIDGETS_OFF, "")!!.split(',').filter { it.isNotBlank() }.toMutableSet()
+        if (on) off.remove(id) else off.add(id)
+        get(c).edit().putString(WIDGETS_OFF, off.joinToString(",")).apply()
+    }
+
+    fun animations(c: Context) = get(c).getBoolean(ANIMATIONS, true)
 }
 
 fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
@@ -69,38 +116,56 @@ fun Context.dpf(v: Float): Float = v * resources.displayMetrics.density
 fun View.dp(v: Int): Int = context.dp(v)
 fun View.dpf(v: Float): Float = context.dpf(v)
 
-/** A see-through graphite card with a hairline, like the island's open cards. */
-fun Context.glass(radius: Float = dpf(28f)): GradientDrawable = GradientDrawable().apply {
-    setColor(Palette.GLASS)
-    setStroke(dp(1), Palette.GLASS_STROKE)
-    cornerRadius = radius
-}
+fun Context.glass(radius: Float = dpf(28f)): GradientDrawable = round(Palette.TILE, radius)
 
-/** A near-white card with black ink. */
-fun Context.paper(radius: Float = dpf(28f)): GradientDrawable = GradientDrawable().apply {
-    setColor(Palette.PAPER)
-    cornerRadius = radius
-}
+fun Context.paper(radius: Float = dpf(28f)): GradientDrawable = round(Palette.PAPER, radius)
 
 fun Context.round(color: Int, radius: Float): GradientDrawable = GradientDrawable().apply {
     setColor(color)
     cornerRadius = radius
 }
 
-fun Context.text(sp: Float, color: Int, bold: Boolean = false, lines: Int = 1): TextView = TextView(this).apply {
+/** Text in Inter. [caps] makes the small spaced labels widgets use. */
+fun Context.text(sp: Float, color: Int, bold: Boolean = false, lines: Int = 1, caps: Boolean = false): TextView = TextView(this).apply {
     setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
     setTextColor(color)
-    typeface = if (bold) Typeface.create("sans-serif-medium", Typeface.NORMAL) else Typeface.create("sans-serif", Typeface.NORMAL)
+    typeface = if (bold || caps) Fonts.semibold(this@text) else Fonts.regular(this@text)
     includeFontPadding = false
+    if (caps) {
+        isAllCaps = true
+        letterSpacing = 0.14f
+    }
     if (lines > 0) {
         maxLines = lines
         ellipsize = TextUtils.TruncateAt.END
     }
 }
 
-/** A light bounce on tap, used by every widget. */
+/** A light bounce on tap. */
 fun View.bounce() {
-    animate().scaleX(0.95f).scaleY(0.95f).setDuration(70L).withEndAction {
-        animate().scaleX(1f).scaleY(1f).setDuration(160L).start()
+    animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setDuration(80L).withEndAction {
+        animate().scaleX(1f).scaleY(1f).setInterpolator(OvershootInterpolator(2.5f)).setDuration(260L).start()
     }.start()
+}
+
+/** Shrinks while pressed and springs back on release, like iOS widgets. Keeps clicks working. */
+@SuppressLint("ClickableViewAccessibility")
+fun View.pressable() {
+    setOnTouchListener { v, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> v.animate().setStartDelay(0).scaleX(0.96f).scaleY(0.96f).setInterpolator(DecelerateInterpolator()).setDuration(120L).start()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(OvershootInterpolator(2f)).setDuration(300L).start()
+        }
+        false
+    }
+}
+
+/** Fades and lifts a view in, after [delay] ms. */
+fun View.enter(delay: Long, distance: Float = dpf(22f)) {
+    if (!Prefs.animations(context)) return
+    alpha = 0f
+    translationY = distance
+    animate().alpha(1f).translationY(0f).setStartDelay(delay).setDuration(460L)
+        .setInterpolator(DecelerateInterpolator(2.2f)).start()
 }

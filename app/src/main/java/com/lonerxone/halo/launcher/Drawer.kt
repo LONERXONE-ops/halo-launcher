@@ -76,6 +76,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             setHintTextColor(Palette.WHITE50)
             setTextColor(Palette.INK)
             textSize = 16f
+            typeface = Fonts.regular(context)
             background = null
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_GO
@@ -84,9 +85,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         pill.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         col.addView(pill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)))
 
-        col.addView(context.text(12.5f, Palette.WHITE50, bold = true).apply {
+        col.addView(context.text(10.5f, Palette.GREY, caps = true).apply {
             text = "MOST USED"
-            letterSpacing = 0.12f
             setPadding(dp(6), dp(18), 0, dp(8))
         })
         usedRow = LinearLayout(context).apply {
@@ -95,9 +95,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             setPadding(dp(6), dp(12), dp(6), dp(8))
         }
         col.addView(usedRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        col.addView(context.text(12.5f, Palette.WHITE50, bold = true).apply {
+        col.addView(context.text(10.5f, Palette.GREY, caps = true).apply {
             text = "ALL APPS"
-            letterSpacing = 0.12f
             setPadding(dp(6), dp(18), 0, dp(4))
         })
 
@@ -191,6 +190,12 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     // ----- open / close -----
 
+    /** Follows the finger (stops any animation first). */
+    fun drag(p: Float) {
+        anim?.cancel()
+        setProgress(p)
+    }
+
     fun setProgress(p: Float) {
         val h = height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
         translationY = h * (1f - p.coerceIn(0f, 1f))
@@ -204,9 +209,24 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     fun open() {
+        val wasOpen = isOpen
         isOpen = true
         visibility = View.VISIBLE
         refresh()
+        if (!wasOpen && Prefs.animations(context)) {
+            // Icons ripple in row by row.
+            grid.layoutAnimation = android.view.animation.LayoutAnimationController(
+                android.view.animation.AnimationSet(true).apply {
+                    addAnimation(android.view.animation.AlphaAnimation(0f, 1f))
+                    addAnimation(android.view.animation.TranslateAnimation(0f, 0f, dpf(24f), 0f))
+                    duration = 320
+                    interpolator = android.view.animation.DecelerateInterpolator(2f)
+                },
+                0.06f,
+            )
+            grid.scheduleLayoutAnimation()
+            for (i in 0 until usedRow.childCount) usedRow.getChildAt(i).enter(i * 40L, dpf(14f))
+        }
         animateTo(1f)
     }
 
@@ -218,13 +238,18 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         animateTo(0f)
     }
 
+    private var anim: android.animation.ValueAnimator? = null
+
+    /** One animation at a time (a new open/close cancels the last), on a smooth iOS-like curve. */
     fun animateTo(target: Float) {
+        anim?.cancel()
         val start = progress()
-        val anim = android.animation.ValueAnimator.ofFloat(start, target)
-        anim.duration = (180 + 160 * abs(target - start)).toLong()
-        anim.interpolator = android.view.animation.DecelerateInterpolator(2f)
-        anim.addUpdateListener { setProgress(it.animatedValue as Float) }
-        anim.start()
+        val a = android.animation.ValueAnimator.ofFloat(start, target)
+        a.duration = (220 + 220 * abs(target - start)).toLong()
+        a.interpolator = android.view.animation.PathInterpolator(0.2f, 0.9f, 0.1f, 1f)
+        a.addUpdateListener { setProgress(it.animatedValue as Float) }
+        a.start()
+        anim = a
         isOpen = target > 0.5f
     }
 
@@ -258,7 +283,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         if (!dragging) return super.onTouchEvent(e)
         val h = height.toFloat().coerceAtLeast(1f)
         when (e.actionMasked) {
-            MotionEvent.ACTION_MOVE -> setProgress(1f - ((e.rawY - downY) / h).coerceAtLeast(0f))
+            MotionEvent.ACTION_MOVE -> drag(1f - ((e.rawY - downY) / h).coerceAtLeast(0f))
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 dragging = false
                 if (progress() < 0.75f) close() else animateTo(1f)

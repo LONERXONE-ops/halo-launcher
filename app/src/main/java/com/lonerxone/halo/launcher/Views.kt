@@ -1,48 +1,59 @@
 package com.lonerxone.halo.launcher
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
-import android.graphics.Typeface
 import android.text.format.DateFormat
 import android.view.View
-import java.util.Calendar
+import android.view.animation.DecelerateInterpolator
+import android.widget.LinearLayout
 import java.util.Date
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * An app icon (in the chosen style) with an optional label and Halo's unread
- * badge.
+ * An app icon (in the chosen style), an optional label, and an iOS-style
+ * badge: a red pill on the top-right corner with a thin black rim, never clipped.
  */
 @SuppressLint("ViewConstructor")
-class AppIconView(context: Context, val app: App, private val sizeDp: Int, private val showLabel: Boolean, private val labelColor: Int = Palette.INK) : View(context) {
+class AppIconView(
+    context: Context,
+    val app: App,
+    private val sizeDp: Int,
+    private val showLabel: Boolean,
+    private val labelColor: Int = Palette.INK,
+    private val forceStyle: Int = -1,
+) : View(context) {
     private var result: Icons.Result? = null
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = labelColor
         textSize = dpf(11.5f)
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        typeface = Fonts.regular(context)
         textAlign = Paint.Align.CENTER
     }
-    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 69, 58) }
+    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.RED }
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val badgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = dpf(10f)
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        textSize = dpf(10.5f)
+        typeface = Fonts.semibold(context)
         textAlign = Paint.Align.CENTER
     }
     private val px = dp(sizeDp)
+    private val iconTop = dpf(7f)
     private val dst = RectF()
+    private val pill = RectF()
+    private var fade = 1f
     var badge = 0
         set(v) {
             if (field != v) {
@@ -57,32 +68,42 @@ class AppIconView(context: Context, val app: App, private val sizeDp: Int, priva
     }
 
     fun reload() {
-        val style = Icons.style(context)
+        val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
         Icons.cached(app, style, px)?.let { result = it; invalidate(); return }
+        fade = 0f
         Icons.load(context, app, style, px) { r ->
             result = r
-            invalidate()
+            // Icons fade in as they finish loading instead of popping.
+            ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 220
+                addUpdateListener { fade = it.animatedValue as Float; invalidate() }
+            }.start()
         }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val h = px + if (showLabel) dp(22) else 0
-        setMeasuredDimension(resolveSize(px + dp(12), widthMeasureSpec), resolveSize(h, heightMeasureSpec))
+        val h = (iconTop + px).toInt() + if (showLabel) dp(22) else dp(4)
+        setMeasuredDimension(resolveSize(px + dp(16), widthMeasureSpec), resolveSize(h, heightMeasureSpec))
     }
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
         result?.let {
-            dst.set(cx - px / 2f, 0f, cx + px / 2f, px.toFloat())
+            iconPaint.alpha = (255 * fade).toInt()
+            dst.set(cx - px / 2f, iconTop, cx + px / 2f, iconTop + px)
             canvas.drawBitmap(it.bitmap, null, dst, iconPaint)
         }
-        if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, px + dpf(16f), labelPaint)
+        if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, iconTop + px + dpf(16f), labelPaint)
         if (badge > 0) {
-            val br = dpf(8.5f)
-            val bx = cx + px / 2f - br * 0.4f
-            val by = br * 0.5f
-            canvas.drawCircle(bx, by, br, badgePaint)
-            canvas.drawText(if (badge > 99) "99" else badge.toString(), bx, by + dpf(3.5f), badgeText)
+            val label = if (badge > 99) "99+" else badge.toString()
+            val h = dpf(18f)
+            val w = max(h, badgeText.measureText(label) + dpf(10f))
+            val right = cx + px / 2f + dpf(5f)
+            pill.set(right - w, iconTop - dpf(6f), right, iconTop - dpf(6f) + h)
+            val rim = dpf(2f)
+            canvas.drawRoundRect(pill.left - rim, pill.top - rim, pill.right + rim, pill.bottom + rim, h / 2f + rim, h / 2f + rim, rimPaint)
+            canvas.drawRoundRect(pill, h / 2f, h / 2f, badgePaint)
+            canvas.drawText(label, pill.centerX(), pill.centerY() + dpf(3.8f), badgeText)
         }
     }
 
@@ -95,128 +116,135 @@ class AppIconView(context: Context, val app: App, private val sizeDp: Int, priva
 }
 
 /**
- * The big stacked clock: hours over minutes, like a poster. Three looks:
- * outline (grey with a white rim), solid white, and thin.
+ * The big stacked clock, hours over minutes, poster style. Four looks:
+ * VARSITY (grey digits with a black and a white outline, like a college
+ * jersey), DOTS (dot matrix), BOLD (tall condensed) and THIN. When the
+ * minute changes the new digits slide up into place.
  */
 class StackedClock(context: Context) : View(context) {
+    companion object {
+        const val VARSITY = 0
+        const val DOTS = 1
+        const val BOLD = 2
+        const val THIN = 3
+        val NAMES = listOf("Varsity", "Dot matrix", "Bold", "Thin")
+    }
+
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
     }
-    var style = 0
+    var style = VARSITY
         set(v) {
             field = v
             invalidate()
         }
+    private var shown: Pair<String, String>? = null
+    private var previous: Pair<String, String>? = null
+    private var slide = 1f
 
-    override fun onDraw(canvas: Canvas) {
-        val now = Date()
-        val h = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", now).toString()
-        val m = DateFormat.format("mm", now).toString()
-        val lineH = height / 2f
-        val size = min(lineH * 1.08f, width / 1.25f)
+    /** Call every minute: animates when the time changed. */
+    fun tick() {
+        val now = current()
+        val old = shown
+        if (old == null || !Prefs.animations(context)) {
+            shown = now
+            invalidate()
+            return
+        }
+        if (old == now) return
+        previous = old
+        shown = now
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 650
+            interpolator = DecelerateInterpolator(2f)
+            addUpdateListener {
+                slide = it.animatedValue as Float
+                invalidate()
+            }
+        }.start()
+    }
+
+    private fun current(): Pair<String, String> {
+        val d = Date()
+        return DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", d).toString() to DateFormat.format("mm", d).toString()
+    }
+
+    private fun setup(size: Float) {
         fill.textSize = size
         stroke.textSize = size
         fill.typeface = when (style) {
-            2 -> Typeface.create("sans-serif-thin", Typeface.NORMAL)
-            else -> Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            DOTS -> Fonts.dots(context)
+            BOLD -> Fonts.bold(context)
+            THIN -> Fonts.light(context)
+            else -> Fonts.varsity(context)
         }
         stroke.typeface = fill.typeface
-        stroke.strokeWidth = dpf(2.2f)
-        fill.letterSpacing = -0.02f
-        stroke.letterSpacing = -0.02f
-        val fm = fill.fontMetrics
-        val asc = -fm.ascent * 0.74f
-        for ((n, s) in listOf(h, m).withIndex()) {
+        fill.letterSpacing = if (style == DOTS) 0f else -0.03f
+        stroke.letterSpacing = fill.letterSpacing
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val now = shown ?: current().also { shown = it }
+        val lineH = height / 2f
+        val size = when (style) {
+            BOLD -> lineH * 1.12f
+            DOTS -> min(lineH * 1.05f, width / 1.35f)
+            THIN -> min(lineH * 1.15f, width / 1.15f)
+            else -> min(lineH * 1.02f, width / 1.3f)
+        }
+        setup(size)
+        val asc = -fill.fontMetrics.ascent * 0.72f
+        for (n in 0..1) {
             val y = n * lineH + (lineH + asc) / 2f
-            when (style) {
-                0 -> {
-                    fill.color = Color.rgb(58, 58, 62)
-                    canvas.drawText(s, 0f, y, fill)
-                    stroke.color = Color.argb(225, 255, 255, 255)
-                    canvas.drawText(s, 0f, y, stroke)
-                }
-                else -> {
-                    fill.color = Palette.INK
-                    canvas.drawText(s, 0f, y, fill)
-                }
-            }
-        }
-    }
-}
-
-/** A rounded progress bar with a label, used by the battery and music widgets. */
-class BarView(context: Context) : View(context) {
-    var fraction = 0f
-        set(v) {
-            field = v.coerceIn(0f, 1f)
-            invalidate()
-        }
-    var track = Color.argb(46, 0, 0, 0)
-    var bar = Color.BLACK
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val r = RectF()
-
-    override fun onDraw(canvas: Canvas) {
-        val rad = height / 2f
-        r.set(0f, 0f, width.toFloat(), height.toFloat())
-        p.color = track
-        canvas.drawRoundRect(r, rad, rad, p)
-        if (fraction > 0f) {
-            r.right = max(height.toFloat(), width * fraction)
-            p.color = bar
-            canvas.drawRoundRect(r, rad, rad, p)
-        }
-    }
-}
-
-/** A month at a glance, today circled. */
-class MonthView(context: Context) : View(context) {
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
-    private val dot = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    override fun onDraw(canvas: Canvas) {
-        val cal = Calendar.getInstance()
-        val today = cal.get(Calendar.DAY_OF_MONTH)
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        val firstDow = (cal.get(Calendar.DAY_OF_WEEK) - cal.firstDayOfWeek + 7) % 7
-        val days = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-        val cols = 7
-        val rows = 7 // header + up to 6 weeks
-        val cw = width / cols.toFloat()
-        val rh = height / rows.toFloat()
-        p.textSize = min(rh * 0.6f, dpf(12f))
-        val names = java.text.DateFormatSymbols.getInstance().shortWeekdays
-        for (c in 0 until cols) {
-            val dow = (cal.firstDayOfWeek - 1 + c) % 7 + 1
-            p.color = Color.argb(140, 0, 0, 0)
-            p.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            canvas.drawText(names[dow].take(1), cw * c + cw / 2f, rh * 0.7f, p)
-        }
-        for (d in 1..days) {
-            val i = firstDow + d - 1
-            val c = i % 7
-            val r = i / 7 + 1
-            val x = cw * c + cw / 2f
-            val y = rh * r + rh * 0.7f
-            if (d == today) {
-                dot.color = Color.BLACK
-                canvas.drawCircle(x, y - p.textSize * 0.35f, min(cw, rh) * 0.46f, dot)
-                p.color = Color.WHITE
+            val newText = if (n == 0) now.first else now.second
+            val oldText = previous?.let { if (n == 0) it.first else it.second }
+            if (oldText != null && oldText != newText && slide < 1f) {
+                // Old digits rise and fade out, new ones rise in.
+                canvas.save()
+                canvas.clipRect(0f, n * lineH, width.toFloat(), (n + 1) * lineH)
+                drawDigits(canvas, oldText, y - slide * lineH * 0.6f, 1f - slide)
+                drawDigits(canvas, newText, y + (1f - slide) * lineH * 0.6f, slide)
+                canvas.restore()
             } else {
-                p.color = Color.argb(215, 0, 0, 0)
+                drawDigits(canvas, newText, y, 1f)
             }
-            p.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            canvas.drawText(d.toString(), x, y, p)
+        }
+    }
+
+    private fun drawDigits(canvas: Canvas, s: String, y: Float, alpha: Float) {
+        val a = (255 * alpha.coerceIn(0f, 1f)).toInt()
+        when (style) {
+            VARSITY -> {
+                stroke.strokeWidth = dpf(6f)
+                stroke.color = Color.argb(a, 245, 245, 247)
+                canvas.drawText(s, dpf(3f), y, stroke)
+                stroke.strokeWidth = dpf(2.6f)
+                stroke.color = Color.argb(a, 0, 0, 0)
+                canvas.drawText(s, dpf(3f), y, stroke)
+                fill.color = Color.argb(a, 142, 142, 147)
+                canvas.drawText(s, dpf(3f), y, fill)
+            }
+            DOTS -> {
+                fill.color = Color.argb(a, 245, 245, 247)
+                canvas.drawText(s, 0f, y, fill)
+            }
+            BOLD -> {
+                fill.color = Color.argb(a, 245, 245, 247)
+                canvas.drawText(s, 0f, y, fill)
+            }
+            else -> {
+                fill.color = Color.argb(a, 245, 245, 247)
+                canvas.drawText(s, 0f, y, fill)
+            }
         }
     }
 }
 
 /**
- * Your picture, fixed behind the pages and centre-cropped to the screen. The
- * black sheets cover the lower part, like the poster-style home screens.
- * With no picture set, it stays clear so your phone's wallpaper shows.
+ * Your picture, fixed behind the pages and filling the top of the screen.
+ * With no picture set it stays clear so your phone's wallpaper shows.
  */
 class ArtView(context: Context) : View(context) {
     var picture: Bitmap? = null
@@ -228,16 +256,22 @@ class ArtView(context: Context) : View(context) {
     private var shader: BitmapShader? = null
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val m = Matrix()
+    /** Small parallax from page swipes (0..1). */
+    var drift = 0f
+        set(v) {
+            field = v
+            invalidate()
+        }
 
     override fun onDraw(canvas: Canvas) {
         val bmp = picture ?: return
         val sh = shader ?: return
-        // Fill the top ~60% (what shows above the sheet), anchored to the top.
-        val target = height * 0.62f
-        val s = max(width.toFloat() / bmp.width, target / bmp.height)
+        val target = height * 0.66f
+        val s = max(width * 1.08f / bmp.width, target / bmp.height)
         m.reset()
         m.setScale(s, s)
-        m.postTranslate((width - bmp.width * s) / 2f, 0f)
+        val spare = bmp.width * s - width
+        m.postTranslate(-spare * (0.5f + (drift - 0.5f) * 0.6f), 0f)
         sh.setLocalMatrix(m)
         p.shader = sh
         canvas.drawRect(0f, 0f, width.toFloat(), bmp.height * s, p)
@@ -245,13 +279,12 @@ class ArtView(context: Context) : View(context) {
 }
 
 /**
- * A solid black sheet with a soft curved top edge (one side higher than the
- * other), the shape from the poster-style reference. Content sits below the
- * curve.
+ * A solid black sheet with one smooth curve along its top. Page 1's curve
+ * runs high-left to low-right and page 2's low-left to high-right, from the
+ * same height, so side by side they make one continuous wave.
  */
-class SheetView(context: Context, private val highOnLeft: Boolean) : android.widget.LinearLayout(context) {
-    /** How far the low side sits below the high side. */
-    var curve = dpf(96f)
+class SheetView(context: Context, private val highOnLeft: Boolean) : LinearLayout(context) {
+    var curve = dpf(84f)
         set(v) {
             field = v
             invalidate()
@@ -271,8 +304,8 @@ class SheetView(context: Context, private val highOnLeft: Boolean) : android.wid
         val b = if (highOnLeft) curve else 0f
         path.reset()
         path.moveTo(0f, a)
-        // One smooth S: flat, then sweeping down (or up), then flat again.
-        path.cubicTo(w * 0.52f, a, w * 0.48f, b, w, b)
+        // Flat at both ends (so the pages meet without a kink), sweeping in the middle.
+        path.cubicTo(w * 0.5f, a, w * 0.5f, b, w, b)
         path.lineTo(w, h)
         path.lineTo(0f, h)
         path.close()
@@ -286,10 +319,10 @@ class SheetView(context: Context, private val highOnLeft: Boolean) : android.wid
  * upside down: rounded on top, flaring into the screen edge with concave
  * curves at its feet.
  */
-class DockTab(context: Context) : android.widget.LinearLayout(context) {
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(28, 28, 30) }
+class DockTab(context: Context) : LinearLayout(context) {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(24, 24, 26) }
     private val path = Path()
-    var sideMargin = dpf(22f)
+    var sideMargin = dpf(18f)
 
     init {
         orientation = HORIZONTAL
@@ -302,7 +335,7 @@ class DockTab(context: Context) : android.widget.LinearLayout(context) {
         val h = height.toFloat()
         val m = sideMargin
         val r = dpf(30f)
-        val f = dpf(20f)
+        val f = dpf(18f)
         path.reset()
         path.moveTo(m - f, h)
         path.quadTo(m, h, m, h - f)
@@ -318,27 +351,101 @@ class DockTab(context: Context) : android.widget.LinearLayout(context) {
     }
 }
 
-/** A thin ring that fills clockwise (battery tile). */
-class RingView(context: Context) : View(context) {
+/** A thin rounded progress bar. */
+class BarView(context: Context) : View(context) {
     var fraction = 0f
         set(v) {
             field = v.coerceIn(0f, 1f)
             invalidate()
         }
-    var color = Palette.INK
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-    }
+    var track = Color.argb(46, 255, 255, 255)
+    var bar = Palette.INK
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
 
     override fun onDraw(canvas: Canvas) {
-        val sw = dpf(7f)
-        p.strokeWidth = sw
-        r.set(sw / 2f, sw / 2f, width - sw / 2f, height - sw / 2f)
-        p.color = Color.argb(40, 255, 255, 255)
-        canvas.drawArc(r, 0f, 360f, false, p)
-        p.color = color
-        canvas.drawArc(r, -90f, 360f * fraction, false, p)
+        val rad = height / 2f
+        r.set(0f, 0f, width.toFloat(), height.toFloat())
+        p.color = track
+        canvas.drawRoundRect(r, rad, rad, p)
+        if (fraction > 0f) {
+            r.right = max(height.toFloat(), width * fraction)
+            p.color = bar
+            canvas.drawRoundRect(r, rad, rad, p)
+        }
+    }
+}
+
+/**
+ * A row of dots that fill up (battery, steps), Nothing style. The last lit
+ * dot can be an accent, and [pulse] makes it breathe (charging).
+ */
+class DotsView(context: Context) : View(context) {
+    var count = 10
+    var fraction = 0f
+        set(v) {
+            field = v.coerceIn(0f, 1f)
+            invalidate()
+        }
+    var on = Palette.INK
+    var off = Palette.GRAPHITE
+    var accent: Int? = null
+    var pulse = false
+        set(v) {
+            field = v
+            invalidate()
+        }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(canvas: Canvas) {
+        val gap = width / count.toFloat()
+        val r = min(height / 2f, gap * 0.34f)
+        val lit = Math.round(fraction * count)
+        val t = (System.currentTimeMillis() % 1400L) / 1400f
+        for (i in 0 until count) {
+            val last = i == lit - 1
+            p.color = when {
+                i >= lit -> off
+                last && accent != null -> accent!!
+                else -> on
+            }
+            if (last && pulse) p.alpha = (110 + 145 * (0.5f + 0.5f * Math.sin(t * 2 * Math.PI).toFloat())).toInt()
+            canvas.drawCircle(gap * i + gap / 2f, height / 2f, r, p)
+        }
+        if (pulse && isShown) postInvalidateDelayed(50L)
+    }
+}
+
+/**
+ * Page dots that follow your finger: the active dot stretches into a pill and
+ * slides smoothly between pages as you swipe.
+ */
+class PageDots(context: Context) : View(context) {
+    var pages = 2
+    var position = 0f
+        set(v) {
+            field = v
+            invalidate()
+        }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+
+    override fun onDraw(canvas: Canvas) {
+        val d = dpf(5f)
+        val wide = dpf(16f)
+        val gap = dpf(6f)
+        val widths = FloatArray(pages) { i ->
+            val near = (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f)
+            d + (wide - d) * near
+        }
+        var x = (width - (widths.sum() + gap * (pages - 1))) / 2f
+        val y = height / 2f
+        for (i in 0 until pages) {
+            val near = (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f)
+            p.color = Color.argb((90 + 165 * near).toInt(), 245, 245, 247)
+            r.set(x, y - d / 2f, x + widths[i], y + d / 2f)
+            canvas.drawRoundRect(r, d / 2f, d / 2f, p)
+            x += widths[i] + gap
+        }
     }
 }

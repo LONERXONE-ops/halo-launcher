@@ -14,14 +14,12 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.text.format.DateFormat
 import android.util.SizeF
 import android.view.ContextThemeWrapper
@@ -44,49 +42,48 @@ import java.util.Date
 import kotlin.math.abs
 
 /**
- * Halo Launcher's home screen, poster style: your wallpaper (or a picture
- * you choose) across the top, a solid black sheet with a curved edge below.
+ * Halo Launcher's home screen, poster style.
  *
- * Page 1: the big stacked clock, date and weather, and a music player made
- * for the sheet. Page 2: a few quiet tiles (weather, calendar, battery,
- * note) and any Android widgets you add. The dock rises out of the bottom
- * edge like an upside-down notch. Swipe up for all apps.
+ * Your wallpaper (or a picture you choose) fills the top. Below it one black
+ * sheet runs across both pages with a single wave: high on the left of page
+ * 1, dipping in the middle, high again on the right of page 2.
+ *
+ * Page 1: the stacked clock, the date and weather, and the music player.
+ * Page 2: the big date and Halo's own widgets, then any Android widgets.
+ * The dock rises out of the bottom edge like an upside-down notch.
  */
-class LauncherActivity : Activity(), Drawer.Host {
+class LauncherActivity : Activity(), Drawer.Host, WidgetActions {
 
     private lateinit var root: GestureRoot
     private lateinit var art: ArtView
     private lateinit var pager: HomePager
     private lateinit var drawer: Drawer
-    private lateinit var dots: LinearLayout
+    private lateinit var dots: PageDots
     private lateinit var dock: DockTab
     private lateinit var widgetHost: AppWidgetHost
     private val ui = Handler(Looper.getMainLooper())
     private var insetTop = 0
     private var insetBottom = 0
-    private val dockBody get() = dp(92)
+    private val dockBody: Int get() = dp(94)
+    private val sheetTop: Int get() = (resources.displayMetrics.heightPixels * 0.42f).toInt()
 
     // Live views
     private var sheet1: SheetView? = null
     private var sheet2: SheetView? = null
     private var clock: StackedClock? = null
+    private var sideInfo: LinearLayout? = null
     private var dateLine: TextView? = null
     private var tempText: TextView? = null
     private var tempIcon: ImageView? = null
     private var weatherDesc: TextView? = null
-    private var musicBox: FrameLayout? = null
-    private var musicBar: BarView? = null
+    private var music: MusicCard? = null
     private var musicTick: Runnable? = null
-    private var bigDay: TextView? = null
-    private var bigDayName: TextView? = null
-    private var weatherTile: LinearLayout? = null
-    private var monthView: MonthView? = null
-    private var monthTitle: TextView? = null
-    private var batteryRing: RingView? = null
-    private var batteryPct: TextView? = null
-    private var batteryState: TextView? = null
-    private var noteText: TextView? = null
-    private var widgetsBox: LinearLayout? = null
+    private var dayName: TextView? = null
+    private var dayBig: TextView? = null
+    private var widgetGrid: LinearLayout? = null
+    private val widgets = ArrayList<BaseWidget>()
+    private var androidWidgets: LinearLayout? = null
+    private var lastScreenTime = 0L
 
     private val appsChanged: () -> Unit = { rebuildApps() }
     private val haloChanged: () -> Unit = { onHalo() }
@@ -94,7 +91,7 @@ class LauncherActivity : Activity(), Drawer.Host {
     private val tick = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_BATTERY_CHANGED -> onBattery(i)
+                Intent.ACTION_BATTERY_CHANGED, Intent.ACTION_POWER_CONNECTED, Intent.ACTION_POWER_DISCONNECTED -> refreshWidgets("battery")
                 else -> onMinute()
             }
         }
@@ -128,12 +125,16 @@ class LauncherActivity : Activity(), Drawer.Host {
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
             addAction(Intent.ACTION_DATE_CHANGED)
             addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
         registerReceiver(tick, f)
-        onMinute()
         refreshLook()
+        onMinute()
+        Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
+        animateIn()
     }
 
     override fun onResume() {
@@ -156,6 +157,11 @@ class LauncherActivity : Activity(), Drawer.Host {
             widgetHost.stopListening()
         } catch (_: Exception) {
         }
+        Steps.stop(this)
+        // Come back to a closed drawer and page 1, like every launcher.
+        if (drawer.isOpen) {
+            drawer.close()
+        }
     }
 
     override fun onDestroy() {
@@ -164,10 +170,16 @@ class LauncherActivity : Activity(), Drawer.Host {
         super.onDestroy()
     }
 
-    /** Home pressed while already home: close the drawer, or go back to page 1. */
+    /** Home pressed: close the drawer, or glide back to page 1. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (drawer.isOpen) drawer.close() else pager.snapTo(0)
+        when {
+            drawer.isOpen -> drawer.close()
+            pager.current != 0 -> pager.snapTo(0)
+            hasWindowFocus() -> {
+                (pager.page(1) as? ScrollView)?.smoothScrollTo(0, 0)
+            }
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -177,6 +189,12 @@ class LauncherActivity : Activity(), Drawer.Host {
             drawer.isOpen -> drawer.close()
             pager.current != 0 -> pager.snapTo(0)
         }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        Steps.start(this) { refreshWidgets("steps") }
+        refreshWidgets(null)
     }
 
     // =====================================================================
@@ -191,11 +209,10 @@ class LauncherActivity : Activity(), Drawer.Host {
         pager = HomePager(this)
         pager.addView(buildPage1())
         pager.addView(buildPage2())
-        pager.onPageChanged = { p -> updateDots(p) }
-        pager.onScrolled = { f -> scrollWallpaper(f) }
+        pager.onScrolled = { f -> onPagerScroll(f) }
         root.addView(pager, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        dots = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        dots = PageDots(this)
         root.addView(dots, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14), Gravity.BOTTOM))
 
         dock = DockTab(this)
@@ -216,29 +233,27 @@ class LauncherActivity : Activity(), Drawer.Host {
             insets
         }
         setContentView(root)
-        updateDots(0)
     }
 
-    /** The dock reaches into the gesture bar area; everything else keeps clear of it. */
     private fun layoutForInsets() {
         val dh = dockBody + insetBottom
         (dock.layoutParams as FrameLayout.LayoutParams).height = dh
-        dock.setPadding(dp(34), 0, dp(34), insetBottom)
+        dock.setPadding(dp(30), dp(4), dp(30), insetBottom)
         dock.requestLayout()
-        (dots.layoutParams as FrameLayout.LayoutParams).bottomMargin = dh + dp(4)
+        (dots.layoutParams as FrameLayout.LayoutParams).bottomMargin = dh + dp(6)
         dots.requestLayout()
-        sheet1?.setPadding(dp(22), dp(24), dp(22), dh + dp(26))
-        sheet2?.let { it.setPadding(dp(18), dp(20), dp(18), dh + dp(30)) }
+        sheet1?.setPadding(dp(20), dp(22), dp(20), dh + dp(28))
+        sheet2?.setPadding(dp(16), dp(18), dp(16), dh + dp(34))
         drawer.setPadding(0, insetTop, 0, 0)
     }
 
     private fun refreshLook() {
         root.setBackgroundColor(Color.TRANSPARENT)
-        clock?.style = Prefs.get(this).getInt(Prefs.CLOCK_STYLE, 0)
+        clock?.style = Prefs.get(this).getInt(Prefs.CLOCK_STYLE, StackedClock.VARSITY)
         art.picture = loadPic(Prefs.HERO_PIC)
-        noteText?.text = Prefs.get(this).getString(Prefs.NOTE, "").orEmpty().ifEmpty { "Tap to write a note" }
         rebuildApps()
         rebuildWidgets()
+        rebuildAndroidWidgets()
     }
 
     private fun loadPic(key: String) = try {
@@ -248,29 +263,32 @@ class LauncherActivity : Activity(), Drawer.Host {
         null
     }
 
-    private fun updateDots(page: Int) {
-        dots.removeAllViews()
-        for (i in 0 until pager.childCount) {
-            dots.addView(View(this).apply {
-                background = round(if (i == page) Palette.INK else Color.argb(90, 255, 255, 255), dpf(3f))
-            }, LinearLayout.LayoutParams(if (i == page) dp(14) else dp(5), dp(5)).apply {
-                marginStart = dp(3)
-                marginEnd = dp(3)
-            })
+    /** Dots follow the finger; the picture drifts a little; page 2's widgets lag behind for depth. */
+    private fun onPagerScroll(f: Float) {
+        dots.position = f
+        art.drift = f
+        val g = widgetGrid
+        if (g != null) {
+            val off = (1f - f).coerceIn(0f, 1f)
+            for (i in 0 until g.childCount) g.getChildAt(i).translationX = off * dpf(40f) * (1 + i * 0.35f)
         }
-    }
-
-    private fun scrollWallpaper(f: Float) {
         try {
             val wm = WallpaperManager.getInstance(this)
-            val pages = (pager.childCount - 1).coerceAtLeast(1)
-            wm.setWallpaperOffsetSteps(1f / pages, 0f)
-            wm.setWallpaperOffsets(root.windowToken, (f / pages).coerceIn(0f, 1f), 0f)
+            wm.setWallpaperOffsetSteps(1f, 0f)
+            wm.setWallpaperOffsets(root.windowToken, f.coerceIn(0f, 1f), 0f)
         } catch (_: Exception) {
         }
     }
 
-    private fun solid(color: Int = TILE, radius: Float = dpf(26f)) = round(color, radius)
+    /** The home screen settles in: clock, weather, player, then the dock icons one by one. */
+    private fun animateIn() {
+        if (!Prefs.animations(this)) return
+        clock?.enter(0)
+        sideInfo?.enter(70)
+        music?.enter(140)
+        for (i in 0 until dock.childCount) dock.getChildAt(i).enter(180L + i * 40L, dpf(16f))
+        if (pager.current == 1) widgetGrid?.let { g -> for (i in 0 until g.childCount) g.getChildAt(i).enter(i * 60L) }
+    }
 
     // ----- Page 1: clock, date + weather, music -----
 
@@ -279,13 +297,12 @@ class LauncherActivity : Activity(), Drawer.Host {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val top = View(this)
         top.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
-        page.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.44f))
+        page.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, sheetTop))
 
         val sheet = SheetView(this, highOnLeft = true)
         sheet1 = sheet
         sheet.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
 
-        // Clock on the left (where the sheet is high), date and weather on the right (lower).
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.BOTTOM
@@ -296,154 +313,60 @@ class LauncherActivity : Activity(), Drawer.Host {
             it.bounce()
             openClockApp()
         }
-        row.addView(c, LinearLayout.LayoutParams(dp(150), dp(150)))
+        row.addView(c, LinearLayout.LayoutParams(dp(170), dp(176)))
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         val right = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
-            setPadding(0, 0, 0, dp(10))
+            setPadding(0, 0, dp(2), dp(14))
             setOnClickListener {
                 it.bounce()
                 pager.snapTo(1)
             }
         }
+        sideInfo = right
         val wRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val ti = ImageView(this).apply { imageTintList = ColorStateList.valueOf(Palette.INK) }
         tempIcon = ti
-        wRow.addView(ti, LinearLayout.LayoutParams(dp(22), dp(22)))
-        val tt = text(30f, Palette.INK).apply {
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-            setPadding(dp(6), 0, 0, 0)
+        wRow.addView(ti, LinearLayout.LayoutParams(dp(20), dp(20)))
+        val tt = text(34f, Palette.INK).apply {
+            typeface = Fonts.dots(this@LauncherActivity)
+            setPadding(dp(8), 0, 0, 0)
         }
         tempText = tt
         wRow.addView(tt)
         right.addView(wRow)
-        val wd = text(12f, Palette.WHITE50, bold = true).apply { setPadding(0, dp(2), 0, 0) }
+        val wd = text(10.5f, Palette.GREY, caps = true).apply { setPadding(0, dp(6), 0, 0) }
         weatherDesc = wd
         right.addView(wd)
-        val dl = text(12.5f, Palette.INK, bold = true).apply {
-            letterSpacing = 0.14f
-            setPadding(0, dp(10), 0, 0)
-        }
+        val dl = text(12f, Palette.INK, caps = true).apply { setPadding(0, dp(14), 0, 0) }
         dateLine = dl
         right.addView(dl)
         row.addView(right)
         sheet.addView(row)
 
-        val mb = FrameLayout(this)
-        musicBox = mb
-        sheet.addView(mb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(84)).apply { topMargin = dp(22) })
-        page.addView(sheet, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.56f))
-        renderMusic()
+        val m = MusicCard(this) { cmd -> if (!HaloLink.command(this, cmd)) noHalo() }
+        music = m
+        sheet.addView(m, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(112)).apply { topMargin = dp(18) })
+        page.addView(sheet, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         return page
     }
 
-    // ----- Music (from Halo), made for the sheet -----
-
-    private fun renderMusic() {
-        val box = musicBox ?: return
-        box.removeAllViews()
-        musicBar = null
-        val m = HaloLink.music
-        val card = FrameLayout(this).apply {
-            background = solid(TILE, dpf(24f))
-            clipToOutline = true
-        }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-        }
-        val cover = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(v: View, o: android.graphics.Outline) {
-                    o.setRoundRect(0, 0, v.width, v.height, dpf(14f))
-                }
-            }
-            clipToOutline = true
-            if (m?.art != null) {
-                setImageBitmap(m.art)
-            } else {
-                background = round(Color.rgb(44, 44, 46), dpf(14f))
-                setImageResource(R.drawable.ic_music)
-                imageTintList = ColorStateList.valueOf(Palette.WHITE50)
-                scaleType = ImageView.ScaleType.CENTER
-            }
-        }
-        row.addView(cover, LinearLayout.LayoutParams(dp(58), dp(58)))
-        val texts = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, dp(8), 0)
-        }
-        texts.addView(text(15f, Palette.INK, bold = true).apply {
-            text = m?.title ?: "Nothing playing"
-        })
-        texts.addView(text(12.5f, Palette.WHITE50).apply {
-            text = m?.artist?.ifEmpty { null } ?: if (m == null) {
-                if (HaloLink.installed(this@LauncherActivity)) "Tap play to resume" else "Install Halo for music here"
-            } else {
-                ""
-            }
-            setPadding(0, dp(3), 0, 0)
-        })
-        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        fun btn(res: Int, big: Boolean, cmd: String) = ImageView(this).apply {
-            setImageResource(res)
-            imageTintList = ColorStateList.valueOf(if (big) Color.BLACK else Palette.INK)
-            val pad = if (big) dp(11) else dp(8)
-            setPadding(pad, pad, pad, pad)
-            if (big) background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Palette.INK)
-            }
-            setOnClickListener {
-                it.bounce()
-                if (!HaloLink.command(this@LauncherActivity, cmd)) noHalo()
-            }
-        }
-        row.addView(btn(R.drawable.ic_prev, false, "prev"), LinearLayout.LayoutParams(dp(38), dp(38)))
-        row.addView(btn(if (m?.playing == true) R.drawable.ic_pause else R.drawable.ic_play, true, "play_pause"), LinearLayout.LayoutParams(dp(46), dp(46)).apply {
-            marginStart = dp(2)
-            marginEnd = dp(2)
-        })
-        row.addView(btn(R.drawable.ic_next, false, "next"), LinearLayout.LayoutParams(dp(38), dp(38)))
-        card.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        // Tap the cover or the words to open the player.
-        val open = View.OnClickListener {
-            it.bounce()
-            if (!HaloLink.command(this@LauncherActivity, "open_music")) noHalo()
-        }
-        cover.setOnClickListener(open)
-        texts.setOnClickListener(open)
-        if (m != null && m.durationMs > 0) {
-            val bar = BarView(this).apply {
-                track = Color.argb(30, 255, 255, 255)
-                bar = Palette.INK
-                fraction = m.position() / m.durationMs.toFloat()
-            }
-            musicBar = bar
-            card.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2), Gravity.BOTTOM).apply {
-                marginStart = dp(24)
-                marginEnd = dp(24)
-                bottomMargin = dp(5)
-            })
-        }
-        box.addView(card, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    private fun onHalo() {
+        music?.bind(HaloLink.music)
         startMusicTick()
+        updateBadges()
     }
 
     private fun startMusicTick() {
         musicTick?.let { ui.removeCallbacks(it) }
         val r = object : Runnable {
             override fun run() {
-                val m = HaloLink.music
-                val bar = musicBar
-                if (m != null && bar != null && m.durationMs > 0) bar.fraction = m.position() / m.durationMs.toFloat()
-                if (m?.playing == true) ui.postDelayed(this, 1000L)
+                music?.tick()
+                if (HaloLink.music?.playing == true) ui.postDelayed(this, 1000L)
             }
         }
         musicTick = r
@@ -454,12 +377,7 @@ class LauncherActivity : Activity(), Drawer.Host {
         Toast.makeText(this, if (HaloLink.installed(this)) "Turn on Halo to control music from here" else "Install Halo to see your music here", Toast.LENGTH_SHORT).show()
     }
 
-    private fun onHalo() {
-        renderMusic()
-        updateBadges()
-    }
-
-    // ----- Page 2: a few quiet tiles and your widgets -----
+    // ----- Page 2: the big date, Halo's widgets, Android widgets -----
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildPage2(): View {
@@ -469,17 +387,15 @@ class LauncherActivity : Activity(), Drawer.Host {
             isFillViewport = true
         }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val h = resources.displayMetrics.heightPixels
         val top = View(this)
         top.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
-        col.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (h * 0.30f).toInt()))
+        col.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, sheetTop))
 
         val sheet = SheetView(this, highOnLeft = false)
         sheet2 = sheet
-        sheet.minimumHeight = (h * 0.70f).toInt()
+        sheet.minimumHeight = resources.displayMetrics.heightPixels - sheetTop
         sheet.setOnTouchListener { _, e -> root.gestures.onTouchEvent(e); true }
 
-        // The sheet is high on the right: a big date sits there.
         val dateCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
@@ -488,134 +404,113 @@ class LauncherActivity : Activity(), Drawer.Host {
                 openCalendar()
             }
         }
-        val bd = text(52f, Palette.INK).apply { typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL) }
-        bigDay = bd
-        dateCol.addView(bd)
-        val bn = text(12f, Palette.WHITE50, bold = true).apply { letterSpacing = 0.18f }
-        bigDayName = bn
-        dateCol.addView(bn)
+        val dn = text(10.5f, Palette.GREY, caps = true)
+        dayName = dn
+        dateCol.addView(dn)
+        val db = text(40f, Palette.INK).apply {
+            typeface = Fonts.light(this@LauncherActivity)
+            setPadding(0, dp(2), 0, 0)
+        }
+        dayBig = db
+        dateCol.addView(db)
         sheet.addView(dateCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.END
             marginEnd = dp(6)
         })
 
-        val tile = ((resources.displayMetrics.widthPixels - dp(18) * 2 - dp(12)) / 2)
-        val r1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        r1.addView(weatherTileView(), LinearLayout.LayoutParams(tile, tile))
-        r1.addView(calendarTile(), LinearLayout.LayoutParams(tile, tile).apply { marginStart = dp(12) })
-        sheet.addView(r1, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(18) })
-        val r2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        r2.addView(batteryTile(), LinearLayout.LayoutParams(tile, tile))
-        r2.addView(noteTile(), LinearLayout.LayoutParams(tile, tile).apply { marginStart = dp(12) })
-        sheet.addView(r2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        widgetGrid = grid
+        sheet.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
 
-        val wb = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        widgetsBox = wb
-        sheet.addView(wb)
-        sheet.addView(text(13f, Palette.WHITE70, bold = true).apply {
-            text = "+  Add a widget"
+        val aw = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        androidWidgets = aw
+        sheet.addView(aw)
+
+        val add = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(dp(18), dp(10), dp(18), dp(10))
-            background = solid(TILE, dpf(18f))
+        }
+        add.addView(text(12.5f, Palette.SILVER, bold = true).apply {
+            text = "+  Widget"
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = round(Palette.TILE, dpf(18f))
             setOnClickListener {
                 it.bounce()
                 @Suppress("DEPRECATION")
                 startActivityForResult(Intent(this@LauncherActivity, WidgetPickActivity::class.java), REQ_WIDGET)
             }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = dp(16)
         })
+        add.addView(text(12.5f, Palette.SILVER, bold = true).apply {
+            text = "Edit"
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = round(Palette.TILE, dpf(18f))
+            setOnClickListener {
+                it.bounce()
+                openSettingsPage("widgets")
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        sheet.addView(add, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
 
         col.addView(sheet, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         scroll.addView(col)
-        onWeather()
         return scroll
     }
 
-    private fun weatherTileView(): View {
-        val t = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = solid()
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            setOnClickListener {
-                it.bounce()
-                if (!Weather.hasPlace(this@LauncherActivity)) openSettings() else Weather.refresh(this@LauncherActivity, force = true) { onWeather() }
-            }
+    /** Lays Halo's widgets out: wide ones take a row, small ones go two by two. */
+    private fun rebuildWidgets() {
+        val grid = widgetGrid ?: return
+        grid.removeAllViews()
+        widgets.clear()
+        val gap = dp(12)
+        var pending: BaseWidget? = null
+        fun flushSmall(a: BaseWidget, b: BaseWidget?) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val fa = SquareFrame(this).apply { addView(a) }
+            row.addView(fa, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val fb = SquareFrame(this)
+            if (b != null) fb.addView(b)
+            row.addView(fb, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = gap })
+            grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = gap })
         }
-        weatherTile = t
-        return t
-    }
-
-    private fun calendarTile(): View {
-        val t = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = solid(Palette.PAPER)
-            setPadding(dp(12), dp(12), dp(12), dp(8))
-            setOnClickListener {
-                it.bounce()
-                openCalendar()
-            }
-        }
-        val mt = text(13f, Color.BLACK, bold = true).apply { setPadding(dp(4), 0, 0, dp(2)) }
-        monthTitle = mt
-        t.addView(mt)
-        val mv = MonthView(this)
-        monthView = mv
-        t.addView(mv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        return t
-    }
-
-    private fun batteryTile(): View {
-        val t = FrameLayout(this).apply {
-            background = solid()
-            setOnClickListener {
-                it.bounce()
-                try {
-                    startActivity(Intent(Intent.ACTION_POWER_USAGE_SUMMARY))
-                } catch (_: Exception) {
+        for (spec in HomeWidgets.ALL) {
+            if (!Prefs.widgetOn(this, spec.id)) continue
+            val w = HomeWidgets.create(this, spec.id, this) ?: continue
+            widgets += w
+            if (spec.wide) {
+                pending?.let { flushSmall(it, null); pending = null }
+                grid.addView(w, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (spec.id == "agenda") 150 else 156)).apply { topMargin = gap })
+            } else {
+                val p = pending
+                if (p == null) pending = w else {
+                    flushSmall(p, w)
+                    pending = null
                 }
             }
         }
-        val ring = RingView(this)
-        batteryRing = ring
-        t.addView(ring, FrameLayout.LayoutParams(dp(96), dp(96), Gravity.CENTER))
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
-        val p = text(24f, Palette.INK).apply { typeface = Typeface.create("sans-serif-light", Typeface.NORMAL) }
-        batteryPct = p
-        col.addView(p)
-        val s = text(10.5f, Palette.WHITE50, bold = true).apply { letterSpacing = 0.1f }
-        batteryState = s
-        col.addView(s)
-        t.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
-        return t
+        pending?.let { flushSmall(it, null) }
     }
 
-    private fun noteTile(): View {
-        val t = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = solid()
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            setOnClickListener { editNote() }
+    private fun refreshWidgets(onlyId: String?) {
+        for (w in widgets) {
+            val id = when (w) {
+                is WeatherWidget -> "weather"
+                is BatteryWidget -> "battery"
+                is StepsWidget -> "steps"
+                is AgendaWidget -> "agenda"
+                is ScreenTimeWidget -> "screen"
+                is NoteWidget -> "note"
+                else -> ""
+            }
+            if (onlyId != null && id != onlyId) continue
+            if (id == "screen" && onlyId == null && System.currentTimeMillis() - lastScreenTime < 60_000L) continue
+            if (id == "screen") lastScreenTime = System.currentTimeMillis()
+            w.refresh()
         }
-        t.addView(text(11f, Palette.WHITE50, bold = true).apply {
-            text = "NOTE"
-            letterSpacing = 0.18f
-        })
-        val nt = text(18f, Palette.INK, lines = 5).apply {
-            typeface = Typeface.create("cursive", Typeface.NORMAL)
-            setLineSpacing(0f, 1.05f)
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        noteText = nt
-        t.addView(nt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6) })
-        return t
     }
 
-    // ----- Weather -----
+    // ----- Weather / time -----
 
     private fun onWeather() {
         val w = Weather.now
@@ -626,63 +521,20 @@ class LauncherActivity : Activity(), Drawer.Host {
         } else {
             tempIcon?.setImageDrawable(null)
             tempText?.text = ""
-            weatherDesc?.text = ""
+            weatherDesc?.text = if (Weather.hasPlace(this)) "" else "Set your city"
         }
-        val t = weatherTile ?: return
-        t.removeAllViews()
-        if (w == null) {
-            t.addView(ImageView(this).apply {
-                setImageResource(R.drawable.w_sun)
-                imageTintList = ColorStateList.valueOf(Palette.WHITE50)
-            }, LinearLayout.LayoutParams(dp(28), dp(28)))
-            t.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-            t.addView(text(13f, Palette.WHITE70, lines = 3).apply {
-                text = if (Weather.hasPlace(this@LauncherActivity)) "Loading…" else "Tap to set your city"
-            })
-            return
-        }
-        t.addView(ImageView(this).apply {
-            setImageResource(Weather.icon(w.code, w.isDay))
-            imageTintList = ColorStateList.valueOf(Palette.INK)
-        }, LinearLayout.LayoutParams(dp(28), dp(28)))
-        t.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-        t.addView(text(40f, Palette.INK).apply {
-            text = "${w.temp}°"
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
-        })
-        t.addView(text(12.5f, Palette.WHITE70, bold = true).apply {
-            text = Weather.describe(w.code)
-            setPadding(0, dp(4), 0, 0)
-        })
-        val today = w.days.firstOrNull()
-        t.addView(text(11.5f, Palette.WHITE50).apply {
-            text = listOfNotNull(w.city.ifBlank { null }, today?.let { "H ${it.max}°  L ${it.min}°" }).joinToString(" · ")
-            setPadding(0, dp(2), 0, 0)
-        })
+        refreshWidgets("weather")
     }
-
-    // ----- Time and battery -----
 
     private fun onMinute() {
-        clock?.invalidate()
+        clock?.tick()
         val now = Date()
-        dateLine?.text = DateFormat.format("EEE, d MMM", now).toString().uppercase()
-        bigDay?.text = DateFormat.format("d", now)
-        bigDayName?.text = DateFormat.format("EEEE", now).toString().uppercase()
-        monthTitle?.text = DateFormat.format("MMMM", now)
-        monthView?.invalidate()
-    }
-
-    private fun onBattery(i: Intent) {
-        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
-        if (level < 0) return
-        val pct = level * 100 / scale
-        val charging = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-        batteryRing?.color = if (charging) Palette.GREEN else Palette.INK
-        batteryRing?.fraction = pct / 100f
-        batteryPct?.text = "$pct%"
-        batteryState?.text = if (charging) "CHARGING" else "BATTERY"
+        dateLine?.text = DateFormat.format("EEE d MMM", now)
+        dayName?.text = DateFormat.format("EEEE", now)
+        dayBig?.text = DateFormat.format("d MMM", now)
+        refreshWidgets("agenda")
+        refreshWidgets("battery")
+        refreshWidgets("screen")
     }
 
     // ----- Apps: the dock -----
@@ -691,7 +543,7 @@ class LauncherActivity : Activity(), Drawer.Host {
         if (AppRepo.apps.isEmpty()) return
         dock.removeAllViews()
         for (a in dockApps()) {
-            dock.addView(iconView(a, 50, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            dock.addView(iconView(a, 52, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         drawer.refresh()
         updateBadges()
@@ -709,7 +561,6 @@ class LauncherActivity : Activity(), Drawer.Host {
     private fun dockApps(): List<App> {
         val saved = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }
         if (saved.isNotEmpty()) return saved.take(5)
-        // First run: phone, messages, browser, camera, gallery.
         val picks = listOf(
             Intent(Intent.ACTION_DIAL),
             Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MESSAGING),
@@ -734,11 +585,7 @@ class LauncherActivity : Activity(), Drawer.Host {
     }
 
     private fun updateBadges() {
-        fun walk(v: View) {
-            if (v is AppIconView) v.badge = HaloLink.badges[v.app.pkg] ?: 0
-            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
-        }
-        walk(dock)
+        for (i in 0 until dock.childCount) (dock.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
         drawer.updateBadges()
     }
 
@@ -747,15 +594,13 @@ class LauncherActivity : Activity(), Drawer.Host {
     // =====================================================================
 
     override fun launch(app: App, from: View) {
-        from.bounce()
         AppRepo.launch(this, app, from)
-        if (drawer.isOpen) ui.postDelayed({ drawer.close() }, 350L)
     }
 
     override fun onDrawerProgress(progress: Float) {
-        val s = 1f - progress * 0.05f
-        for (v in listOf(pager, dock, dots)) {
-            v.alpha = 1f - progress * 0.8f
+        val s = 1f - progress * 0.06f
+        for (v in listOf<View>(pager, dock, dots)) {
+            v.alpha = 1f - progress
             v.scaleX = s
             v.scaleY = s
         }
@@ -824,6 +669,64 @@ class LauncherActivity : Activity(), Drawer.Host {
     }
 
     // =====================================================================
+    // WidgetActions
+    // =====================================================================
+
+    override fun askPermission(permission: String) {
+        requestPermissions(arrayOf(permission), 77)
+    }
+
+    override fun openSettingsPage(page: String) {
+        startActivity(Intent(this, SettingsActivity::class.java).putExtra("page", page))
+    }
+
+    override fun openCalendar() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setData(Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis())))
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override fun editNote() {
+        val input = EditText(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault)).apply {
+            setText(Prefs.get(this@LauncherActivity).getString(Prefs.NOTE, ""))
+            setSelection(text.length)
+            minLines = 3
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Note")
+            .setView(FrameLayout(this).apply {
+                setPadding(dp(20), dp(8), dp(20), 0)
+                addView(input)
+            })
+            .setPositiveButton("Save") { _, _ ->
+                Prefs.get(this).edit().putString(Prefs.NOTE, input.text.toString().trim()).apply()
+                refreshWidgets("note")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun refreshWeather() {
+        Weather.refresh(this, force = true) { onWeather() }
+    }
+
+    override fun openUsageAccess() {
+        try {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun launchPackage(pkg: String, from: View) {
+        AppRepo.apps.firstOrNull { it.pkg == pkg }?.let { AppRepo.launch(this, it, from) }
+    }
+
+    // =====================================================================
     // Android widgets
     // =====================================================================
 
@@ -837,14 +740,14 @@ class LauncherActivity : Activity(), Drawer.Host {
                 val ids = Prefs.list(this, Prefs.WIDGETS)
                 ids.add(id.toString())
                 Prefs.setList(this, Prefs.WIDGETS, ids)
-                rebuildWidgets()
+                rebuildAndroidWidgets()
                 pager.snapTo(1)
             }
         }
     }
 
-    private fun rebuildWidgets() {
-        val box = widgetsBox ?: return
+    private fun rebuildAndroidWidgets() {
+        val box = androidWidgets ?: return
         box.removeAllViews()
         val awm = AppWidgetManager.getInstance(this)
         for (idStr in Prefs.list(this, Prefs.WIDGETS)) {
@@ -852,7 +755,7 @@ class LauncherActivity : Activity(), Drawer.Host {
             val info = awm.getAppWidgetInfo(id) ?: continue
             val hDp = Prefs.get(this).getInt("wh_$id", (info.minHeight / resources.displayMetrics.density).toInt().coerceIn(90, 420))
             val frame = FrameLayout(this).apply {
-                background = solid()
+                background = round(Palette.TILE, dpf(24f))
                 clipToOutline = true
                 setPadding(dp(6), dp(6), dp(6), dp(6))
             }
@@ -864,7 +767,7 @@ class LauncherActivity : Activity(), Drawer.Host {
             frame.addView(hv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             frame.addView(ImageView(this).apply {
                 setImageResource(R.drawable.ic_more)
-                imageTintList = ColorStateList.valueOf(Palette.WHITE70)
+                imageTintList = ColorStateList.valueOf(Palette.SILVER)
                 background = round(Color.argb(170, 0, 0, 0), dpf(12f))
                 setPadding(dp(4), dp(4), dp(4), dp(4))
                 setOnClickListener { widgetMenu(id, it) }
@@ -899,7 +802,7 @@ class LauncherActivity : Activity(), Drawer.Host {
                     Prefs.setList(this, Prefs.WIDGETS, Prefs.list(this, Prefs.WIDGETS).filter { it != id.toString() })
                 }
             }
-            rebuildWidgets()
+            rebuildAndroidWidgets()
             true
         }
         m.show()
@@ -909,27 +812,6 @@ class LauncherActivity : Activity(), Drawer.Host {
     // Small actions
     // =====================================================================
 
-    private fun editNote() {
-        val input = EditText(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault)).apply {
-            setText(Prefs.get(this@LauncherActivity).getString(Prefs.NOTE, ""))
-            setSelection(text.length)
-            minLines = 3
-        }
-        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Note")
-            .setView(FrameLayout(this).apply {
-                setPadding(dp(20), dp(8), dp(20), 0)
-                addView(input)
-            })
-            .setPositiveButton("Save") { _, _ ->
-                val t = input.text.toString().trim()
-                Prefs.get(this).edit().putString(Prefs.NOTE, t).apply()
-                noteText?.text = t.ifEmpty { "Tap to write a note" }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
     private fun openClockApp() {
         try {
             startActivity(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS))
@@ -937,22 +819,10 @@ class LauncherActivity : Activity(), Drawer.Host {
         }
     }
 
-    private fun openCalendar() {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW).setData(Uri.parse("content://com.android.calendar/time/" + System.currentTimeMillis())))
-        } catch (_: Exception) {
-            try {
-                startActivity(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR))
-            } catch (_: Exception) {
-            }
-        }
-    }
-
     private fun openSettings() {
         startActivity(Intent(this, SettingsActivity::class.java))
     }
 
-    /** Swipe down: Halo's notification center, or Android's shade. */
     private fun swipeDown() {
         val useHalo = Prefs.get(this).getInt(Prefs.SWIPE_DOWN, 0) == 0
         if (useHalo && HaloLink.alive() && HaloLink.command(this, "open_panel")) return
@@ -1008,28 +878,35 @@ class LauncherActivity : Activity(), Drawer.Host {
                     mode = 0
                     tracker?.recycle()
                     tracker = android.view.VelocityTracker.obtain()
+                    tracker?.addMovement(e)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     tracker?.addMovement(e)
                     val dx = e.x - downX
                     val dy = e.y - downY
-                    if (abs(dy) > slop * 1.5f && abs(dy) > abs(dx) * 1.3f) {
-                        val inDock = downY > dock.top - dp(24)
-                        val page2AtTop = !(pager.page(1) as ScrollView).canScrollVertically(-1)
-                        val allowed = pager.current == 0 || inDock || (dy > 0 && page2AtTop)
+                    if (mode == 0 && abs(dy) > slop * 1.5f && abs(dy) > abs(dx) * 1.3f) {
+                        val inDock = downY > dock.top - dp(20)
+                        val scroll = pager.page(1) as ScrollView
+                        val up = dy < 0
+                        val allowed = when {
+                            inDock || pager.current == 0 -> true
+                            up -> !scroll.canScrollVertically(1)
+                            else -> !scroll.canScrollVertically(-1)
+                        }
                         if (!allowed) return false
-                        if (dy < 0) {
+                        if (up) {
                             mode = 1
                             drawer.visibility = View.VISIBLE
                             drawer.refresh()
                             return true
-                        } else if (downY < height * 0.7f || inDock) {
+                        } else {
                             mode = 2
                             swipeDown()
                             return true
                         }
                     }
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> mode = 0
             }
             return false
         }
@@ -1039,11 +916,11 @@ class LauncherActivity : Activity(), Drawer.Host {
             tracker?.addMovement(e)
             when (mode) {
                 1 -> when (e.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> drawer.setProgress(((downY - e.y) / (height * 0.7f)).coerceIn(0f, 1f))
+                    MotionEvent.ACTION_MOVE -> drawer.drag(((downY - e.y) / (height * 0.6f)).coerceIn(0f, 1f))
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         tracker?.computeCurrentVelocity(1000)
                         val vy = tracker?.yVelocity ?: 0f
-                        if (vy < -800f || drawer.progress() > 0.35f) drawer.open() else drawer.close()
+                        if (vy < -700f || (vy < 700f && drawer.progress() > 0.3f)) drawer.open() else drawer.close()
                         mode = 0
                     }
                 }
@@ -1056,7 +933,5 @@ class LauncherActivity : Activity(), Drawer.Host {
     companion object {
         const val WIDGET_HOST_ID = 4207
         private const val REQ_WIDGET = 31
-        /** Solid tile colour on the black sheet. */
-        val TILE = Color.rgb(28, 28, 30)
     }
 }

@@ -23,15 +23,16 @@ For the full experience, install **[Halo](https://github.com/LONERXONE-ops/halo/
 
 ## The home screen
 
-Poster style: your wallpaper (or a picture you pick) across the top, a solid black sheet with a soft curved edge below.
+Poster style: your wallpaper (or a picture you pick) across the top, and one black sheet with a single wave running across both pages.
 
 | | |
 |---|---|
-| **Page 1** | The big stacked clock (outline, solid or thin), the date and weather, and a music player made for the sheet, fed by Halo so it works with any player. |
-| **Page 2** | A few quiet tiles (weather, a month calendar, battery, a note) and any Android widgets you add. |
+| **Page 1** | The stacked clock (varsity, dot matrix, bold or thin; digits roll up each minute), the date and weather, and the music player: blurred cover washed in the song's colour, with progress and time. Fed by Halo, works with any player. |
+| **Page 2** | Halo Launcher's own widgets, built on Apple's widget rules (one idea each, live data, dot-matrix numbers): weather with the next hours, battery in dots, steps toward your goal, today's events, screen time with your top apps, and a note. Plus any Android widget. |
 | **Dock** | A solid tab rising out of the bottom edge, like a notch turned upside down. Long-press it to change the apps. |
-| **All apps** | Swipe up: search, most used, and an A–Z grid. Long-press any app for its shortcuts, dock, hide, info and uninstall. |
-| **Icons** | Dark by default, like iOS dark mode: each app's own glyph in its brand colour on a dark tile. Or white line icons, or the originals. |
+| **All apps** | Swipe up: search, most used, and an A–Z grid that ripples in. Long-press any app for its shortcuts, dock, hide, info and uninstall. |
+| **Icons** | iOS-style dark icons: each app's own symbol in its brand colour on a dark tile, worked out from the real icon so it works with Samsung's icons too. Or white line icons, or the originals. iOS-style red badges. |
+| **Settings** | A page per topic with live examples: your real clock in every style, your own apps in every icon style, the actual widgets, the dock. |
 
 ## Gestures
 
@@ -50,7 +51,7 @@ Both apps are signed with the same key and talk through a signature-protected li
 
 ## Built on what others learned
 
-Studied before writing a line: [Kvaesitso](https://github.com/MM2-0/Kvaesitso) (widget hosting, themed icons, weather), [Lawnchair](https://github.com/LawnchairLauncher/lawnchair) (reading the monochrome icon layer, home activity setup), [Olauncher](https://github.com/tanujnotes/Olauncher) and [KISS](https://github.com/Neamar/KISS) (fast app lists through LauncherApps). Halo Launcher's code is its own. Weather by [Open-Meteo](https://open-meteo.com).
+Studied before writing a line, and again for the redesign (Niagara's single header widget, Nothing's dot-matrix widgets, Apple's widget guidelines): [Kvaesitso](https://github.com/MM2-0/Kvaesitso) (widget hosting, themed icons, weather), [Lawnchair](https://github.com/LawnchairLauncher/lawnchair) (reading the monochrome icon layer, home activity setup), [Olauncher](https://github.com/tanujnotes/Olauncher) and [KISS](https://github.com/Neamar/KISS) (fast app lists through LauncherApps). Halo Launcher's code is its own. Weather by [Open-Meteo](https://open-meteo.com). Fonts: Inter, Doto, Graduate and Anton (SIL Open Font License, see `docs/licenses`).
 
 ---
 
