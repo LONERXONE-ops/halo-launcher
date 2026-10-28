@@ -74,13 +74,13 @@ class AppIconView(
     /** Still drawn in the current icon style (and tint)? */
     fun isCurrent(): Boolean {
         val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
-        return style == styleUsed && (style != Icons.TINTED || accentUsed == Icons.accent(context))
+        return style == styleUsed
     }
 
     fun reload() {
         val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
         styleUsed = style
-        accentUsed = if (style == Icons.TINTED) Icons.accent(context) else 0
+
         Icons.cached(app, style, px)?.let { result = it; invalidate(); return }
         fade = 0f
         Icons.load(context, app, style, px) { r ->
@@ -399,6 +399,10 @@ class DotsView(context: Context) : View(context) {
  */
 class PageDots(context: Context) : View(context) {
     var pages = 2
+        set(v) {
+            field = v
+            invalidate()
+        }
     var position = 0f
         set(v) {
             field = v

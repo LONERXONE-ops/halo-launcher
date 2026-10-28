@@ -386,13 +386,11 @@ class SettingsActivity : Activity() {
         note(col, "How app icons look in the dock and the app list. Here are your own apps in each style, on your background.")
         val samples = sampleApps()
         val about = listOf(
-            "Like iOS dark mode: each app's symbol in its own colour on a dark tile.",
+            "Like iOS dark mode: each app's own symbol in its colours, centred on a black tile, all the same size.",
             "Just the white symbol, like Android's themed icons.",
             "Icons as the apps made them.",
-            "Like iOS 26 Clear: white symbols on frosted glass.",
-            "Like iOS 26 Tinted: every symbol in one colour, from your wallpaper or one you pick.",
         )
-        for (i in listOf(Icons.DARK, Icons.CLEAR, Icons.TINTED, Icons.MONO, Icons.ORIGINAL)) {
+        for (i in listOf(Icons.DARK, Icons.MONO, Icons.ORIGINAL)) {
             val card = choiceCard(Icons.style(this) == i) {
                 Prefs.get(this).edit().putInt(Prefs.ICON_STYLE, i).apply()
                 render()
@@ -403,7 +401,7 @@ class SettingsActivity : Activity() {
                 text = about[i]
                 setPadding(0, dp(3), 0, dp(10))
             })
-            // Clear and Tinted are made to sit on a picture, so show them on yours.
+            // Shown on your background, as they'll be on the home screen.
             val stage = FrameLayout(this).apply {
                 clipToOutline = true
                 outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -420,36 +418,6 @@ class SettingsActivity : Activity() {
             for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             stage.addView(row)
             card.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            if (i == Icons.TINTED && Icons.style(this) == Icons.TINTED) {
-                val picked = Prefs.get(this).getInt(Prefs.ICON_TINT, 0)
-                val swatches = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(12), 0, 0)
-                }
-                val colours = listOf(0, 0xFFFFB340.toInt(), 0xFFFF6B6B.toInt(), 0xFF64D2FF.toInt(), 0xFF7CE38B.toInt(), 0xFFBF8CFF.toInt(), 0xFFFFFFFF.toInt())
-                for (col0 in colours) {
-                    val shown = if (col0 == 0) Icons.autoAccent(this) else col0
-                    swatches.addView(View(this).apply {
-                        background = android.graphics.drawable.GradientDrawable().apply {
-                            shape = android.graphics.drawable.GradientDrawable.OVAL
-                            setColor(shown)
-                            setStroke(dp(if (picked == col0) 3 else 1), if (picked == col0) Palette.INK else Color.argb(60, 255, 255, 255))
-                        }
-                        contentDescription = if (col0 == 0) "From wallpaper" else "Colour"
-                        setOnClickListener {
-                            it.bounce()
-                            Prefs.get(this@SettingsActivity).edit().putInt(Prefs.ICON_TINT, col0).apply()
-                            render()
-                        }
-                    }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginEnd = dp(10) })
-                }
-                card.addView(swatches)
-                card.addView(text(11.5f, Palette.GREY).apply {
-                    text = "First dot: from your wallpaper"
-                    setPadding(0, dp(6), 0, 0)
-                })
-            }
             col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
     }
@@ -497,7 +465,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun widgetsPage(col: LinearLayout) {
-        note(col, "Page 2's widgets, live. Pick a size for each (Small, Medium or Large; bigger sizes show more), move them up or down, or switch them off. On the home screen, long-press a widget to do the same.")
+        note(col, "Your widgets, live. Pick a size (Small, Medium or Large; bigger sizes show more) or switch one off. To put one exactly where you want, long-press the home screen and drag it anywhere, on any page.")
         val actions = object : WidgetActions {
             override fun askPermission(permission: String) = requestPermissions(arrayOf(permission), 6)
             override fun openSettingsPage(page: String) = go(Page.WEATHER)
@@ -563,20 +531,6 @@ class SettingsActivity : Activity() {
                 }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) })
             }
             sizes.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-            fun arrow(icon: Int, enabled: Boolean, by: Int) = ImageView(this).apply {
-                setImageResource(icon)
-                imageTintList = ColorStateList.valueOf(if (enabled) Palette.INK else Palette.DIM)
-                setPadding(dp(7), dp(7), dp(7), dp(7))
-                background = round(Palette.GRAPHITE, dpf(16f))
-                isEnabled = enabled
-                setOnClickListener {
-                    it.bounce()
-                    HomeWidgets.move(this@SettingsActivity, spec.id, by)
-                    render()
-                }
-            }
-            sizes.addView(arrow(R.drawable.ic_arrow_up, index > 0, -1), LinearLayout.LayoutParams(dp(32), dp(32)))
-            sizes.addView(arrow(R.drawable.ic_arrow_down, index < order.size - 1, 1), LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(6) })
             box.addView(sizes)
 
             val sw = Switch(this).apply {

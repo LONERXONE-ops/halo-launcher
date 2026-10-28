@@ -264,6 +264,16 @@ class Editor(private val host: Host) {
         /** The scroller that holds this zone, for scrolling while dragging near an edge. */
         fun scrollerFor(zone: String): ScrollView?
         fun onEditingChanged(on: Boolean)
+
+        /**
+         * Free placement on the home grid ("home" zone): the dragged item's
+         * top-left on screen and the finger, so the host can show where it
+         * would land and turn the page at the screen's edge.
+         */
+        fun homeHover(id: String, left: Float, top: Float, fingerX: Float)
+
+        /** Commit the drop; returns where (on screen) the item now sits, or null to just rebuild. */
+        fun homeDrop(id: String): IntArray?
     }
 
     var editing = false
@@ -272,6 +282,9 @@ class Editor(private val host: Host) {
     var draggingId: String? = null
         private set
     var draggingZone: String? = null
+        private set
+    /** The last item dropped (so the host can show its page). */
+    var lastDropped: String? = null
         private set
 
     private val cells = ArrayList<Cell>()
@@ -370,15 +383,18 @@ class Editor(private val host: Host) {
         host.overlay.getLocationOnScreen(oloc)
         val w = c.width
         val h = c.height
-        // Leave an empty slot exactly where it was.
         val idx = parent.indexOfChild(c)
         val lp = c.layoutParams
         parent.removeViewAt(idx)
         draggingId = c.itemId
         draggingZone = c.zone
         floating = c
-        val slot = Cell(c.context, this, c.zone, c.itemId, null)
-        parent.addView(slot, idx, lp)
+        // In a row (the dock) leave an empty slot where it was; the home grid
+        // shows an outline where it will land instead.
+        if (c.zone != "home") {
+            val slot = Cell(c.context, this, c.zone, c.itemId, null)
+            parent.addView(slot, idx, lp)
+        }
         // Lift the real thing above everything.
         c.rotation = 0f
         host.overlay.addView(c, FrameLayout.LayoutParams(w, h))
@@ -407,6 +423,10 @@ class Editor(private val host: Host) {
     private fun findTarget() {
         val c = floating ?: return
         val zone = draggingZone ?: return
+        if (zone == "home") {
+            host.homeHover(c.itemId, lastX - grabX, lastY - grabY, lastX)
+            return
+        }
         val now = System.currentTimeMillis()
         if (now - lastSwap < 180) return
         val cx = lastX - grabX + c.width / 2f
@@ -441,9 +461,11 @@ class Editor(private val host: Host) {
         val zone = draggingZone ?: return
         host.scrollerFor(zone)?.removeCallbacks(autoScroll)
         val slot = live(zone).firstOrNull { it.placeholder && it.itemId == c.itemId }
+        val target: IntArray? = if (zone == "home") host.homeDrop(c.itemId) else slot?.let { s -> IntArray(2).also { s.getLocationOnScreen(it) } }
         val loc = IntArray(2)
         val oloc = IntArray(2)
         host.overlay.getLocationOnScreen(oloc)
+        lastDropped = c.itemId
         val finish = {
             host.overlay.removeView(c)
             floating = null
@@ -452,11 +474,12 @@ class Editor(private val host: Host) {
             cells.remove(c)
             host.rebuildZone(zone)
         }
-        if (slot == null) {
+        if (target == null) {
             finish()
             return
         }
-        slot.getLocationOnScreen(loc)
+        loc[0] = target[0]
+        loc[1] = target[1]
         c.animate()
             .translationX((loc[0] - oloc[0]).toFloat())
             .translationY((loc[1] - oloc[1]).toFloat())

@@ -117,10 +117,25 @@ object Prefs {
     private val OFF_BY_DEFAULT = setOf("photo", "timer")
     private const val WIDGETS_ON = "widgets_on"
 
-    fun widgetOn(c: Context, id: String): Boolean =
+    /** Is this Halo widget on the home screen? */
+    fun widgetOn(c: Context, id: String): Boolean = HomeLayout.has(c, "w:$id")
+
+    /** Put a Halo widget on the home screen (first free spot from page 2) or take it off. */
+    fun setWidget(c: Context, id: String, on: Boolean) {
+        if (on) {
+            if (widgetOn(c, id)) return
+            val (sx, sy) = HomeLayout.spansFor(HomeWidgets.spec(id).defaultSize)
+            HomeLayout.add(c, "w:$id", sx, sy, preferPage = 1)
+        } else {
+            HomeLayout.remove(c, "w:$id")
+        }
+    }
+
+    /** Before the home grid: whether a widget was switched on (used once, to carry your setup over). */
+    fun widgetOnLegacy(c: Context, id: String): Boolean =
         if (id in OFF_BY_DEFAULT) id in get(c).getString(WIDGETS_ON, "")!!.split(',') else id !in get(c).getString(WIDGETS_OFF, "")!!.split(',')
 
-    fun setWidget(c: Context, id: String, on: Boolean) {
+    private fun setWidgetLegacy(c: Context, id: String, on: Boolean) {
         val off = get(c).getString(WIDGETS_OFF, "")!!.split(',').filter { it.isNotBlank() }.toMutableSet()
         val onSet = get(c).getString(WIDGETS_ON, "")!!.split(',').filter { it.isNotBlank() }.toMutableSet()
         if (on) {

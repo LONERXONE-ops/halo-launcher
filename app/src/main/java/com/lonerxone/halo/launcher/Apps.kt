@@ -162,27 +162,7 @@ object Icons {
     const val DARK = 0
     const val MONO = 1
     const val ORIGINAL = 2
-    /** iOS 26 "Clear": the symbol in white on a pane of frosted glass. */
-    const val CLEAR = 3
-    /** iOS 26 "Tinted": every symbol in one colour (from your wallpaper, or one you pick). */
-    const val TINTED = 4
-    val NAMES = listOf("Dark", "White line", "Original", "Clear", "Tinted")
-
-    /** The tint for TINTED icons: your pick, or a vivid version of the wallpaper's main colour. */
-    fun accent(ctx: Context): Int {
-        val picked = Prefs.get(ctx).getInt(Prefs.ICON_TINT, 0)
-        return if (picked != 0) picked else autoAccent(ctx)
-    }
-
-    /** A vivid version of the wallpaper's main colour. */
-    fun autoAccent(ctx: Context): Int {
-        val base = Glass.wallColor(ctx) ?: return 0xFFFFB340.toInt()
-        val hsv = FloatArray(3)
-        android.graphics.Color.colorToHSV(base, hsv)
-        hsv[1] = hsv[1].coerceAtLeast(0.45f).coerceAtMost(0.8f)
-        hsv[2] = 0.97f
-        return android.graphics.Color.HSVToColor(hsv)
-    }
+    val NAMES = listOf("Dark", "White line", "Original")
 
     class Result(val bitmap: Bitmap)
 
@@ -192,7 +172,7 @@ object Icons {
     private val io = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
 
-    fun style(ctx: Context): Int = Prefs.get(ctx).getInt(Prefs.ICON_STYLE, DARK)
+    fun style(ctx: Context): Int = Prefs.get(ctx).getInt(Prefs.ICON_STYLE, DARK).let { if (it in DARK..ORIGINAL) it else DARK }
 
     fun forget(pkg: String) {
         for (k in cache.snapshot().keys) if (k.contains(pkg)) cache.remove(k)
@@ -200,13 +180,9 @@ object Icons {
 
     fun cached(app: App, style: Int, size: Int): Result? = cache.get(keyOf(app, style, size))
 
-    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|" + (if (style == TINTED) lastAccent else 0)
-
-    @Volatile
-    private var lastAccent = 0
+    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|v2"
 
     fun load(ctx: Context, app: App, style: Int, size: Int, done: (Result) -> Unit) {
-        if (style == TINTED) lastAccent = accent(ctx)
         val k = keyOf(app, style, size)
         cache.get(k)?.let { done(it); return }
         val c = ctx.applicationContext
@@ -247,17 +223,23 @@ object Icons {
             }
             return Result(dark(icon, null, size, DARK, 0))
         }
-        return Result(dark(icon, glyph, size, style, if (style == TINTED) lastAccent else 0))
+        return Result(dark(icon, glyph, size, style, 0))
     }
 
     /**
-     * iOS-style dark icon. The icon is drawn as the phone gives it (Samsung
-     * often hands out a pre-made picture, not layers), then its background
-     * colour is found along an inner ring and keyed out to a dark tile:
-     * - colourful glyph on white (YouTube, Photos): the glyph keeps its colours;
-     * - white glyph on colour (WhatsApp, Phone): the glyph takes the brand colour;
-     * - busy backgrounds (gradients, photos): the app's themed glyph in its
-     *   brand colour, or the icon a little dimmed.
+     * iOS 18-style dark icon: the app's own symbol, in its own colours, on a
+     * near-black tile.
+     *
+     * The phone often hands out a finished picture (Samsung does), so the
+     * background colour is found on a ring just inside the edge and keyed
+     * out, leaving only the symbol:
+     * - colourful symbol on white (YouTube, Photos) keeps its colours;
+     * - white symbol on colour (WhatsApp, Phone) takes the brand colour;
+     * - black symbol on white (X, TikTok) turns white so it shows on black;
+     * - busy icons (gradients, photos) use the app's themed symbol in its
+     *   brand colour, or the whole icon a little smaller and dimmed.
+     * Then every symbol is centred and sized the same, so the dock and the
+     * app list look even instead of some icons being boxes and some tiny.
      */
     private fun dark(icon: Drawable, glyph: Drawable?, size: Int, mode: Int, accent: Int): Bitmap {
         val src = draw(icon, size, 1f)
@@ -279,89 +261,116 @@ object Icons {
         // Share of the ring that really is background (low when a glyph or gradient crosses it).
         val clean = if (ring.isEmpty()) 0.0 else ring.count { dist(it, bg) < 40.0 }.toDouble() / steps
 
-        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val c = Canvas(out)
-        val r = size * 0.27f
-        val rect = android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat())
-        val tilePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            shader = when (mode) {
-                // Frosted glass: light, see-through, brighter at the top.
-                CLEAR -> android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), android.graphics.Color.argb(92, 255, 255, 255), android.graphics.Color.argb(38, 255, 255, 255), android.graphics.Shader.TileMode.CLAMP)
-                // Dark, with a breath of the tint colour.
-                TINTED -> android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), mix(0xFF2A2A2D.toInt(), accent, 0.16), mix(0xFF101012.toInt(), accent, 0.06), android.graphics.Shader.TileMode.CLAMP)
-                else -> android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), 0xFF2E2E31.toInt(), 0xFF121214.toInt(), android.graphics.Shader.TileMode.CLAMP)
-            }
-        }
-        c.drawRoundRect(rect, r, r, tilePaint)
-        val tile = IntArray(size * size)
-        out.getPixels(tile, 0, size, 0, 0, size, size)
-
-        val bgSat = sat(bg)
-        val brand = brightOnBlack(bg)
-        if (clean > 0.6) {
-            for (n in px.indices) {
-                val p = px[n]
-                val a = android.graphics.Color.alpha(p)
-                if (a == 0 || android.graphics.Color.alpha(tile[n]) == 0) continue
-                val d = dist(p, bg)
-                var t = ((d - 30.0) / 70.0).coerceIn(0.0, 1.0)
-                t = t * t * (3 - 2 * t) * a / 255.0
-                if (t <= 0.0) continue
-                var col = p
-                // White glyph on a coloured background: paint it in the brand colour.
-                if (bgSat > 0.25f && luma(p) > 205 && sat(p) < 0.18f) col = brand
-                col = when (mode) {
-                    CLEAR -> android.graphics.Color.WHITE
-                    // Keep the glyph's light and shade, in the tint colour.
-                    TINTED -> shade(accent, (0.55 + 0.45 * luma(col) / 255.0).coerceAtMost(1.0))
-                    else -> col
+        // 1. The symbol on its own (transparent around it).
+        val sym = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        var fill = 0.62f
+        when {
+            clean > 0.6 -> {
+                val bgSat = sat(bg)
+                val brand = brightOnBlack(bg)
+                // Only look inside the icon's rounded shape (not the transparent corners).
+                val out = IntArray(size * size)
+                val lim = size * 0.47f
+                for (n in px.indices) {
+                    val p = px[n]
+                    val a = android.graphics.Color.alpha(p)
+                    if (a == 0) continue
+                    val x = n % size - size / 2f
+                    val y = n / size - size / 2f
+                    if (x * x + y * y > lim * lim * 1.9f) continue
+                    val d = dist(p, bg)
+                    var t = ((d - 30.0) / 70.0).coerceIn(0.0, 1.0)
+                    t = t * t * (3 - 2 * t) * a / 255.0
+                    if (t <= 0.02) continue
+                    var col = p
+                    when {
+                        // White symbol on a coloured background: paint it in the brand colour.
+                        bgSat > 0.25f && luma(p) > 205 && sat(p) < 0.18f -> col = brand
+                        // Black symbol: white, or it vanishes on black.
+                        luma(p) < 70 && sat(p) < 0.3f -> col = 0xFFEDEDED.toInt()
+                    }
+                    out[n] = android.graphics.Color.argb((t * 255).toInt(), android.graphics.Color.red(col), android.graphics.Color.green(col), android.graphics.Color.blue(col))
                 }
-                tile[n] = if (mode == CLEAR) over(tile[n], col, t) else mix(tile[n], col, t)
+                sym.setPixels(out, 0, size, 0, 0, size, size)
             }
-            out.setPixels(tile, 0, size, 0, 0, size, size)
-        } else if (glyph != null) {
-            val tint = when (mode) {
-                CLEAR -> android.graphics.Color.WHITE
-                TINTED -> accent
-                else -> brightOnBlack(average(icon))
+            glyph != null -> {
+                val g = glyph.mutate()
+                g.setTint(brightOnBlack(average(icon)))
+                g.setTintMode(PorterDuff.Mode.SRC_IN)
+                drawInto(Canvas(sym), g, size, 1.45f)
             }
-            val g = glyph.mutate()
-            g.setTint(tint)
-            g.setTintMode(PorterDuff.Mode.SRC_IN)
-            val save = c.save()
-            c.clipPath(android.graphics.Path().apply { addRoundRect(rect, r, r, android.graphics.Path.Direction.CW) })
-            drawInto(c, g, size, 1.45f)
-            c.restoreToCount(save)
-        } else {
-            // A busy icon without a glyph: shown slightly dimmed on the tile.
-            val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
-                colorFilter = ColorMatrixColorFilter(
-                    when (mode) {
-                        // Greyscale, then (for Tinted) washed in the tint.
-                        CLEAR -> ColorMatrix().apply { setSaturation(0f) }
-                        TINTED -> ColorMatrix().apply {
-                            setSaturation(0f)
-                            postConcat(ColorMatrix().apply { setScale(android.graphics.Color.red(accent) / 255f, android.graphics.Color.green(accent) / 255f, android.graphics.Color.blue(accent) / 255f, 1f) })
-                        }
-                        else -> ColorMatrix().apply { setScale(0.82f, 0.82f, 0.82f, 1f) }
-                    },
-                )
+            else -> {
+                // A busy icon with no symbol to pull out: the whole icon, smaller, slightly dimmed.
+                val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                    colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setScale(0.86f, 0.86f, 0.86f, 1f) })
+                }
+                val cv = Canvas(sym)
+                val path = android.graphics.Path().apply {
+                    addRoundRect(android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat()), size * 0.2237f, size * 0.2237f, android.graphics.Path.Direction.CW)
+                }
+                cv.clipPath(path)
+                cv.drawBitmap(src, 0f, 0f, p)
+                fill = 0.8f
             }
-            val save = c.save()
-            c.clipPath(android.graphics.Path().apply { addRoundRect(rect, r, r, android.graphics.Path.Direction.CW) })
-            c.drawBitmap(src, null, rect, p)
-            c.restoreToCount(save)
         }
         src.recycle()
-        // A hairline so the tile reads on pure black.
+
+        // 2. The tile: near-black, a touch lighter at the top, iOS corner radius.
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        val r = size * 0.2237f
+        val rect = android.graphics.RectF(0f, 0f, size.toFloat(), size.toFloat())
+        c.drawRoundRect(rect, r, r, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), 0xFF232325.toInt(), 0xFF0B0B0C.toInt(), android.graphics.Shader.TileMode.CLAMP)
+        })
+
+        // 3. The symbol, centred and sized the same for every app.
+        val box = bounds(sym)
+        if (box != null) {
+            val longest = maxOf(box.width(), box.height()).toFloat().coerceAtLeast(1f)
+            val scale = (size * fill / longest).coerceIn(0.55f, 1.7f)
+            val m = android.graphics.Matrix().apply {
+                postTranslate(-box.exactCenterX(), -box.exactCenterY())
+                postScale(scale, scale)
+                postTranslate(size / 2f, size / 2f)
+            }
+            val save = c.save()
+            c.clipPath(android.graphics.Path().apply { addRoundRect(rect, r, r, android.graphics.Path.Direction.CW) })
+            c.drawBitmap(sym, m, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG))
+            c.restoreToCount(save)
+        }
+        sym.recycle()
+
+        // 4. A faint rim, brighter along the top, so the tile reads on dark pictures.
         val edge = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = size / 80f
-            color = android.graphics.Color.argb(if (mode == CLEAR) 120 else 36, 255, 255, 255)
+            strokeWidth = size / 72f
+            shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), android.graphics.Color.argb(70, 255, 255, 255), android.graphics.Color.argb(14, 255, 255, 255), android.graphics.Shader.TileMode.CLAMP)
         }
         rect.inset(edge.strokeWidth / 2f, edge.strokeWidth / 2f)
         c.drawRoundRect(rect, r, r, edge)
         return out
+    }
+
+    /** The box around everything that isn't (nearly) transparent. */
+    private fun bounds(b: Bitmap): android.graphics.Rect? {
+        val w = b.width
+        val h = b.height
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        var l = w
+        var t = h
+        var r = -1
+        var bt = -1
+        for (y in 0 until h) for (x in 0 until w) {
+            if (android.graphics.Color.alpha(px[y * w + x]) > 50) {
+                if (x < l) l = x
+                if (x > r) r = x
+                if (y < t) t = y
+                if (y > bt) bt = y
+            }
+        }
+        return if (r < l || bt < t) null else android.graphics.Rect(l, t, r + 1, bt + 1)
     }
 
     private fun shade(c: Int, f: Double): Int = android.graphics.Color.rgb(

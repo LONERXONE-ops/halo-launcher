@@ -455,14 +455,23 @@ class GlassDrawable(
             // glass, see-through and tinted with the wallpaper's colour.
             fallback.shader = null
             val wc = Glass.wallColor(host.context) ?: Color.rgb(22, 22, 26)
-            val a = (96 + 110 * darkness).toInt().coerceAtMost(220)
+            val a = (40 + 150 * darkness).toInt().coerceAtMost(200)
             fallback.color = Color.argb(
                 a,
-                (Color.red(wc) * 0.18f + 18 * 0.82f).toInt(),
-                (Color.green(wc) * 0.18f + 18 * 0.82f).toInt(),
-                (Color.blue(wc) * 0.18f + 22 * 0.82f).toInt(),
+                (Color.red(wc) * 0.22f + 14 * 0.78f).toInt(),
+                (Color.green(wc) * 0.22f + 14 * 0.78f).toInt(),
+                (Color.blue(wc) * 0.22f + 18 * 0.78f).toInt(),
             )
             canvas.drawRoundRect(rect, radius, radius, fallback)
+            // A pale sheen, brightest at the top, so it reads as glass and
+            // not as a solid tile.
+            fallback.shader = LinearGradient(
+                rect.left, rect.top, rect.left, rect.bottom,
+                intArrayOf(Color.argb(46, 255, 255, 255), Color.argb(14, 255, 255, 255), Color.argb(22, 255, 255, 255)),
+                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP,
+            )
+            canvas.drawRoundRect(rect, radius, radius, fallback)
+            fallback.shader = null
         }
         // A crisp hairline that's bright where the light hits.
         val sw = host.dpf(1.1f)

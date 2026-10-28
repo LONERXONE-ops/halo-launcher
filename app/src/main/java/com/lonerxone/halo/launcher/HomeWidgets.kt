@@ -67,10 +67,12 @@ object HomeWidgets {
         else -> null
     }?.also { it.size = sizeOf(c, id) }
 
-    fun sizeOf(c: Context, id: String) = Prefs.get(c).getInt("wsize_$id", spec(id).defaultSize)
+    fun sizeOf(c: Context, id: String): Int = HomeLayout.get(c, "w:$id")?.let { HomeLayout.sizeOf(it) } ?: spec(id).defaultSize
 
+    /** Resizes the widget on the home grid (moving it if it no longer fits where it is). */
     fun setSize(c: Context, id: String, size: Int) {
-        Prefs.get(c).edit().putInt("wsize_$id", size.coerceIn(SMALL, LARGE)).apply()
+        val (sx, sy) = HomeLayout.spansFor(size.coerceIn(SMALL, LARGE))
+        HomeLayout.resize(c, "w:$id", sx, sy)
     }
 
     /** The user's order (new widgets go at the end). */
