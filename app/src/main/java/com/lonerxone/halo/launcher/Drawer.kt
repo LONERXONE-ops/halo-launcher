@@ -47,6 +47,12 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private val usedRow: LinearLayout
     private val usedTitle: TextView
     private val pill: LinearLayout
+    private val searchIcon: ImageView
+    private val searchClose: ImageView
+    private var searchOpen = false
+    private var searchAnim: android.animation.ValueAnimator? = null
+    private var navBottom = 0
+    private var imeBottom = 0
     private val letters: LetterStrip
     /** Beyond apps: a calculator answer, and searching the web or the Play Store. */
     private val extras: LinearLayout
@@ -67,7 +73,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     /** Liquid Glass over your picture, or solid black. */
     fun restyle() {
         background = if (Glass.enabled(context)) GlassDrawable(this, dpf(2f), darkness = 0.66f, bendPx = 0f, rimLight = false) else android.graphics.drawable.ColorDrawable(Color.BLACK)
-        pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(24f), darkness = 0.2f, bendPx = dpf(10f)) else context.round(Color.rgb(28, 28, 30), dpf(24f))
+        pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(27f), darkness = 0.3f, bendPx = dpf(10f)) else context.round(Color.rgb(32, 32, 35), dpf(27f)).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
     }
 
     init {
@@ -84,15 +90,25 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             bottomMargin = dp(14)
         })
 
+        // Search: a small round button floating at the bottom (One UI 9 style).
+        // Tap it and it stretches into a search bar above the keyboard.
         pill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), 0, dp(12), 0)
+            gravity = Gravity.CENTER
+            elevation = dpf(10f)
+            isClickable = true
+            setOnClickListener { if (!searchOpen) openSearch() }
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) {
+                    o.setRoundRect(0, 0, v.width, v.height, v.height / 2f)
+                }
+            }
         }
-        pill.addView(ImageView(context).apply {
+        searchIcon = ImageView(context).apply {
             setImageResource(R.drawable.ic_search)
-            imageTintList = android.content.res.ColorStateList.valueOf(Palette.WHITE70)
-        }, LinearLayout.LayoutParams(dp(20), dp(20)))
+            imageTintList = android.content.res.ColorStateList.valueOf(Palette.INK)
+        }
+        pill.addView(searchIcon, LinearLayout.LayoutParams(dp(22), dp(22)))
         search = EditText(context).apply {
             hint = "Search apps"
             setHintTextColor(Palette.WHITE50)
@@ -103,9 +119,18 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_GO
             setPadding(dp(12), 0, dp(4), 0)
+            visibility = View.GONE
         }
         pill.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        content.addView(pill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)))
+        searchClose = ImageView(context).apply {
+            setImageResource(R.drawable.ic_plus)
+            rotation = 45f
+            imageTintList = android.content.res.ColorStateList.valueOf(Palette.WHITE70)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            visibility = View.GONE
+            setOnClickListener { closeSearch(clear = true) }
+        }
+        pill.addView(searchClose, LinearLayout.LayoutParams(dp(32), dp(32)))
 
         usedTitle = context.text(10.5f, Palette.GREY, caps = true).apply {
             text = "Most used"
@@ -157,7 +182,39 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             elevation = dpf(8f)
         }
         addView(bubble, LayoutParams(dp(60), dp(60), Gravity.END or Gravity.TOP).apply { rightMargin = dp(46) })
+        addView(pill, LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(24) })
         restyle()
+
+        // Ride above the navigation bar, and follow the keyboard as it slides.
+        setOnApplyWindowInsetsListener { _, insets ->
+            navBottom = insets.getInsets(android.view.WindowInsets.Type.systemBars()).bottom
+            if (!imeAnimating) {
+                imeBottom = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+                placePill()
+            }
+            insets
+        }
+        setWindowInsetsAnimationCallback(object : android.view.WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+            override fun onPrepare(a: android.view.WindowInsetsAnimation) {
+                if (a.typeMask and android.view.WindowInsets.Type.ime() != 0) imeAnimating = true
+            }
+            override fun onProgress(insets: android.view.WindowInsets, running: MutableList<android.view.WindowInsetsAnimation>): android.view.WindowInsets {
+                if (imeAnimating) {
+                    imeBottom = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom
+                    placePill()
+                }
+                return insets
+            }
+            override fun onEnd(a: android.view.WindowInsetsAnimation) {
+                if (a.typeMask and android.view.WindowInsets.Type.ime() == 0) return
+                imeAnimating = false
+                val ime = rootWindowInsets?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
+                imeBottom = ime
+                placePill()
+                // Keyboard put away with nothing typed: shrink back to the button.
+                if (ime == 0 && searchOpen && search.text.isNullOrEmpty()) closeSearch(clear = false)
+            }
+        })
 
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -179,6 +236,57 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             override fun onScroll(view: AbsListView?, first: Int, visible: Int, total: Int) {}
         })
         visibility = View.INVISIBLE
+    }
+
+    private var imeAnimating = false
+
+    private fun placePill() {
+        val lp = pill.layoutParams as? LayoutParams ?: return
+        lp.bottomMargin = maxOf(navBottom, imeBottom) + dp(16)
+        pill.layoutParams = lp
+    }
+
+    /** The round button stretches into a search bar, then the keyboard comes up. */
+    private fun openSearch() {
+        searchOpen = true
+        search.visibility = View.VISIBLE
+        searchClose.visibility = View.VISIBLE
+        search.alpha = 0f
+        searchClose.alpha = 0f
+        pill.setPadding(dp(18), 0, dp(10), 0)
+        val to = (width - dp(40)).coerceAtLeast(dp(200))
+        stretch(to, Spring(0.3f), 460L)
+        search.animate().alpha(1f).setStartDelay(120).setDuration(220).start()
+        searchClose.animate().alpha(1f).setStartDelay(160).setDuration(220).start()
+        search.requestFocus()
+        context.getSystemService(InputMethodManager::class.java)?.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun closeSearch(clear: Boolean) {
+        if (!searchOpen) return
+        searchOpen = false
+        if (clear && !search.text.isNullOrEmpty()) search.setText("")
+        context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
+        search.clearFocus()
+        search.animate().alpha(0f).setStartDelay(0).setDuration(90).withEndAction { search.visibility = View.GONE }.start()
+        searchClose.animate().alpha(0f).setStartDelay(0).setDuration(90).withEndAction { searchClose.visibility = View.GONE }.start()
+        pill.setPadding(0, 0, 0, 0)
+        stretch(dp(56), Spring(0.45f), 420L)
+    }
+
+    private fun stretch(to: Int, interp: android.view.animation.Interpolator, ms: Long) {
+        searchAnim?.cancel()
+        val from = pill.layoutParams.width.takeIf { it > 0 } ?: pill.width
+        searchAnim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = ms
+            interpolator = interp
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                pill.layoutParams = pill.layoutParams.apply { width = (from + (to - from) * f).toInt().coerceAtLeast(dp(40)) }
+                pill.invalidateOutline()
+            }
+            start()
+        }
     }
 
     fun refresh() {
@@ -342,6 +450,11 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         content.scaleX = 0.94f + 0.06f * p
         content.scaleY = 0.94f + 0.06f * p
         letters.alpha = content.alpha
+        // The search button pops up last.
+        val sp = ((p - 0.4f) / 0.6f).coerceIn(0f, 1f)
+        pill.alpha = sp
+        pill.scaleX = 0.7f + 0.3f * sp
+        pill.scaleY = pill.scaleX
         host.onDrawerProgress(p)
     }
 
@@ -359,6 +472,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         isOpen = false
         hideKeyboard()
         if (!search.text.isNullOrEmpty()) search.setText("")
+        closeSearch(clear = true)
         animateTo(0f)
     }
 
@@ -450,6 +564,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
                     isOpen = false
                     hideKeyboard()
                     if (!search.text.isNullOrEmpty()) search.setText("")
+                    closeSearch(clear = true)
                     animateTo(0f, vy)
                 } else {
                     animateTo(1f, vy)

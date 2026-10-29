@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
  * to the nearest page with a fling.
  */
 class HomePager(context: Context) : ViewGroup(context) {
-    private val scroller = OverScroller(context, Spring(0.35f))
+    private val scroller = OverScroller(context, android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f))
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity * 3
     private var tracker: VelocityTracker? = null
@@ -53,7 +53,8 @@ class HomePager(context: Context) : ViewGroup(context) {
                 downY = e.y
                 lastX = e.x
                 dragging = !scroller.isFinished
-                if (dragging) scroller.abortAnimation()
+                // Catch the page where it is (abortAnimation would jump it to the end).
+                if (dragging) scroller.forceFinished(true)
                 tracker?.recycle()
                 tracker = VelocityTracker.obtain()
                 tracker?.addMovement(e)
@@ -104,7 +105,7 @@ class HomePager(context: Context) : ViewGroup(context) {
                     vx > minFling -> current - 1
                     else -> ((scrollX + width / 2f) / width).toInt()
                 }
-                snapTo(target)
+                snapTo(target, velocity = abs(vx))
                 dragging = false
                 tracker?.recycle()
                 tracker = null
@@ -113,13 +114,21 @@ class HomePager(context: Context) : ViewGroup(context) {
         return true
     }
 
-    fun snapTo(page: Int, animate: Boolean = true) {
+    /**
+     * Glides to a page with no overshoot (bouncing past the page made the
+     * page effects look broken). A fast flick lands quicker, matching your
+     * finger's speed so there's no hitch when you let go.
+     */
+    fun snapTo(page: Int, animate: Boolean = true, velocity: Float = 0f) {
         val p = page.coerceIn(0, (childCount - 1).coerceAtLeast(0))
         val changed = p != current
         current = p
         val dx = p * width - scrollX
         if (animate) {
-            scroller.startScroll(scrollX, 0, dx, 0, (300 + abs(dx) / 8).coerceAtMost(420))
+            val base = 300 + abs(dx) * 120 / width.coerceAtLeast(1)
+            // Start at the finger's speed: the curve begins ~4× its average speed.
+            val dur = if (velocity > 0f) (abs(dx) * 1000f / velocity * 4f).toInt().coerceIn(200, base + 80) else base
+            scroller.startScroll(scrollX, 0, dx, 0, dur)
             postInvalidateOnAnimation()
         } else {
             scrollTo(p * width, 0)

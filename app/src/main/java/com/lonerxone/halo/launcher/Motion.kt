@@ -63,12 +63,15 @@ object Motion {
             v.scaleY = 1f
             v.rotationY = 0f
             v.alpha = 1f
+            v.translationZ = 0f
             v.pivotX = w / 2f
             v.pivotY = h / 2f
             if (abs(o) >= 1f || effect == PAGE_SLIDE) continue
             when (effect) {
                 PAGE_DEPTH -> if (o > 0f) {
-                    // The next page rises from behind instead of sliding in.
+                    // The next page rises from behind instead of sliding in
+                    // (drawn underneath, so the page you leave slides over it).
+                    v.translationZ = -1f
                     v.translationX = -w * o
                     val s = 0.82f + 0.18f * (1f - o)
                     v.scaleX = s
