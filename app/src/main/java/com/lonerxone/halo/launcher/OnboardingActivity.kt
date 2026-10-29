@@ -599,16 +599,16 @@ class OnboardingActivity : Activity() {
             // Stack: rest, swipe up to the next face (springy), three times a loop.
             val pos = t * 3f
             val cur = pos.toInt() % 3
-            val m = spring(seg(pos - pos.toInt(), 0.62f, 1f), 0.3f)
+            val sm = spring(seg(pos - pos.toInt(), 0.62f, 1f), 0.3f)
             val ch = card.height.toFloat()
             for ((i, fc) in faces.withIndex()) {
                 when (i) {
-                    cur -> { fc.translationY = -ch * m; fc.alpha = 1f - 0.7f * m.coerceIn(0f, 1f) }
-                    (cur + 1) % 3 -> { fc.translationY = ch * (1f - m); fc.alpha = 1f }
+                    cur -> { fc.translationY = -ch * sm; fc.alpha = 1f - 0.7f * ssm.coerceIn(0f, 1f) }
+                    (cur + 1) % 3 -> { fc.translationY = ch * (1f - sm); fc.alpha = 1f }
                     else -> { fc.translationY = ch; fc.alpha = 0f }
                 }
             }
-            val on = if (m > 0.5f) (cur + 1) % 3 else cur
+            val on = if (sm > 0.5f) (cur + 1) % 3 else cur
             for ((i, p) in pips.withIndex()) p.alpha = if (i == on) 1f else 0.3f
 
             // Folder: B is carried onto A, they melt into a folder, it rests, then resets.
