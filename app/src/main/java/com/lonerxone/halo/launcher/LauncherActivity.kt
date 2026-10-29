@@ -124,6 +124,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         HaloLink.addListener(haloChanged)
         HaloLink.start(this)
         Glass.addListener(glassChanged)
+        ScreenTime.listener = { refreshWidgets("screen") }
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsWatch)
     }
 
@@ -150,11 +151,14 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             dirty = false
             refreshLook()
         } else {
-            refreshWidgets(null)
-            music?.bind(HaloLink.music)
-            loadBackdrop()
+            // Let the return animation run first; update the live bits a beat later.
+            root.postDelayed({
+                refreshWidgets(null)
+                music?.bind(HaloLink.music)
+                loadBackdrop()
+            }, 280L)
         }
-        onMinute()
+        root.postDelayed({ onMinute() }, 300L)
         Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
@@ -169,7 +173,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private val prefsWatch = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         val k = key ?: ""
         // Counters and caches change all the time and don't change the look.
-        if (k.startsWith("launch") || k.startsWith("w_") || k.startsWith("timer") || k == Prefs.NOTE) return@OnSharedPreferenceChangeListener
+        // (Steps update as you walk; these used to make every return home rebuild everything.)
+        if (k.startsWith("launch") || k.startsWith("w_") || k.startsWith("timer") || k.startsWith("steps_") ||
+            k.startsWith("stackpos_") || k.startsWith("cd_") || k == Prefs.WALL_DAY || k == Prefs.NOTE
+        ) return@OnSharedPreferenceChangeListener
         dirty = true
     }
 
@@ -353,8 +360,21 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private fun animateIn() {
         if (!Prefs.animations(this)) return
         if (editor.editing) return
-        grids.getOrNull(pager.current)?.let { g -> for (i in 0 until g.childCount) g.getChildAt(i).enter(i * 50L) }
-        for (i in 0 until dock.childCount) dock.getChildAt(i).enter(160L + i * 40L, dpf(16f))
+        // One cheap zoom of the whole page and dock (drawn as a single layer),
+        // like iOS, instead of animating every item: smooth even on slower phones.
+        for (v in listOf<View>(pager, dock)) {
+            v.animate().cancel()
+            v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            v.scaleX = 1.08f
+            v.scaleY = 1.08f
+            v.alpha = 0f
+            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300)
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.2f, 1f))
+                .withEndAction {
+                    v.setLayerType(View.LAYER_TYPE_NONE, null)
+                    v.invalidateGlass()
+                }.start()
+        }
     }
 
     // ----- The clock block and the music player (placed on the grid like widgets) -----

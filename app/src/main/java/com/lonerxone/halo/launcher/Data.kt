@@ -110,8 +110,39 @@ object ScreenTime {
         false
     }
 
+    @Volatile
+    private var cached: Result? = null
+    @Volatile
+    private var cachedAt = 0L
+    @Volatile
+    private var busy = false
+
+    /**
+     * Today's screen time. Asking Android for it is slow (it adds up every
+     * app's usage), so it's worked out in the background at most once a
+     * minute; until then you get the last answer.
+     */
     fun today(c: Context): Result? {
         if (!allowed(c)) return null
+        val now = System.currentTimeMillis()
+        if (now - cachedAt > 60_000L && !busy) {
+            busy = true
+            val app = c.applicationContext
+            Thread {
+                val r = compute(app)
+                cached = r
+                cachedAt = System.currentTimeMillis()
+                busy = false
+                listener?.let { l -> android.os.Handler(android.os.Looper.getMainLooper()).post(l) }
+            }.start()
+        }
+        return cached
+    }
+
+    /** Called (on the main thread) when a fresh answer is ready. */
+    var listener: (() -> Unit)? = null
+
+    private fun compute(c: Context): Result? {
         val usm = c.getSystemService(UsageStatsManager::class.java) ?: return null
         val start = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)

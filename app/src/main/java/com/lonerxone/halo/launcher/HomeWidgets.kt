@@ -454,7 +454,7 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
         val r = ScreenTime.today(context)
         if (r == null) {
             total.text = "—"
-            sub.text = "Tap to allow usage access"
+            sub.text = if (ScreenTime.allowed(context)) "Adding it up…" else "Tap to allow usage access"
             return
         }
         total.text = ScreenTime.format(r.totalMs)
