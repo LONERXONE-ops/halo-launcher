@@ -277,6 +277,19 @@ object Icons {
         }
     }
 
+    /** Right now, on this thread (for Halo, through IconProvider). */
+    fun renderNow(ctx: Context, app: App, style: Int, size: Int): Result? {
+        cachedOrDisk(ctx, app, style, size)?.let { return it }
+        val r = try {
+            render(ctx, app, style, size)
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        cache.put(keyOf(app, style, size), r)
+        saveDisk(ctx, app, style, size, r)
+        return r
+    }
+
     private fun render(ctx: Context, app: App, style: Int, size: Int): Result? {
         val density = ctx.resources.displayMetrics.densityDpi
         val own = app.info.getIcon(density) ?: return null

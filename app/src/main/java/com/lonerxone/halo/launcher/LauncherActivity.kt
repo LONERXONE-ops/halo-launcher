@@ -171,6 +171,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private var wasAway = true
     private val prefsWatch = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         val k = key ?: ""
+        // Halo shows the same icons as the home screen: tell it they changed.
+        if (k == Prefs.ICON_STYLE || k == Prefs.ICON_PACK || k == Prefs.THEME) HaloLink.command(this, "icons_changed")
         // Counters and caches change all the time and don't change the look.
         // (Steps update as you walk; these used to make every return home rebuild everything.)
         if (k.startsWith("launch") || k.startsWith("w_") || k.startsWith("timer") || k.startsWith("steps_") ||

@@ -119,9 +119,16 @@
             android:label="Halo Launcher settings"
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
+        <provider
+            android:name=".IconProvider"
+            android:authorities="com.lonerxone.halo.launcher.icons"
+            android:exported="true"
+            android:readPermission="com.lonerxone.halo.permission.LINK" />
+
         <activity
             android:name=".OnboardingActivity"
             android:exported="false"
+            android:theme="@style/Launcher.Home"
             android:label="Welcome"
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
