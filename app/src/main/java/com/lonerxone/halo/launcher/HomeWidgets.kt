@@ -562,17 +562,40 @@ class PhotoWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Photo") {
         refresh()
     }
 
+    private var shownStamp = -1L
+
+    /** Decodes the photo only when it changed, off the main thread, sized for the widget. */
     override fun refresh() {
+        val stamp = Prefs.get(context).getLong(KEY, 0L)
         val f = Prefs.picFile(context, KEY)
-        val bmp = if (f.exists() && Prefs.get(context).getLong(KEY, 0L) != 0L) {
-            try {
-                android.graphics.BitmapFactory.decodeFile(f.absolutePath)
+        if (stamp == 0L || !f.exists()) {
+            shownStamp = 0L
+            show(null)
+            return
+        }
+        if (stamp == shownStamp) return
+        shownStamp = stamp
+        cache?.takeIf { cacheStamp == stamp }?.let { show(it); return }
+        val target = (resources.displayMetrics.widthPixels * 0.9f).toInt()
+        Thread {
+            val bmp = try {
+                val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(f.absolutePath, o)
+                var sample = 1
+                while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= target) sample *= 2
+                android.graphics.BitmapFactory.decodeFile(f.absolutePath, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
             } catch (_: Throwable) {
                 null
             }
-        } else {
-            null
-        }
+            post {
+                cache = bmp
+                cacheStamp = stamp
+                show(bmp)
+            }
+        }.start()
+    }
+
+    private fun show(bmp: android.graphics.Bitmap?) {
         image.setImageBitmap(bmp)
         titleView.visibility = if (bmp == null) VISIBLE else GONE
         hint.visibility = if (bmp == null) VISIBLE else GONE
@@ -581,6 +604,9 @@ class PhotoWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Photo") {
 
     companion object {
         const val KEY = "w_photo"
+        /** Kept across rebuilds of the home screen. */
+        private var cache: android.graphics.Bitmap? = null
+        private var cacheStamp = 0L
     }
 }
 

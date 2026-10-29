@@ -107,7 +107,14 @@ object Glass {
     fun wallColor(c: Context): Int? {
         // A picture you chose wins.
         val pic = backdrop
-        if (pic != null) return average(pic)
+        if (pic != null) {
+            val col = average(pic)
+            rememberColour(c, col)
+            return col
+        }
+        // Not loaded yet (a fresh start): the colour it had last time, if the
+        // picture hasn't changed, so the look doesn't jump (and rebuild) a moment later.
+        remembered(c)?.let { return it }
         val t = System.currentTimeMillis()
         if (t - wallCheckedAt < 5000 && wallColorId != -1) return wallColorCache
         wallCheckedAt = t
@@ -129,6 +136,36 @@ object Glass {
         wallColorCache = col
         wallColorId = id
         return col
+    }
+
+    private fun pictureKey(c: Context): String =
+        Prefs.get(c).getLong(Prefs.HERO_PIC, 0L).toString() + "/" + wallpaperId(c)
+
+    private var rememberedFor = ""
+
+    private fun rememberColour(c: Context, col: Int) {
+        val k = pictureKey(c)
+        if (k == rememberedFor) return
+        rememberedFor = k
+        c.getSharedPreferences("glass_cache", Context.MODE_PRIVATE).edit().putString("key", k).putInt("colour", col).apply()
+    }
+
+    private var memoAt = 0L
+    private var memo: Int? = null
+
+    private fun remembered(c: Context): Int? {
+        // Asking Android for the wallpaper id isn't free: check at most every few seconds.
+        val now = System.currentTimeMillis()
+        if (now - memoAt < 4000L) return memo
+        memoAt = now
+        memo = rememberedNow(c)
+        return memo
+    }
+
+    private fun rememberedNow(c: Context): Int? {
+        val p = c.getSharedPreferences("glass_cache", Context.MODE_PRIVATE)
+        if (!p.contains("colour") || p.getString("key", "") != pictureKey(c)) return null
+        return p.getInt("colour", 0)
     }
 
     /** A vivid version of the wallpaper's main colour (for the clock and accents). */

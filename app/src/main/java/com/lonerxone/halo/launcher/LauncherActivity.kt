@@ -116,9 +116,17 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         App0.ctx = applicationContext
         window.setDecorFitsSystemWindows(false)
         widgetHost = AppWidgetHost(applicationContext, WIDGET_HOST_ID)
+        // Colours first (from the remembered wallpaper colour), so the first build is the final one.
+        Palette.adapt(this)
         build()
         AppRepo.addListener(appsChanged)
         AppRepo.load(this)
+        // Built once here: coming home right after a fresh start doesn't build it all again.
+        if (!homeBuilt && AppRepo.apps.isNotEmpty()) {
+            rebuildApps()
+            rebuildHome()
+        }
+        dirty = false
         HaloLink.addListener(haloChanged)
         HaloLink.start(this)
         Glass.addListener(glassChanged)
@@ -495,7 +503,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
      * Puts every item on its page and cell. While something is being
      * dragged an extra empty page waits at the end, so you can make a new one.
      */
+    private var homeBuilt = false
+
     private fun rebuildHome() {
+        homeBuilt = true
         val dragging = editor.draggingZone == "home"
         val n = HomeLayout.pages(this) + if (dragging) 1 else 0
         while (grids.size < n) grids += newGrid(grids.size).also { pager.addView(it) }
