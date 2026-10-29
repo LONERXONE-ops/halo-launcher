@@ -1038,7 +1038,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     override fun musicCommand(cmd: String) {
-        if (!HaloLink.command(this, cmd)) noHalo()
+        // "seek:12000", "queue_play:7": a command with its argument.
+        val c = cmd.substringBefore(':')
+        val arg = if (cmd.contains(':')) cmd.substringAfter(':') else null
+        if (!HaloLink.command(this, c, arg)) noHalo()
     }
 
     override fun launchPackage(pkg: String, from: View) {

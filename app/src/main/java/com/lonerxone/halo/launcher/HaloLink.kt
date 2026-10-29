@@ -46,6 +46,8 @@ object HaloLink {
 
     class Note(val key: String, val app: String, val appName: String, val title: String, val text: String, val time: Long)
     class Quick(val id: String, val label: String)
+    /** A song in the player's queue (only when the music app shares it). */
+    class Track(val id: Long, val title: String, val sub: String)
 
     var music: Music? = null
         private set
@@ -54,6 +56,10 @@ object HaloLink {
     var notes: List<Note> = emptyList()
         private set
     var quick: List<Quick> = emptyList()
+        private set
+    var queue: List<Track> = emptyList()
+        private set
+    var queueActive = -1L
         private set
     private var lastState = 0L
 
@@ -123,6 +129,11 @@ object HaloLink {
         notes = keys.indices.map { n ->
             Note(keys[n], apps.getOrElse(n) { "" }, names.getOrElse(n) { "" }, titles.getOrElse(n) { "" }, texts.getOrElse(n) { "" }, times.getOrElse(n) { 0L })
         }
+        val tid = i.getLongArrayExtra("q_ids") ?: LongArray(0)
+        val tt = i.getStringArrayExtra("q_titles") ?: emptyArray()
+        val ts = i.getStringArrayExtra("q_subs") ?: emptyArray()
+        queue = tid.indices.map { n -> Track(tid[n], tt.getOrElse(n) { "" }, ts.getOrElse(n) { "" }) }
+        queueActive = i.getLongExtra("q_active", -1L)
         val qid = i.getStringArrayExtra("q_id") ?: emptyArray()
         val qlabel = i.getStringArrayExtra("q_label") ?: emptyArray()
         quick = qid.indices.map { n -> Quick(qid[n], qlabel.getOrElse(n) { qid[n] }) }
