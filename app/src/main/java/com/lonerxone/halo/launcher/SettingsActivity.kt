@@ -37,7 +37,7 @@ import android.widget.Toast
  */
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
-        MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), ICONS("Icons"), DOCK("Dock"),
+        MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), MOTION("Animations"), ICONS("Icons"), DOCK("Dock"),
         WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
     }
 
@@ -104,6 +104,7 @@ class SettingsActivity : Activity() {
         when (page) {
             Page.MENU -> menuPage(col)
             Page.THEME -> themePage(col)
+            Page.MOTION -> motionPage(col)
             Page.LOOK -> lookPage(col)
             Page.CLOCK -> clockPage(col)
             Page.ICONS -> iconsPage(col)
@@ -190,6 +191,7 @@ class SettingsActivity : Activity() {
         col.addView(group(
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
             nav(R.drawable.ic_image, "Wallpapers", "Browse, search, your photos, change daily") { startActivity(Intent(this, WallpaperActivity::class.java)) },
+            nav(R.drawable.ic_gesture, "Animations", Motion.OPEN_NAMES.getOrElse(Motion.open(this)) { "Zoom" } + " · " + Motion.PAGE_NAMES.getOrElse(Motion.page(this)) { "Depth" }) { go(Page.MOTION) },
             nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
             nav(R.drawable.ic_clock, "Clock & date", ClockFaces.current(this).name) { go(Page.CLOCK) },
             nav(R.drawable.ic_apps, "Icons", (Icons.NAMES[Icons.style(this)] ?: "Normal") + IconPacks.current(this).let { p -> if (p.isEmpty()) "" else " · " + (IconPacks.installed(this).firstOrNull { it.pkg == p }?.label ?: "icon pack") }) { go(Page.ICONS) },
@@ -419,6 +421,47 @@ class SettingsActivity : Activity() {
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
         }
         col.addView(row)
+    }
+
+    private fun motionPage(col: LinearLayout) {
+        note(col, "How apps open, how pages turn. Android keeps the real \"app flies out of its icon\" morph for the phone's own launcher (and Samsung doesn't share its closing animation), so Halo Launcher animates everything it's allowed to: the app's entrance, the home screen around it, the icon it lands back in, page turns and unlocking.")
+        col.addView(group(switchRow("Motion", "All animations. Off for a calmer, instant feel", Prefs.ANIMATIONS, true)))
+        chips(col, "Opening an app", Prefs.OPEN_ANIM, Motion.OPEN_NAMES)
+        note(col, when (Motion.open(this)) {
+            Motion.OPEN_REVEAL -> "Reveal: the app is uncovered from the icon outwards, like a window opening."
+            Motion.OPEN_FADE -> "Fade: a soft cross-fade, no movement."
+            else -> "Zoom: the app grows out of its icon while the home screen rushes past you, like iOS. Coming back, the home zooms in and the icon catches the app with a bounce."
+        })
+        chips(col, "Turning pages", Prefs.PAGE_EFFECT, Motion.PAGE_NAMES, def = Motion.PAGE_DEPTH)
+        // A live demo of the page effect: two mini pages you can scrub.
+        val demo = stage(dpf(20f))
+        val pages = listOf(
+            LinearLayout(this).apply { background = round(Palette.TILE2, dpf(14f)) },
+            LinearLayout(this).apply { background = round(Palette.GRAPHITE, dpf(14f)) },
+        )
+        val track = FrameLayout(this)
+        for (p in pages) track.addView(p, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(20), dp(18), dp(20), dp(18)) })
+        demo.addView(track, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        col.addView(demo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(170)).apply { topMargin = dp(12) })
+        val anim = android.animation.ValueAnimator.ofFloat(0f, 1f, 1f, 0f, 0f).apply {
+            duration = 3600
+            repeatCount = android.animation.ValueAnimator.INFINITE
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                val w = track.width.toFloat()
+                // Lay the two pages side by side like the pager does, then apply the effect.
+                pages[0].translationX = 0f
+                pages[1].translationX = 0f
+                Motion.applyPages(pages, f, Motion.page(this@SettingsActivity))
+                pages[0].translationX += -f * w
+                pages[1].translationX += (1f - f) * w
+            }
+        }
+        demo.post { anim.start() }
+        demo.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+            override fun onViewDetachedFromWindow(v: View) = anim.cancel()
+        })
     }
 
     private fun clockPage(col: LinearLayout) {
@@ -661,6 +704,10 @@ class SettingsActivity : Activity() {
                 }
             }
             override fun launchPackage(pkg: String, from: View) {}
+            override fun musicCommand(cmd: String) {
+                HaloLink.command(this@SettingsActivity, cmd)
+            }
+
             override fun pickPhoto() {
                 Toast.makeText(this@SettingsActivity, "Tap the Photo widget on your home screen to pick a photo", Toast.LENGTH_SHORT).show()
             }

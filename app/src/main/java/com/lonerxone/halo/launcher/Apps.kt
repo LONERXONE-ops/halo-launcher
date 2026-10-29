@@ -110,7 +110,7 @@ object AppRepo {
             it.getLocationOnScreen(loc)
             android.graphics.Rect(loc[0], loc[1], loc[0] + it.width, loc[1] + it.height)
         }
-        val opts = from?.let { android.app.ActivityOptions.makeScaleUpAnimation(it, 0, 0, it.width, it.height).toBundle() }
+        val opts = Motion.launchOptions(ctx, from)
         try {
             la.startMainActivity(app.component, app.user, bounds, opts)
             countLaunch(ctx, app)

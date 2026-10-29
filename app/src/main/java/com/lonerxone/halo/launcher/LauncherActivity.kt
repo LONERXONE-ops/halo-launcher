@@ -75,7 +75,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private var clockFace: ClockFace? = null
     private var dateFace: DateFace? = null
     private var wxFace: WeatherFace? = null
-    private var music: MusicCard? = null
     private var musicTick: Runnable? = null
     /** An app's long-press menu that turns into a drag if the finger moves on. */
     private var menuDrag: Triple<App, View, PopupMenu>? = null
@@ -125,6 +124,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         HaloLink.start(this)
         Glass.addListener(glassChanged)
         ScreenTime.listener = { refreshWidgets("screen") }
+        // Unlocking the phone: the home screen zooms in, like iOS.
+        registerReceiver(unlock, IntentFilter(Intent.ACTION_USER_PRESENT))
         Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsWatch)
     }
 
@@ -154,7 +155,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             // Let the return animation run first; update the live bits a beat later.
             root.postDelayed({
                 refreshWidgets(null)
-                music?.bind(HaloLink.music)
                 loadBackdrop()
             }, 280L)
         }
@@ -182,6 +182,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     override fun onResume() {
         super.onResume()
+        // Never stay zoomed away (an app that didn't open, a quick return).
+        if (pager.alpha < 1f && pager.animate() != null) root.postDelayed({ if (pager.alpha < 0.99f) animateIn() }, 450L)
         startMusicTick()
     }
 
@@ -208,7 +210,17 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         editor.exit()
     }
 
+    private val unlock = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (hasWindowFocus() && !drawer.isOpen) animateIn()
+        }
+    }
+
     override fun onDestroy() {
+        try {
+            unregisterReceiver(unlock)
+        } catch (_: Exception) {
+        }
         AppRepo.removeListener(appsChanged)
         HaloLink.removeListener(haloChanged)
         Glass.removeListener(glassChanged)
@@ -327,7 +339,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         Palette.adapt(this)
         root.setBackgroundColor(Color.TRANSPARENT)
         dock.restyle()
-        music?.restyle()
         drawer.restyle()
         rebuildApps()
         rebuildHome()
@@ -345,8 +356,21 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     /** Dots follow the finger; page 2's widgets lag behind for depth; glass re-samples as it moves. */
+    /** A little "landing" bounce on the icon of the app you just came back from. */
+    private fun settle(key: String) {
+        val views = ArrayList<View>()
+        for (g in grids) for (i in 0 until g.childCount) ((g.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { if (it.app.key == key) views += it }
+        for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { if (it.app.key == key) views += it }
+        for (v in views) {
+            v.scaleX = 0.72f
+            v.scaleY = 0.72f
+            v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(android.view.animation.OvershootInterpolator(2.6f)).start()
+        }
+    }
+
     private fun onPagerScroll(f: Float) {
         dots.position = f
+        Motion.applyPages(grids, f, Motion.page(this))
         pager.invalidateGlass()
         try {
             val wm = WallpaperManager.getInstance(this)
@@ -360,6 +384,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private fun animateIn() {
         if (!Prefs.animations(this)) return
         if (editor.editing) return
+        // The app you were in lands back in its icon.
+        lastLaunched?.let { key -> root.postDelayed({ settle(key) }, 170L) }
+        lastLaunched = null
         // One cheap zoom of the whole page and dock (drawn as a single layer),
         // like iOS, instead of animating every item: smooth even on slower phones.
         for (v in listOf<View>(pager, dock)) {
@@ -398,11 +425,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 if (!Weather.hasPlace(this@LauncherActivity)) openSettingsPage("weather") else refreshWeather()
             }
         }
-        val m = MusicCard(this) { cmd -> if (!HaloLink.command(this, cmd)) noHalo() }
-        music = m
     }
 
-    private fun musicOff() = !HomeLayout.has(this, "music")
 
     // ----- The home grid -----
 
@@ -455,6 +479,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         }
         dots.pages = n
         if (pager.current >= n) pager.snapTo(n - 1, animate = false)
+        Motion.applyPages(grids, pager.current.toFloat(), Motion.page(this))
     }
 
     /** A movable Cell for one home item. */
@@ -494,18 +519,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 val icon = iconView(app, size, labels)
                 Cell(this, editor, "home", id, icon, longPressEdits = false, minusFromCentre = dp(size) / 2).apply {
                     onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
-                }
-            }
-            id == "music" -> {
-                val v = music ?: return null
-                (v.parent as? ViewGroup)?.removeView(v)
-                val wide = item.sx >= 4
-                Cell(this, editor, "home", id, v, sizeLabel = if (wide) "Wide" else "Small").apply {
-                    onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
-                    onSize = {
-                        changed { HomeLayout.resize(this@LauncherActivity, id, if (wide) 2 else 4, 2) }
-                        snapToItem(id)
-                    }
                 }
             }
             id.startsWith("w:") -> {
@@ -608,7 +621,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     private fun onHalo() {
-        music?.bind(HaloLink.music)
+        refreshWidgets("music")
         startMusicTick()
         updateBadges()
     }
@@ -617,7 +630,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         musicTick?.let { ui.removeCallbacks(it) }
         val r = object : Runnable {
             override fun run() {
-                music?.tick()
+                for (w in widgets) (w as? MusicWidget)?.tick()
                 if (HaloLink.music?.playing == true) ui.postDelayed(this, 1000L)
             }
         }
@@ -634,7 +647,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
         val off = HomeWidgets.ALL.filter { !Prefs.widgetOn(this, it.id) }
         off.forEachIndexed { i, spec -> m.menu.add(0, 100 + i, i, spec.name) }
-        if (musicOff()) m.menu.add(1, 2, 50, "Music player")
         if (!HomeLayout.has(this, "clock")) m.menu.add(1, 3, 40, "Clock")
         if (!HomeLayout.has(this, "date")) m.menu.add(1, 4, 41, "Date")
         if (!HomeLayout.has(this, "wx")) m.menu.add(1, 5, 42, "Weather (on the wallpaper)")
@@ -646,7 +658,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                     @Suppress("DEPRECATION")
                     startActivityForResult(Intent(this, WidgetPickActivity::class.java), REQ_WIDGET)
                 }
-                2 -> addItem("music", 4, 2)
                 3 -> addItem("clock", 2, 2)
                 4 -> addItem("date", 2, 1)
                 5 -> addItem("wx", 2, 1)
@@ -760,6 +771,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     private fun iconView(a: App, size: Int, label: Boolean): AppIconView = AppIconView(this, a, size, label).apply {
+        pressable()
         badge = HaloLink.badges[a.pkg] ?: 0
         setOnClickListener { launch(a, it) }
         setOnLongClickListener {
@@ -803,7 +815,23 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     // Drawer.Host
     // =====================================================================
 
+    /** The app opened last, so it can land back in its icon when you return. */
+    private var lastLaunched: String? = null
+
     override fun launch(app: App, from: View) {
+        lastLaunched = app.key
+        // Zoom: the home screen rushes past you as the app grows out of its icon.
+        if (Prefs.animations(this) && Motion.open(this) == Motion.OPEN_ZOOM && !drawer.isOpen && sheet == null) {
+            for (v in listOf<View>(pager, dock)) {
+                v.animate().cancel()
+                v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                v.animate().scaleX(1.12f).scaleY(1.12f).alpha(0f).setDuration(260)
+                    .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f))
+                    .withEndAction { v.setLayerType(View.LAYER_TYPE_NONE, null) }.start()
+            }
+            // If the app doesn't actually open (or opens over us), come back.
+            root.postDelayed({ if (hasWindowFocus() && pager.alpha < 1f) animateIn() }, 1400L)
+        }
         AppRepo.launch(this, app, from)
     }
 
@@ -983,6 +1011,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 refreshWidgets("photo")
             }
         }.start()
+    }
+
+    override fun musicCommand(cmd: String) {
+        if (!HaloLink.command(this, cmd)) noHalo()
     }
 
     override fun launchPackage(pkg: String, from: View) {

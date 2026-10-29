@@ -57,6 +57,8 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
     private val remain = context.text(10.5f, Palette.SILVER, bold = true)
     private var key: String? = null
     private var wide = true
+    /** Large (2 rows of cells or more, square-ish): a big cover on top. */
+    private var tall = false
 
     /** Glass or solid, following the theme. */
     fun restyle() {
@@ -95,7 +97,8 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         val isWide = w > h * 1.5f
-        if (isWide != wide || childCount < 2) post { build(isWide) }
+        val isTall = !isWide && h > dp(250)
+        if (isWide != wide || isTall != tall || childCount < 2) post { build(isWide) }
     }
 
     private fun detach(vararg v: View) {
@@ -164,7 +167,23 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            top.addView(cover, LinearLayout.LayoutParams(dp(54), dp(54)))
+            tall = height > dp(250)
+            if (tall) {
+                // Large: the cover fills the top, title and controls under it.
+                val coverBox = object : FrameLayout(context) {
+                    override fun onMeasure(wm: Int, hm: Int) {
+                        val s = minOf(MeasureSpec.getSize(wm), MeasureSpec.getSize(hm))
+                        super.onMeasure(MeasureSpec.makeMeasureSpec(s, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(s, MeasureSpec.EXACTLY))
+                    }
+                }
+                coverBox.addView(cover, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                col.addView(coverBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 0, 1f).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    bottomMargin = dp(12)
+                })
+            } else {
+                top.addView(cover, LinearLayout.LayoutParams(dp(54), dp(54)))
+            }
             val texts = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(10), 0, 0, 0)
@@ -173,11 +192,11 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
             texts.addView(artist)
             top.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             col.addView(top)
-            col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
+            if (!tall) col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
             col.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
             col.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
             addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-            title.textSize = 14.5f
+            title.textSize = if (tall) 17f else 14.5f
             elapsed.visibility = View.GONE
             remain.visibility = View.GONE
         }

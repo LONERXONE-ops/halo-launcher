@@ -132,6 +132,9 @@ object Prefs {
     const val WALL_DAY = "wall_day"
     /** Adaptive colour: Palette.ADAPT_OFF / SUBTLE / RICH. */
     const val ADAPTIVE = "adaptive"
+    /** Motion.OPEN_* and Motion.PAGE_*. */
+    const val OPEN_ANIM = "open_anim"
+    const val PAGE_EFFECT = "page_effect"
     const val SHOW_WALLPAPER = "show_wallpaper"
     const val DOCK = "dock"
     const val FAVORITES = "favorites"

@@ -106,7 +106,7 @@ object HomeLayout {
         list += Item("clock", 0, 0, 0, 2, 2)
         list += Item("date", 0, 2, 0, 2, 1)
         list += Item("wx", 0, 2, 1, 2, 1)
-        if (!p.getBoolean(Prefs.MUSIC_OFF, false)) list += Item("music", 0, 0, rows - 2, 4, 2)
+        if (!p.getBoolean(Prefs.MUSIC_OFF, false)) list += Item("w:music", 0, 0, rows - 2, 4, 2)
         for (id in HomeWidgets.order(c)) {
             if (!Prefs.widgetOnLegacy(c, id)) continue
             val (sx, sy) = spansFor(p.getInt("wsize_$id", HomeWidgets.spec(id).defaultSize))
@@ -131,6 +131,15 @@ object HomeLayout {
      */
     private fun upgrade(c: Context) {
         val p = Prefs.get(c)
+        // The music player became a widget like the others.
+        items?.let { list ->
+            val i = list.indexOfFirst { it.id == "music" }
+            if (i >= 0) {
+                val o = list[i]
+                list[i] = Item("w:music", o.page, o.col, o.row, o.sx, o.sy)
+                save(c)
+            }
+        }
         if (p.getBoolean("layout_v2", false)) return
         val list = items ?: return
         val clock = list.firstOrNull { it.id == "clock" }

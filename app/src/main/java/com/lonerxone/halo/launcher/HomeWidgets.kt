@@ -32,6 +32,8 @@ interface WidgetActions {
     fun openUsageAccess()
     fun launchPackage(pkg: String, from: View)
     fun pickPhoto()
+    /** play_pause / next / prev / open_music, through Halo. */
+    fun musicCommand(cmd: String)
 }
 
 class WidgetSpec(val id: String, val name: String, val about: String, val defaultSize: Int)
@@ -43,6 +45,7 @@ object HomeWidgets {
     val SIZE_NAMES = listOf("Small", "Medium", "Large")
 
     val ALL = listOf(
+        WidgetSpec("music", "Music", "What's playing in any app (through Halo): cover, controls and progress. Small, wide, or large with a big cover.", MEDIUM),
         WidgetSpec("weather", "Weather", "Now, today's high and low; bigger sizes add the next hours and days.", MEDIUM),
         WidgetSpec("battery", "Battery", "Charge in dots, and time until full while charging.", SMALL),
         WidgetSpec("steps", "Steps", "Today's steps against your goal.", SMALL),
@@ -68,6 +71,7 @@ object HomeWidgets {
         "note" -> NoteWidget(c, a)
         "photo" -> PhotoWidget(c, a)
         "timer" -> TimerWidget(c, a)
+        "music" -> MusicWidget(c, a)
         "analog" -> AnalogWidget(c, a)
         "month" -> MonthWidget(c, a)
         "countdown" -> CountdownWidget(c, a)
@@ -906,4 +910,27 @@ class StorageWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Storage") 
         dots.accent = if (used > 0.9) Palette.RED else null
         sub.text = String.format(java.util.Locale.getDefault(), "%.0f GB free of %.0f GB", free / 1e9, total / 1e9)
     }
+}
+
+
+/** The music player as a widget: it brings its own card (cover glow, controls). */
+@SuppressLint("ViewConstructor")
+class MusicWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Music") {
+    override val id = "music"
+    private val card = MusicCard(c) { cmd -> actions.musicCommand(cmd) }
+
+    init {
+        removeView(header)
+        setPadding(0, 0, 0, 0)
+        background = null
+        setOnTouchListener(null)
+        addView(card, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    }
+
+    override fun refresh() {
+        card.restyle()
+        card.bind(HaloLink.music)
+    }
+
+    fun tick() = card.tick()
 }

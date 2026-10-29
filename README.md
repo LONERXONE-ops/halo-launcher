@@ -30,6 +30,7 @@ Your picture (or your wallpaper) fills the whole screen, and everything on it si
 | **Clock, date, weather** | Three separate pieces you can place and size anywhere. 23 clock faces from real fonts (Bebas Neue, Unbounded, Syne, Fraunces, Instrument Serif, Monoton, Silkscreen and more), stacked or one line, four colours, three alignments, four date styles, and **Liquid Glass digits** that bend your picture like the iOS 26 lock screen. |
 | **Apps on the home screen** | Long-press an app anywhere and drag it onto the home screen, or pick Add to home screen. |
 | **Adaptive colour** | Tiles, glass, the dock, widgets, the app list and settings take on the hue of your wallpaper (Subtle or Rich), and follow it when the wallpaper changes. |
+| **Animations** | Apps open with Zoom (the home rushes past as the app grows from its icon, iOS-style), Reveal or Fade; coming back, the icon catches the app with a bounce. Page effects: Slide, Depth, Zoom, Cube, Cards, Carousel. Unlocking zooms the home in. |
 | **Folders** | Drop an app onto another on the home screen. Folders sit on Liquid Glass tinted by your wallpaper; Large folders open three apps straight from the home screen. Tap the name to rename. |
 | **Widget stacks** | Drop a widget onto another of the same size, then swipe up or down on it to flip. |
 | **Backup & restore** | Your whole setup in one file, restored on this phone or a new one. |

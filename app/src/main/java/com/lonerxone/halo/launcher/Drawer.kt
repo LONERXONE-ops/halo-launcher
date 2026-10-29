@@ -291,6 +291,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     private fun iconFor(a: App): AppIconView = AppIconView(context, a, 54, true, liveGlass = false).apply {
+        pressable()
         badge = HaloLink.badges[a.pkg] ?: 0
         setOnClickListener { host.launch(a, it) }
         setOnLongClickListener {
