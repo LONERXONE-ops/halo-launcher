@@ -297,7 +297,7 @@ class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") 
 class StepsWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Steps") {
     override val id = "steps"
     private val stepsText = big()
-    private val dots = DotsView(c).apply { accent = Palette.RED }
+    private val dots = DotsView(c).apply { accent = if (Palette.ACCENT == Palette.INK) Palette.RED else Palette.ACCENT }
     private val sub = small()
 
     init {

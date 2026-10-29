@@ -73,6 +73,7 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Palette.adapt(this)
         ensureBackdrop()
         render()
     }
@@ -266,6 +267,32 @@ class SettingsActivity : Activity() {
             row.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i == 1) marginStart = dp(12) })
         }
         col.addView(row)
+        section(col, "Adaptive colour")
+        note(col, "Tiles, glass, the dock, widgets, the app list and these settings take on the hue of your wallpaper. Change the wallpaper and everything follows.")
+        val ad = Prefs.get(this).getInt(Prefs.ADAPTIVE, Palette.ADAPT_OFF)
+        val arow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((i, name) in listOf("Off", "Subtle", "Rich").withIndex()) {
+            arow.addView(chip(name, i == ad).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(9), dp(4), dp(9))
+                pressable()
+                setOnClickListener {
+                    Prefs.get(this@SettingsActivity).edit().putInt(Prefs.ADAPTIVE, i).apply()
+                    Palette.adapt(this@SettingsActivity)
+                    render()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
+        }
+        col.addView(arow)
+        // The palette it makes, as swatches.
+        val sw = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        for (cc in listOf(Palette.TILE, Palette.TILE2, Palette.GRAPHITE, Palette.DIM, Palette.GREY, Palette.SILVER, Palette.ACCENT)) {
+            sw.addView(View(this).apply { background = round(cc, dpf(10f)).apply { setStroke(dp(1), Color.argb(40, 255, 255, 255)) } }, LinearLayout.LayoutParams(0, dp(34), 1f).apply { marginEnd = dp(6) })
+        }
+        col.addView(sw)
         if (Glass.backdrop == null) {
             section(col, "")
             note(col, "Glass needs a picture to bend. Pick a background, or let Halo Launcher read your wallpaper.")

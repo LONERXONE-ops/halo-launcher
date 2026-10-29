@@ -19,22 +19,71 @@ import android.widget.TextView
  * widget guidelines advise), with one accent, red, used sparingly: badges,
  * low battery, "now" in the agenda.
  */
+/**
+ * Halo Launcher's colours. White ink, and greys that (with Adaptive colour
+ * on) take on the hue of your wallpaper: tiles, glass, dock, widgets, the
+ * app list and settings all shift together, like Material You but subtler.
+ */
 object Palette {
     const val INK = 0xFFF5F5F7.toInt()
-    const val SILVER = 0xFFC9C9CE.toInt()
-    const val GREY = 0xFF8E8E93.toInt()
-    const val DIM = 0xFF5A5A5F.toInt()
-    const val GRAPHITE = 0xFF2C2C2E.toInt()
-    const val TILE = 0xFF141416.toInt()
-    const val TILE2 = 0xFF1C1C1E.toInt()
+    var SILVER = 0xFFC9C9CE.toInt()
+    var GREY = 0xFF8E8E93.toInt()
+    var DIM = 0xFF5A5A5F.toInt()
+    var GRAPHITE = 0xFF2C2C2E.toInt()
+    var TILE = 0xFF141416.toInt()
+    var TILE2 = 0xFF1C1C1E.toInt()
+    /** The wallpaper's colour, made vivid (white when Adaptive colour is off). */
+    var ACCENT = INK
     const val PAPER = 0xFFECECEE.toInt()
     const val RED = 0xFFFF3B30.toInt()
     const val GREEN = 0xFF34C759.toInt()
     // Older names, kept for the screens that use them.
-    val WHITE70 = SILVER
-    val WHITE50 = GREY
-    val GLASS = TILE
+    val WHITE70 get() = SILVER
+    val WHITE50 get() = GREY
+    val GLASS get() = TILE
     val GLASS_STROKE = Color.argb(30, 255, 255, 255)
+
+    const val ADAPT_OFF = 0
+    const val ADAPT_SUBTLE = 1
+    const val ADAPT_RICH = 2
+
+    private var lastKey = ""
+
+    /**
+     * Works the palette out from the wallpaper's colour. Returns true when it
+     * changed (so the home screen redraws in the new colours).
+     */
+    fun adapt(c: Context): Boolean {
+        val mode = Prefs.get(c).getInt(Prefs.ADAPTIVE, ADAPT_OFF)
+        val wc = if (mode == ADAPT_OFF) null else Glass.wallColor(c)
+        val key = "$mode/$wc"
+        if (key == lastKey) return false
+        lastKey = key
+        if (wc == null) {
+            SILVER = 0xFFC9C9CE.toInt()
+            GREY = 0xFF8E8E93.toInt()
+            DIM = 0xFF5A5A5F.toInt()
+            GRAPHITE = 0xFF2C2C2E.toInt()
+            TILE = 0xFF141416.toInt()
+            TILE2 = 0xFF1C1C1E.toInt()
+            ACCENT = INK
+            return true
+        }
+        val hsv = FloatArray(3)
+        Color.colorToHSV(wc, hsv)
+        val h = hsv[0]
+        // Grey wallpapers stay grey; colourful ones lend their hue.
+        val s = hsv[1].coerceIn(0f, 0.9f) * if (mode == ADAPT_RICH) 0.75f else 0.42f
+        fun tone(sat: Float, v: Float) = Color.HSVToColor(floatArrayOf(h, sat.coerceIn(0f, 1f), v))
+        TILE = tone(s, if (mode == ADAPT_RICH) 0.13f else 0.095f)
+        TILE2 = tone(s, if (mode == ADAPT_RICH) 0.17f else 0.125f)
+        GRAPHITE = tone(s * 0.9f, 0.21f)
+        DIM = tone(s * 0.6f, 0.4f)
+        GREY = tone(s * 0.42f, 0.62f)
+        SILVER = tone(s * 0.24f, 0.85f)
+        ACCENT = Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.4f, 0.75f), 0.97f))
+        return true
+    }
 }
 
 /**
@@ -81,6 +130,8 @@ object Prefs {
     /** Wallpapers: shuffle saved ones daily, and the day it last changed. */
     const val WALL_DAILY = "wall_daily"
     const val WALL_DAY = "wall_day"
+    /** Adaptive colour: Palette.ADAPT_OFF / SUBTLE / RICH. */
+    const val ADAPTIVE = "adaptive"
     const val SHOW_WALLPAPER = "show_wallpaper"
     const val DOCK = "dock"
     const val FAVORITES = "favorites"

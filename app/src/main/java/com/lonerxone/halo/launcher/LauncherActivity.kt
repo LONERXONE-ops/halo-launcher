@@ -96,6 +96,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     private val glassChanged: () -> Unit = {
         bg.invalidate()
         root.invalidateGlass()
+        // A new picture can mean new colours (Adaptive colour).
+        if (Palette.adapt(this)) refreshLook()
     }
 
     private val tick = object : BroadcastReceiver() {
@@ -314,6 +316,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     }
 
     private fun refreshLook() {
+        Palette.adapt(this)
         root.setBackgroundColor(Color.TRANSPARENT)
         dock.restyle()
         music?.restyle()

@@ -452,7 +452,9 @@ class GlassDrawable(
             rs.setFloatUniform("origin", ox, oy)
             rs.setFloatUniform("radius", radius.coerceAtMost(minOf(rect.width(), rect.height()) / 2f))
             rs.setFloatUniform("bend", bendPx)
-            rs.setFloatUniform("tint", 0.04f, 0.04f, 0.05f, darkness)
+            // The glass's tint: neutral, or your wallpaper's hue with Adaptive colour.
+            val t = Palette.TILE
+            rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness)
             rs.setFloatUniform("light", if (rimLight) 1f else 0.4f)
             paint.shader = rs
             canvas.save()
