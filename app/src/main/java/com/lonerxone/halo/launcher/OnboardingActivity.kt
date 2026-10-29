@@ -603,7 +603,7 @@ class OnboardingActivity : Activity() {
             val ch = card.height.toFloat()
             for ((i, fc) in faces.withIndex()) {
                 when (i) {
-                    cur -> { fc.translationY = -ch * sm; fc.alpha = 1f - 0.7f * ssm.coerceIn(0f, 1f) }
+                    cur -> { fc.translationY = -ch * sm; fc.alpha = 1f - 0.7f * sm.coerceIn(0f, 1f) }
                     (cur + 1) % 3 -> { fc.translationY = ch * (1f - sm); fc.alpha = 1f }
                     else -> { fc.translationY = ch; fc.alpha = 0f }
                 }
