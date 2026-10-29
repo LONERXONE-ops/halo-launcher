@@ -120,7 +120,8 @@ class SettingsActivity : Activity() {
             Page.ABOUT -> aboutPage(col)
         }
         val sv = ScrollView(this).apply {
-            setBackgroundColor(Color.BLACK)
+            // Black, with a breath of your wallpaper's colour at the top (Adaptive colour).
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Palette.TILE2, Color.BLACK, Color.BLACK))
             isVerticalScrollBarEnabled = false
             addView(col)
             setOnApplyWindowInsetsListener { v, insets ->
@@ -145,7 +146,7 @@ class SettingsActivity : Activity() {
 
     private fun header(col: LinearLayout) {
         if (page == Page.MENU) {
-            col.addView(ImageView(this).apply { setImageResource(R.drawable.logo_launcher) }, LinearLayout.LayoutParams(dp(92), dp(92)).apply {
+            col.addView(ImageView(this).apply { setImageResource(R.drawable.logo_launcher) }, LinearLayout.LayoutParams(dp(76), dp(76)).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 topMargin = dp(18)
             })
@@ -159,6 +160,9 @@ class SettingsActivity : Activity() {
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, dp(18))
             })
+            // Your home screen in small, as it looks right now.
+            val hero = preview(glass = Glass.enabled(this), small = true)
+            col.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)).apply { bottomMargin = dp(14) })
             return
         }
         val back = ImageView(this).apply {
@@ -307,7 +311,7 @@ class SettingsActivity : Activity() {
         note(col, "Tiles, glass, the dock, widgets, the app list and these settings take on the hue of your wallpaper. Change the wallpaper and everything follows.")
         val ad = Prefs.get(this).getInt(Prefs.ADAPTIVE, Palette.ADAPT_OFF)
         val arow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((i, name) in listOf("Off", "Subtle", "Rich").withIndex()) {
+        for ((i, name) in Palette.ADAPT_NAMES.withIndex()) {
             arow.addView(chip(name, i == ad).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(9), dp(4), dp(9))
@@ -437,6 +441,17 @@ class SettingsActivity : Activity() {
     }
 
     /** A row of choice chips bound to an int setting. */
+    private fun colourFor(i: Int): Int = when (i) {
+        2 -> Color.rgb(200, 200, 206)
+        3 -> Color.rgb(18, 18, 20)
+        4 -> Color.rgb(255, 69, 58)
+        5 -> Color.rgb(255, 204, 92)
+        6 -> Color.rgb(100, 170, 255)
+        7 -> Color.rgb(255, 130, 180)
+        8 -> Color.rgb(90, 220, 140)
+        else -> Palette.INK
+    }
+
     private fun chips(col: LinearLayout, title: String, key: String, names: List<String>, def: Int = 0) {
         section(col, title)
         val cur = Prefs.get(this).getInt(key, def)
@@ -515,9 +530,52 @@ class SettingsActivity : Activity() {
         col.addView(pv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
 
         chips(col, "Liquid Glass digits", Prefs.CLOCK_GLASS, listOf("With theme", "On", "Off"))
-        chips(col, "Colour", Prefs.CLOCK_COLOR, listOf("White", "Wallpaper", "Grey", "Black"))
+        // Colour: a row of swatches (the second is your wallpaper's colour).
+        section(col, "Colour")
+        val curCol = Prefs.get(this).getInt(Prefs.CLOCK_COLOR, 0)
+        val swRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        for (i in ClockFaces.COLOUR_NAMES.indices) {
+            val cc = when (i) {
+                0 -> Palette.INK
+                1 -> Glass.accent(this)
+                else -> colourFor(i)
+            }
+            val dot = View(this).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(cc)
+                    setStroke(dp(if (i == curCol) 3 else 1), if (i == curCol) Color.WHITE else Color.argb(60, 255, 255, 255))
+                }
+                contentDescription = ClockFaces.COLOUR_NAMES[i]
+                scaleX = if (i == curCol) 1.12f else 1f
+                scaleY = scaleX
+                pressable()
+                setOnClickListener {
+                    Prefs.get(this@SettingsActivity).edit().putInt(Prefs.CLOCK_COLOR, i).apply()
+                    render()
+                }
+            }
+            swRow.addView(dot, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
+                marginStart = dp(3)
+                marginEnd = dp(3)
+            })
+        }
+        col.addView(swRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
+        note(col, ClockFaces.COLOUR_NAMES.getOrElse(curCol) { "White" } + if (curCol == 1) ": follows your wallpaper" else "")
+        chips(col, "Two-tone minutes", Prefs.CLOCK_TWOTONE, listOf("Off", "Faded", "Wallpaper"))
         chips(col, "Layout", Prefs.CLOCK_LAYOUT, listOf("Stacked", "One line"))
         chips(col, "Align", Prefs.CLOCK_ALIGN, listOf("Left", "Centre", "Right"))
+        chips(col, "Hours", Prefs.CLOCK_HOURS, listOf("Phone", "24-hour", "12-hour"))
+        chips(col, "Separator (one line)", Prefs.CLOCK_SEP, listOf("9:41", "9.41", "9 41"))
+        section(col, "")
+        col.addView(group(
+            switchRow("Leading zero", "09:41 instead of 9:41", Prefs.CLOCK_ZERO, true) { window.decorView.postDelayed({ render() }, 180) },
+            switchRow("AM / PM", "A small AM or PM beside the time (12-hour)", Prefs.CLOCK_AMPM, false) { window.decorView.postDelayed({ render() }, 180) },
+            switchRow("Shadow", "A soft shadow so the clock and date read on busy wallpapers", Prefs.CLOCK_SHADOW, false) { window.decorView.postDelayed({ render() }, 180) },
+        ))
 
         section(col, "Date style")
         val ds = Prefs.get(this).getInt(Prefs.DATE_STYLE, 0)
@@ -954,11 +1012,17 @@ class SettingsActivity : Activity() {
     private fun group(vararg rows: View): LinearLayout {
         val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(Palette.TILE, dpf(22f))
-            setPadding(0, dp(2), 0, dp(2))
+            background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+            setPadding(0, dp(3), 0, dp(3))
+            clipToOutline = true
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) {
+                    o.setRoundRect(0, 0, v.width, v.height, dpf(24f))
+                }
+            }
         }
         rows.forEachIndexed { i, r ->
-            if (i > 0) c.addView(View(this).apply { setBackgroundColor(Color.rgb(34, 34, 37)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
+            if (i > 0) c.addView(View(this).apply { setBackgroundColor(Palette.GRAPHITE) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
                 marginStart = dp(58)
                 marginEnd = dp(16)
             })
@@ -968,16 +1032,45 @@ class SettingsActivity : Activity() {
     }
 
     /** A menu row with an icon tile. */
+    /** Each section gets its own colour tile, like the phone's own settings. */
+    private val tileColours = mapOf(
+        "Theme" to 0xFF7D5CFF.toInt(),
+        "Wallpapers" to 0xFFFF4F8B.toInt(),
+        "Animations" to 0xFFFF8A3D.toInt(),
+        "Background" to 0xFF22B8A7.toInt(),
+        "Clock & date" to 0xFF3E8BFF.toInt(),
+        "Icons" to 0xFF34C759.toInt(),
+        "Dock" to 0xFF5856D6.toInt(),
+        "Widgets" to 0xFFFFB020.toInt(),
+        "Gestures" to 0xFF8E8E93.toInt(),
+        "Weather" to 0xFF32ADE6.toInt(),
+        "Backup & restore" to 0xFF30B0C7.toInt(),
+        "Hidden apps" to 0xFF636366.toInt(),
+        "Take the tour" to 0xFFFF6B6B.toInt(),
+        "About" to 0xFF48484A.toInt(),
+    )
+
     private fun nav(icon: Int, title: String, summary: String, onClick: () -> Unit): View {
         val r = row(title, summary, chevron(), onClick)
+        val tc = tileColours[title]
         r.addView(ImageView(this).apply {
             setImageResource(icon)
-            imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Palette.INK)
+            imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Color.WHITE)
             setPadding(dp(7), dp(7), dp(7), dp(7))
-            background = round(Palette.GRAPHITE, dpf(10f))
-        }, 0, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(14) })
+            background = if (tc != null) {
+                android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(lighten(tc), tc)).apply { cornerRadius = dpf(10f) }
+            } else {
+                round(Palette.GRAPHITE, dpf(10f))
+            }
+        }, 0, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginEnd = dp(14) })
         return r
     }
+
+    private fun lighten(c: Int): Int = Color.rgb(
+        (Color.red(c) + (255 - Color.red(c)) * 0.22f).toInt(),
+        (Color.green(c) + (255 - Color.green(c)) * 0.22f).toInt(),
+        (Color.blue(c) + (255 - Color.blue(c)) * 0.22f).toInt(),
+    )
 
     private fun info(icon: Int, title: String, summary: String): View {
         val r = row(title, summary, null) {}
@@ -1049,7 +1142,7 @@ class SettingsActivity : Activity() {
     private fun tint(sw: Switch) {
         val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
         sw.thumbTintList = ColorStateList(states, intArrayOf(Color.WHITE, Color.rgb(170, 170, 176)))
-        sw.trackTintList = ColorStateList(states, intArrayOf(Palette.GREEN, Color.rgb(58, 58, 62)))
+        sw.trackTintList = ColorStateList(states, intArrayOf(Palette.SWITCH, Color.rgb(58, 58, 62)))
     }
 
     @Suppress("UseSwitchCompatOrMaterialCode")

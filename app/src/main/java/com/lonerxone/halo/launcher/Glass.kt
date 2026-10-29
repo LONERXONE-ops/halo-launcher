@@ -114,7 +114,15 @@ object Glass {
         val id = wallpaperId(c)
         if (id == wallColorId) return wallColorCache
         val col = try {
-            android.app.WallpaperManager.getInstance(c).getWallpaperColors(android.app.WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb()
+            // Of the three colours Android picks out, use the most vivid one
+            // (the primary is often a dull background tone).
+            val wc = android.app.WallpaperManager.getInstance(c).getWallpaperColors(android.app.WallpaperManager.FLAG_SYSTEM)
+            val opts = listOfNotNull(wc?.primaryColor, wc?.secondaryColor, wc?.tertiaryColor).map { it.toArgb() }
+            val hsv = FloatArray(3)
+            opts.maxByOrNull { o ->
+                Color.colorToHSV(o, hsv)
+                hsv[1] * (0.4f + hsv[2])
+            }?.takeIf { o -> Color.colorToHSV(o, hsv); hsv[1] > 0.2f } ?: opts.firstOrNull()
         } catch (_: Throwable) {
             null
         }
@@ -136,32 +144,62 @@ object Glass {
     private var avgOf: Bitmap? = null
     private var avg = 0
 
+    /**
+     * The wallpaper's main colour: hues are counted (weighted by how vivid
+     * and how much of the picture they cover) and the strongest family wins,
+     * averaged so it isn't thrown off by one odd pixel. Mostly-grey pictures
+     * give their average grey.
+     */
     private fun average(b: Bitmap): Int {
         if (avgOf === b) return avg
-        val s = Bitmap.createScaledBitmap(b, 8, 8, true)
+        val n = 24
+        val s = Bitmap.createScaledBitmap(b, n, n, true)
+        val bins = 24
+        val weight = FloatArray(bins)
+        val rs = FloatArray(bins)
+        val gs = FloatArray(bins)
+        val bs = FloatArray(bins)
         var r = 0L
         var g = 0L
         var bl = 0L
-        var best = 0
-        var bestSat = -1f
+        var colourful = 0f
         val hsv = FloatArray(3)
-        for (y in 0 until 8) for (x in 0 until 8) {
+        for (y in 0 until n) for (x in 0 until n) {
             val p = s.getPixel(x, y)
             r += Color.red(p)
             g += Color.green(p)
             bl += Color.blue(p)
             Color.colorToHSV(p, hsv)
-            val score = hsv[1] * hsv[2]
-            if (score > bestSat) {
-                bestSat = score
-                best = p
+            if (hsv[1] < 0.18f || hsv[2] < 0.16f) continue
+            val w = hsv[1] * hsv[2]
+            val k = ((hsv[0] / 360f) * bins).toInt().coerceIn(0, bins - 1)
+            weight[k] += w
+            rs[k] += Color.red(p) * w
+            gs[k] += Color.green(p) * w
+            bs[k] += Color.blue(p) * w
+            colourful += w
+        }
+        // Neighbouring hues count together (a red that drifts into orange is still red).
+        var best = -1
+        var bestW = 0f
+        for (k in 0 until bins) {
+            val w = weight[k] + 0.5f * (weight[(k + 1) % bins] + weight[(k + bins - 1) % bins])
+            if (w > bestW) {
+                bestW = w
+                best = k
             }
         }
-        // The most colourful patch if there is one, else the average.
-        avg = if (bestSat > 0.18f) best else Color.rgb((r / 64).toInt(), (g / 64).toInt(), (bl / 64).toInt())
+        val total = (n * n).toFloat()
+        avg = if (best >= 0 && colourful / total > 0.025f && weight[best] > 0f) {
+            Color.rgb((rs[best] / weight[best]).toInt().coerceIn(0, 255), (gs[best] / weight[best]).toInt().coerceIn(0, 255), (bs[best] / weight[best]).toInt().coerceIn(0, 255))
+        } else {
+            Color.rgb((r / total).toInt(), (g / total).toInt(), (bl / total).toInt())
+        }
         avgOf = b
+        if (s !== b) s.recycle()
         return avg
     }
+
     private var pendingKey = ""
 
     /**

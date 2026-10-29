@@ -1473,6 +1473,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         private var downX = 0f
         private var downY = 0f
         private var mode = 0 // 0 none, 1 drawer drag, 2 swipe-down fired
+        private var edgeTouch = false
         private var tracker: android.view.VelocityTracker? = null
 
         val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
@@ -1526,6 +1527,15 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                     downX = e.x
                     downY = e.y
                     mode = 0
+                    // Touches that start on the phone's own gesture strips (the
+                    // home bar at the bottom, the shade at the top) belong to
+                    // Android's navigation: never open the app list from there.
+                    val gi = rootWindowInsets?.let {
+                        val a = it.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())
+                        val b = it.getInsets(android.view.WindowInsets.Type.systemGestures())
+                        intArrayOf(maxOf(a.top, b.top), maxOf(a.bottom, b.bottom))
+                    }
+                    edgeTouch = gi != null && (e.y > height - gi[1] - dp(6) || e.y < gi[0])
                     tracker?.recycle()
                     tracker = android.view.VelocityTracker.obtain()
                     tracker?.addMovement(e)
@@ -1534,7 +1544,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                     tracker?.addMovement(e)
                     val dx = e.x - downX
                     val dy = e.y - downY
-                    if (mode == 0 && abs(dy) > slop * 1.5f && abs(dy) > abs(dx) * 1.3f) {
+                    if (mode == 0 && !edgeTouch && abs(dy) > slop * 1.5f && abs(dy) > abs(dx) * 1.3f) {
                         val up = dy < 0
                         if (up) {
                             mode = 1
@@ -1559,10 +1569,15 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             when (mode) {
                 1 -> when (e.actionMasked) {
                     MotionEvent.ACTION_MOVE -> drawer.drag(((downY - e.y) / (height * 0.4f)).coerceIn(0f, 1f))
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    MotionEvent.ACTION_UP -> {
                         tracker?.computeCurrentVelocity(1000)
                         val vy = tracker?.yVelocity ?: 0f
                         if (vy < -500f || (vy < 500f && drawer.progress() > 0.3f)) drawer.open() else drawer.close()
+                        mode = 0
+                    }
+                    // The system took the gesture over (home / recents): put the list away.
+                    MotionEvent.ACTION_CANCEL -> {
+                        drawer.close()
                         mode = 0
                     }
                 }

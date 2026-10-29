@@ -46,6 +46,12 @@ object Palette {
     const val ADAPT_OFF = 0
     const val ADAPT_SUBTLE = 1
     const val ADAPT_RICH = 2
+    /** Strongest: deeper tint everywhere, and switches and highlights in the wallpaper's colour. */
+    const val ADAPT_VIVID = 3
+    val ADAPT_NAMES = listOf("Off", "Subtle", "Rich", "Vivid")
+
+    /** On-switches and highlights: the wallpaper's colour with Adaptive colour, else green. */
+    var SWITCH = GREEN
 
     private var lastKey = ""
 
@@ -67,21 +73,36 @@ object Palette {
             TILE = 0xFF141416.toInt()
             TILE2 = 0xFF1C1C1E.toInt()
             ACCENT = INK
+            SWITCH = GREEN
             return true
         }
         val hsv = FloatArray(3)
         Color.colorToHSV(wc, hsv)
         val h = hsv[0]
         // Grey wallpapers stay grey; colourful ones lend their hue.
-        val s = hsv[1].coerceIn(0f, 0.9f) * if (mode == ADAPT_RICH) 0.75f else 0.42f
+        // Grey wallpapers stay grey (with just a breath of their tone); colourful ones lend their hue.
+        val grey = hsv[1] < 0.12f
+        val strength = when (mode) {
+            ADAPT_VIVID -> 0.95f
+            ADAPT_RICH -> 0.75f
+            else -> 0.42f
+        }
+        val s = if (grey) 0.04f else (hsv[1].coerceIn(0.25f, 0.9f) * strength)
         fun tone(sat: Float, v: Float) = Color.HSVToColor(floatArrayOf(h, sat.coerceIn(0f, 1f), v))
-        TILE = tone(s, if (mode == ADAPT_RICH) 0.13f else 0.095f)
-        TILE2 = tone(s, if (mode == ADAPT_RICH) 0.17f else 0.125f)
-        GRAPHITE = tone(s * 0.9f, 0.21f)
-        DIM = tone(s * 0.6f, 0.4f)
-        GREY = tone(s * 0.42f, 0.62f)
-        SILVER = tone(s * 0.24f, 0.85f)
-        ACCENT = Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.4f, 0.75f), 0.97f))
+        val lift = when (mode) {
+            ADAPT_VIVID -> 0.06f
+            ADAPT_RICH -> 0.035f
+            else -> 0f
+        }
+        TILE = tone(s, 0.095f + lift)
+        TILE2 = tone(s, 0.125f + lift * 1.2f)
+        GRAPHITE = tone(s * 0.9f, 0.21f + lift)
+        DIM = tone(s * 0.6f, 0.42f)
+        GREY = tone(s * 0.42f, 0.64f)
+        SILVER = tone(s * 0.24f, 0.86f)
+        ACCENT = if (grey) INK else Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.45f, 0.78f), 0.97f))
+        // Switches: the wallpaper's colour once it's strong enough to read as "on".
+        SWITCH = if (grey || mode == ADAPT_SUBTLE) GREEN else Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.5f, 0.8f), 0.88f))
         return true
     }
 }
@@ -127,6 +148,13 @@ object Prefs {
     /** Liquid Glass text: 0 follow the theme, 1 on, 2 off. */
     const val CLOCK_GLASS = "clock_glass"
     const val DATE_STYLE = "date_style"
+    /** Clock extras: hours (0 phone setting, 1 24-hour, 2 12-hour), leading zero, AM/PM, separator, two-tone minutes, shadow. */
+    const val CLOCK_HOURS = "clock_hours"
+    const val CLOCK_ZERO = "clock_zero"
+    const val CLOCK_AMPM = "clock_ampm"
+    const val CLOCK_SEP = "clock_sep"
+    const val CLOCK_TWOTONE = "clock_twotone"
+    const val CLOCK_SHADOW = "clock_shadow"
     /** Wallpapers: shuffle saved ones daily, and the day it last changed. */
     const val WALL_DAILY = "wall_daily"
     const val WALL_DAY = "wall_day"

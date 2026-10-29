@@ -79,7 +79,29 @@ object ClockFaces {
         1 -> Glass.accent(c)
         2 -> Color.rgb(200, 200, 206)
         3 -> Color.rgb(18, 18, 20)
+        4 -> Color.rgb(255, 69, 58)
+        5 -> Color.rgb(255, 204, 92)
+        6 -> Color.rgb(100, 170, 255)
+        7 -> Color.rgb(255, 130, 180)
+        8 -> Color.rgb(90, 220, 140)
         else -> Palette.INK
+    }
+
+    val COLOUR_NAMES = listOf("White", "Wallpaper", "Grey", "Black", "Red", "Gold", "Blue", "Pink", "Green")
+
+    /** The minutes' colour when "Two-tone" is on. */
+    fun minuteColour(c: Context): Int {
+        val main = colour(c)
+        return when (Prefs.get(c).getInt(Prefs.CLOCK_TWOTONE, 0)) {
+            1 -> Color.argb(150, Color.red(main), Color.green(main), Color.blue(main))
+            2 -> Glass.accent(c).let { if (it == main) Palette.INK else it }
+            else -> main
+        }
+    }
+
+    /** Soft shadow under the clock, date and weather (for busy wallpapers). */
+    fun shadow(c: Context, p: Paint) {
+        if (Prefs.get(c).getBoolean(Prefs.CLOCK_SHADOW, false)) p.setShadowLayer(p.textSize * 0.06f, 0f, p.textSize * 0.025f, Color.argb(150, 0, 0, 0))
     }
 
     /** Liquid Glass digits: follow the theme, or always / never. */
@@ -127,6 +149,8 @@ abstract class TextArt(context: Context) : View(context) {
     fun refresh() {
         if (width <= 0 || height <= 0) return
         runs = layout(width, height)
+        // Settings → Clock → Shadow reaches the date and weather too.
+        for (r in runs) ClockFaces.shadow(context, r.paint)
         glassNow = ClockFaces.glass(context)
         buildMasks()
         invalidate()
@@ -348,31 +372,46 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
 
     /** Called each minute. */
     fun tick() {
-        if (now() != lastText) refresh()
+        if (now().first != lastText) refresh()
     }
 
-    private fun now(): String {
+    /** "hh:mm" and the AM/PM mark ("" in 24-hour time or when hidden). */
+    private fun now(): Pair<String, String> {
         val d = Date()
-        val h = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", d).toString()
+        val p = Prefs.get(context)
+        val h24 = when (p.getInt(Prefs.CLOCK_HOURS, 0)) {
+            1 -> true
+            2 -> false
+            else -> DateFormat.is24HourFormat(context)
+        }
+        val zero = p.getBoolean(Prefs.CLOCK_ZERO, true)
+        val h = DateFormat.format(if (h24) (if (zero) "HH" else "H") else (if (zero) "hh" else "h"), d).toString()
         val m = DateFormat.format("mm", d).toString()
-        return "$h:$m"
+        val ampm = if (!h24 && p.getBoolean(Prefs.CLOCK_AMPM, false)) DateFormat.format("a", d).toString().uppercase() else ""
+        return "$h:$m" to ampm
     }
 
     override fun layout(w: Int, h: Int): List<Run> {
         val face = forceFace ?: ClockFaces.current(context)
         val p = Prefs.get(context)
-        val t = now()
+        val (t, ampm) = now()
         lastText = t
         val (hh, mm) = t.split(':')
         val pad = w * 0.02f
-        val bw = w - pad * 2
+        // Room on the right for a small AM/PM.
+        val bw = (w - pad * 2) * if (ampm.isNotEmpty()) 0.84f else 1f
         val bh = h - pad * 2
         // Stacked when the box is tall enough for two lines, unless you chose one line.
         val stacked = when (p.getInt(Prefs.CLOCK_LAYOUT, 0)) {
             1 -> false
             else -> h > w * 0.45f
         }
-        val lines = if (stacked) listOf(hh, mm) else listOf("$hh:$mm")
+        val sep = when (p.getInt(Prefs.CLOCK_SEP, 0)) {
+            1 -> "."
+            2 -> " "
+            else -> ":"
+        }
+        val lines = if (stacked) listOf(hh, mm) else listOf("$hh$sep$mm")
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             typeface = ClockFaces.typeface(context, face)
             color = ClockFaces.colour(context)
@@ -380,6 +419,14 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
         }
         val gap = 0.08f
         paint.textSize = TextArt.fit(paint, lines, bw, bh, gap) * if (face.varsity) 0.9f else 1f
+        ClockFaces.shadow(context, paint)
+        val minPaint = Paint(paint).apply { color = ClockFaces.minuteColour(context) }
+        val small = Paint(paint).apply {
+            textSize = paint.textSize * 0.26f
+            letterSpacing = 0.06f
+            typeface = Fonts.semibold(context)
+        }
+        val ampmW = if (ampm.isNotEmpty()) small.measureText(ampm) + paint.textSize * 0.08f else 0f
         val align = p.getInt(Prefs.CLOCK_ALIGN, 0)
         val r = Rect()
         // Measure the real ink height of each line for tight stacking.
@@ -389,12 +436,27 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
         val out = ArrayList<Run>()
         for ((i, l) in lines.withIndex()) {
             val lw = paint.measureText(l)
+            val last = i == lines.lastIndex
             val x = when (align) {
-                1 -> (w - lw) / 2f
-                2 -> w - pad - lw
+                1 -> (w - lw - (if (last) ampmW else 0f)) / 2f
+                2 -> w - pad - lw - (if (last) ampmW else 0f)
                 else -> pad
             }
-            out += Run(l, paint, x, y - heights[i].second, varsity = face.varsity)
+            val base = y - heights[i].second
+            when {
+                stacked -> out += Run(l, if (i == 1) minPaint else paint, x, base, varsity = face.varsity)
+                else -> {
+                    // One line: hours, separator and minutes (so the minutes can be their own colour).
+                    val hw = paint.measureText(hh + sep)
+                    out += Run(hh + sep, paint, x, base, varsity = face.varsity)
+                    out += Run(mm, minPaint, x + hw, base, varsity = face.varsity)
+                }
+            }
+            if (last && ampm.isNotEmpty()) {
+                small.getTextBounds(ampm, 0, ampm.length, r)
+                // Top-aligned with the last line, just to its right.
+                out += Run(ampm, small, x + lw + paint.textSize * 0.08f, y - r.top)
+            }
             y += heights[i].first + paint.textSize * gap
         }
         return out
@@ -468,6 +530,43 @@ class DateFace(context: Context, private val forceStyle: Int = -1) : TextArt(con
                 p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h - pad * 2, 0f)
                 place(listOf(t to p), 0f)
             }
+            4 -> {
+                // Thu · 29 Oct
+                val t = DateFormat.format("EEE", d).toString() + "  ·  " + DateFormat.format("d MMM", d).toString()
+                val p = paint(semi, 0.02f)
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.4f, 0f)
+                ClockFaces.shadow(context, p)
+                place(listOf(t to p), 0f)
+            }
+            5 -> {
+                // OCTOBER 29 in the clock's face
+                val p = paint(ClockFaces.typeface(context, ClockFaces.current(context)), 0.02f)
+                val t = DateFormat.format("MMMM d", d).toString().uppercase()
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.62f, 0f)
+                ClockFaces.shadow(context, p)
+                place(listOf(t to p), 0f)
+            }
+            6 -> {
+                // Thursday over 29 October
+                val big = paint(Fonts.semibold(context))
+                val small = paint(Fonts.regular(context))
+                val l1 = DateFormat.format("EEEE", d).toString()
+                val l2 = DateFormat.format("d MMMM yyyy", d).toString()
+                big.textSize = TextArt.fit(big, listOf(l1), w - pad * 2, h * 0.42f, 0f)
+                small.textSize = (big.textSize * 0.48f).coerceAtMost(TextArt.fit(small, listOf(l2), w - pad * 2, h * 0.3f, 0f))
+                small.color = Color.argb(190, Color.red(colour), Color.green(colour), Color.blue(colour))
+                ClockFaces.shadow(context, big)
+                ClockFaces.shadow(context, small)
+                place(listOf(l1 to big, l2 to small), h * 0.06f)
+            }
+            7 -> {
+                // 29/10/2026, tidy and numeric
+                val p = paint(semi, 0.06f)
+                val t = DateFormat.format("dd/MM/yyyy", d).toString()
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.36f, 0f)
+                ClockFaces.shadow(context, p)
+                place(listOf(t to p), 0f)
+            }
             else -> {
                 // THU 29 OCT
                 val t = DateFormat.format("EEE d MMM", d).toString().uppercase()
@@ -479,7 +578,7 @@ class DateFace(context: Context, private val forceStyle: Int = -1) : TextArt(con
     }
 
     companion object {
-        val NAMES = listOf("THU 29 OCT", "Thursday, 29 October", "Big day", "29.10")
+        val NAMES = listOf("THU 29 OCT", "Thursday, 29 October", "Big day", "29.10", "Thu · 29 Oct", "OCTOBER 29", "Day over date", "29/10/2026")
     }
 }
 

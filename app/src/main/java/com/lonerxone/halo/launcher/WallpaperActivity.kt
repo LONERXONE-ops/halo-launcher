@@ -79,7 +79,6 @@ class WallpaperActivity : Activity() {
     private val adapter = WallAdapter()
     private lateinit var grid: GridView
     private lateinit var status: TextView
-    private lateinit var search: EditText
     private lateinit var chipRow: LinearLayout
     private lateinit var savedBar: LinearLayout
     private lateinit var preview: FrameLayout
@@ -98,109 +97,121 @@ class WallpaperActivity : Activity() {
         if (intent.getStringExtra("tab") == "saved") showSaved() else load(reset = true)
     }
 
+    private lateinit var finder: FloatingSearch
+    private lateinit var tabs: FrameLayout
+    private lateinit var tabPill: View
+    private lateinit var tabLabels: List<TextView>
+    private lateinit var chipScroll: HorizontalScrollView
+
     private fun build() {
+        Palette.adapt(this)
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        // Your current background, dimmed, behind everything.
+        root.addView(BackgroundView(this).apply { alpha = 0.55f }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(View(this).apply {
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(150, 0, 0, 0), Color.argb(215, 0, 0, 0), Color.argb(245, 0, 0, 0)))
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
+        // Header: back · title (and where they come from) · your photos.
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(8), dp(14), dp(6))
+            setPadding(dp(14), dp(10), dp(14), dp(4))
         }
-        head.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_back)
+        fun roundBtn(icon: Int, desc: String, click: () -> Unit) = ImageView(this).apply {
+            setImageResource(icon)
             imageTintList = ColorStateList.valueOf(Palette.INK)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = round(Palette.TILE2, dpf(21f))
-            setOnClickListener { onBackPressedCompat() }
-        }, LinearLayout.LayoutParams(dp(42), dp(42)))
-        head.addView(text(26f, Palette.INK, bold = true).apply {
-            text = "Wallpapers"
-            setPadding(dp(14), 0, 0, 0)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(text(13f, Color.BLACK, bold = true).apply {
-            text = "Your photos"
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(9), dp(14), dp(9))
-            background = round(Palette.INK, dpf(18f))
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            background = round(Color.argb(46, 255, 255, 255), dpf(22f)).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
+            contentDescription = desc
             pressable()
-            setOnClickListener { pickPhoto() }
-        })
+            setOnClickListener { click() }
+        }
+        head.addView(roundBtn(R.drawable.ic_back, "Back") { onBackPressedCompat() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), 0, dp(8), 0)
+        }
+        titles.addView(text(26f, Palette.INK, bold = true).apply { text = "Wallpapers" })
+        titles.addView(text(11.5f, Palette.GREY).apply { text = "From wallhaven.cc, by their artists" })
+        head.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(roundBtn(R.drawable.ic_image, "Use one of your photos") { pickPhoto() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         col.addView(head)
 
-        // Search
-        val pill = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = round(Palette.TILE2, dpf(22f))
-            setPadding(dp(14), 0, dp(10), 0)
+        // Discover | Saved, with a sliding white pill.
+        tabs = FrameLayout(this).apply {
+            background = round(Color.argb(40, 255, 255, 255), dpf(21f))
+            setPadding(dp(4), dp(4), dp(4), dp(4))
         }
-        pill.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_search)
-            imageTintList = ColorStateList.valueOf(Palette.GREY)
-        }, LinearLayout.LayoutParams(dp(18), dp(18)))
-        search = EditText(this).apply {
-            hint = "Search wallpapers (e.g. Jujutsu Kaisen, rain, neon)"
-            setHintTextColor(Palette.GREY)
-            setTextColor(Palette.INK)
-            textSize = 14.5f
-            typeface = Fonts.regular(this@WallpaperActivity)
-            background = null
-            isSingleLine = true
-            imeOptions = EditorInfo.IME_ACTION_SEARCH
-            setPadding(dp(10), 0, 0, 0)
-            setOnEditorActionListener { v, id, ev ->
-                if (id == EditorInfo.IME_ACTION_SEARCH || ev?.keyCode == KeyEvent.KEYCODE_ENTER) {
-                    query = text.toString().trim()
-                    getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken, 0)
-                    savedTab = false
-                    load(reset = true)
-                    true
-                } else {
-                    false
+        tabPill = View(this).apply { background = round(Palette.INK, dpf(17f)) }
+        tabs.addView(tabPill, FrameLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT))
+        val labels = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        tabLabels = listOf("Discover", "♥  Saved").mapIndexed { i, l ->
+            text(13.5f, Palette.INK, bold = true).apply {
+                text = l
+                gravity = Gravity.CENTER
+                setOnClickListener {
+                    if (i == 0 && savedTab) {
+                        savedTab = false
+                        load(reset = true)
+                    } else if (i == 1 && !savedTab) {
+                        showSaved()
+                    }
                 }
-            }
+            }.also { labels.addView(it, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)) }
         }
-        pill.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        col.addView(pill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply {
-            leftMargin = dp(14)
-            rightMargin = dp(14)
+        tabs.addView(labels, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        col.addView(tabs, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply {
+            topMargin = dp(12)
+            leftMargin = dp(16)
+            rightMargin = dp(16)
         })
+        tabs.post { moveTab(animate = false) }
 
-        // Topics + Saved
+        // Topics (Discover only).
         chipRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(14), dp(12), dp(14), dp(8))
+            setPadding(dp(16), dp(12), dp(16), dp(8))
         }
-        col.addView(HorizontalScrollView(this).apply {
+        chipScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(chipRow)
-        })
-        drawChips()
+        }
+        col.addView(chipScroll)
 
-        // Saved tab extras: daily shuffle
+        // Saved extras: change daily.
         savedBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(2), dp(14), dp(6))
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            background = round(Color.argb(36, 255, 255, 255), dpf(18f))
             visibility = View.GONE
         }
-        savedBar.addView(text(13.5f, Palette.SILVER, lines = 2).apply { text = "Change daily: a different saved wallpaper each day" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val sb = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        sb.addView(text(14f, Palette.INK, bold = true).apply { text = "Change daily" })
+        sb.addView(text(12f, Palette.GREY, lines = 2).apply { text = "A different saved wallpaper each day. Hold one to remove it." })
+        savedBar.addView(sb, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         @Suppress("UseSwitchCompatOrMaterialCode")
         savedBar.addView(Switch(this).apply {
             val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
             thumbTintList = ColorStateList(states, intArrayOf(Color.WHITE, Color.rgb(170, 170, 176)))
-            trackTintList = ColorStateList(states, intArrayOf(Palette.GREEN, Color.rgb(58, 58, 62)))
+            trackTintList = ColorStateList(states, intArrayOf(Palette.SWITCH, Color.rgb(58, 58, 62)))
             isChecked = Prefs.get(this@WallpaperActivity).getBoolean(Prefs.WALL_DAILY, false)
             setOnCheckedChangeListener { _, on -> Prefs.get(this@WallpaperActivity).edit().putBoolean(Prefs.WALL_DAILY, on).apply() }
         })
-        col.addView(savedBar)
+        col.addView(savedBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(12)
+            bottomMargin = dp(8)
+            leftMargin = dp(16)
+            rightMargin = dp(16)
+        })
 
-        status = text(13f, Palette.GREY, lines = 3).apply {
+        status = text(13.5f, Palette.GREY, lines = 3).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(20), dp(30), dp(20), dp(30))
+            setPadding(dp(28), dp(40), dp(28), dp(30))
         }
         grid = GridView(this).apply {
             numColumns = 3
@@ -210,20 +221,24 @@ class WallpaperActivity : Activity() {
             selector = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
             isVerticalScrollBarEnabled = false
             clipToPadding = false
-            setPadding(dp(12), dp(4), dp(12), dp(40))
+            setPadding(dp(12), dp(4), dp(12), dp(120))
             adapter = this@WallpaperActivity.adapter
             setOnItemClickListener { _, _, pos, _ -> open(items[pos]) }
-            setOnItemLongClickListener { _, _, pos, _ ->
+            setOnItemLongClickListener { _, v, pos, _ ->
                 val w = items[pos]
                 if (w.local != null) {
-                    w.local.delete()
-                    Toast.makeText(this@WallpaperActivity, "Removed from Saved", Toast.LENGTH_SHORT).show()
-                    showSaved()
+                    v.animate().scaleX(0.8f).scaleY(0.8f).alpha(0f).setDuration(200).withEndAction {
+                        w.local.delete()
+                        Toast.makeText(this@WallpaperActivity, "Removed from Saved", Toast.LENGTH_SHORT).show()
+                        showSaved()
+                    }.start()
                 }
                 true
             }
             setOnScrollListener(object : AbsListView.OnScrollListener {
-                override fun onScrollStateChanged(view: AbsListView?, state: Int) {}
+                override fun onScrollStateChanged(view: AbsListView?, state: Int) {
+                    if (state == AbsListView.OnScrollListener.SCROLL_STATE_TOUCH_SCROLL && finder.isOpen && finder.field.text.isNullOrEmpty()) finder.close(clearText = false)
+                }
                 override fun onScroll(view: AbsListView?, first: Int, visible: Int, total: Int) {
                     if (!savedTab && !loading && total > 0 && first + visible >= total - 6 && page < lastPage) {
                         page++
@@ -236,47 +251,76 @@ class WallpaperActivity : Activity() {
         body.addView(grid)
         body.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
         col.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        col.addView(text(10.5f, Palette.DIM).apply {
-            text = "Wallpapers from wallhaven.cc, by their artists and uploaders"
-            gravity = Gravity.CENTER
-            setPadding(0, dp(4), 0, dp(6))
+
+        // Search: the floating button at the bottom.
+        finder = FloatingSearch(this, "Search: anime, rain, neon…", onSearch = { q ->
+            query = q
+            savedTab = false
+            load(reset = true)
+        }, onClear = {
+            if (query.isNotEmpty()) {
+                query = ""
+                if (!savedTab) load(reset = true)
+            }
         })
+        finder.attach(root)
 
         preview = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             visibility = View.GONE
             isClickable = true
+            elevation = dpf(20f)
         }
         root.addView(preview, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         root.setOnApplyWindowInsetsListener { _, insets ->
             val b = insets.getInsets(WindowInsets.Type.systemBars())
-            col.setPadding(0, b.top, 0, b.bottom)
+            col.setPadding(0, b.top, 0, 0)
+            grid.setPadding(dp(12), dp(4), dp(12), b.bottom + dp(96))
             insets
         }
         setContentView(root)
     }
 
+    private fun moveTab(animate: Boolean) {
+        if (!::tabs.isInitialized) return
+        val w = (tabs.width - tabs.paddingLeft - tabs.paddingRight) / 2
+        if (w <= 0) return
+        if (tabPill.layoutParams.width != w) tabPill.layoutParams = tabPill.layoutParams.apply { width = w }
+        val x = if (savedTab) w.toFloat() else 0f
+        if (animate) tabPill.animate().translationX(x).setDuration(420).setInterpolator(Spring(0.4f)).start() else tabPill.translationX = x
+        for ((i, l) in tabLabels.withIndex()) {
+            val on = (i == 1) == savedTab
+            l.setTextColor(if (on) Color.BLACK else Palette.INK)
+        }
+    }
+
     private fun drawChips() {
+        moveTab(animate = true)
+        chipScroll.visibility = if (savedTab) View.GONE else View.VISIBLE
         chipRow.removeAllViews()
         fun add(label: String, on: Boolean, click: () -> Unit) {
             chipRow.addView(text(13f, if (on) Color.BLACK else Palette.INK, bold = true).apply {
                 text = label
-                setPadding(dp(14), dp(8), dp(14), dp(8))
-                background = round(if (on) Palette.INK else Palette.GRAPHITE, dpf(17f))
-                setOnClickListener {
-                    it.bounce()
-                    click()
-                }
+                setPadding(dp(15), dp(8), dp(15), dp(8))
+                background = if (on) round(Palette.INK, dpf(17f)) else round(Color.argb(22, 255, 255, 255), dpf(17f)).apply { setStroke(dp(1), Color.argb(55, 255, 255, 255)) }
+                pressable()
+                setOnClickListener { click() }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
         }
-        add("♥ Saved", savedTab) { showSaved() }
-        for ((i, t) in topics.withIndex()) add(t.name, !savedTab && query.isEmpty() && i == topic) {
+        // A search you made shows as the first tag; tap it to go back to topics.
+        if (query.isNotEmpty()) add("“$query”  ✕", true) {
+            query = ""
+            finder.close(clearText = true)
+            load(reset = true)
+        }
+        for ((i, t) in topics.withIndex()) add(t.name, query.isEmpty() && i == topic) {
             topic = i
             query = ""
-            search.setText("")
+            if (finder.isOpen) finder.close(clearText = true)
             savedTab = false
             load(reset = true)
+            chipScroll.smoothScrollTo(0, 0)
         }
     }
 
@@ -538,7 +582,7 @@ class WallpaperActivity : Activity() {
         preview.alpha = 0f
         preview.scaleX = 0.96f
         preview.scaleY = 0.96f
-        preview.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).start()
+        preview.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.35f)).start()
     }
 
     private fun closePreview() {
@@ -619,7 +663,11 @@ class WallpaperActivity : Activity() {
     }
 
     private fun onBackPressedCompat() {
-        if (preview.visibility == View.VISIBLE) closePreview() else finish()
+        when {
+            preview.visibility == View.VISIBLE -> closePreview()
+            finder.isOpen -> finder.close(clearText = query.isEmpty())
+            else -> finish()
+        }
     }
 
     @Deprecated("Deprecated in Java")
