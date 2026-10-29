@@ -537,7 +537,7 @@ class GlassDrawable(
         // A flat pane (no lens, like the app list's backdrop) doesn't need the
         // lens shader at all: the cheaper frosted path looks the same.
         val rs0 = if (frost != null && bendPx > 0f && Build.VERSION.SDK_INT >= 33 && !shaderBroken) sharedShader() else null
-        if (frost != null && rs0 != null) {
+        if (frost != null && rs0 != null && Build.VERSION.SDK_INT >= 33) {
             val rs = rs0
             rs.setInputShader("image", frost)
             rs.setFloatUniform("size", rect.width(), rect.height())
@@ -644,6 +644,7 @@ class GlassDrawable(
          * built, which made coming home slow.) Uniforms are set right before
          * each pane draws; Android snapshots them into that draw.
          */
+        @android.annotation.TargetApi(33)
         private fun sharedShader(): RuntimeShader? {
             (shared as? RuntimeShader)?.let { return it }
             return try {

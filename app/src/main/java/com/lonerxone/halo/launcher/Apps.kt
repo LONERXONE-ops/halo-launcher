@@ -596,7 +596,7 @@ object Icons {
     private fun monochromeFromXml(ctx: Context, app: App): Drawable? {
         val pm = ctx.packageManager
         val ai = try {
-            app.info.activityInfo
+            if (android.os.Build.VERSION.SDK_INT >= 31) app.info.activityInfo else null
         } catch (_: Throwable) {
             null
         }

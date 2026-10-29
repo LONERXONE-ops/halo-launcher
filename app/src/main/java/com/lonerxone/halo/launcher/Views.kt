@@ -448,14 +448,17 @@ class PageDots(context: Context) : View(context) {
         }
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
+    private var widthsBuf = FloatArray(0)
 
     override fun onDraw(canvas: Canvas) {
         val d = dpf(5f)
         val wide = dpf(16f)
         val gap = dpf(6f)
-        val widths = FloatArray(pages) { i ->
+        if (widthsBuf.size != pages) widthsBuf = FloatArray(pages)
+        val widths = widthsBuf
+        for (i in 0 until pages) {
             val near = (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f)
-            d + (wide - d) * near
+            widths[i] = d + (wide - d) * near
         }
         var x = (width - (widths.sum() + gap * (pages - 1))) / 2f
         val y = height / 2f

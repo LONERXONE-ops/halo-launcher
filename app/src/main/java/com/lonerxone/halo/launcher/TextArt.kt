@@ -123,7 +123,12 @@ object ClockFaces {
  * class fits, draws and glazes them.
  */
 abstract class TextArt(context: Context) : View(context) {
-    class Run(val text: String?, val paint: Paint, var x: Float, var y: Float, val icon: Drawable? = null, val iconRect: Rect? = null, val varsity: Boolean = false)
+    class Run(val text: String?, val paint: Paint, var x: Float, var y: Float, val icon: Drawable? = null, val iconRect: Rect? = null, val varsity: Boolean = false) {
+        // Paints derived from [paint], made once (not on every frame).
+        val outline: Paint by lazy { Paint(paint).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND } }
+        val grey: Paint by lazy { Paint(paint).apply { color = Color.rgb(205, 205, 210) } }
+        val white: Paint by lazy { Paint(paint).apply { color = Color.WHITE; clearShadowLayer() } }
+    }
 
     protected var runs: List<Run> = emptyList()
     private var hard: Bitmap? = null
@@ -182,33 +187,47 @@ abstract class TextArt(context: Context) : View(context) {
             if (r.varsity && !plain) {
                 // College-jersey digits: grey, a black outline, a white one around that.
                 val s = r.paint.textSize
-                val o = Paint(r.paint).apply {
-                    style = Paint.Style.STROKE
-                    strokeJoin = Paint.Join.ROUND
-                }
+                val o = r.outline
                 o.color = Color.WHITE
                 o.strokeWidth = s * 0.11f
                 c.drawText(t, r.x, r.y, o)
                 o.color = Color.BLACK
                 o.strokeWidth = s * 0.06f
                 c.drawText(t, r.x, r.y, o)
-                c.drawText(t, r.x, r.y, Paint(r.paint).apply { color = Color.rgb(205, 205, 210) })
+                c.drawText(t, r.x, r.y, r.grey)
                 continue
             }
             if (plain) {
-                c.drawText(t, r.x, r.y, Paint(r.paint).apply { color = Color.WHITE })
+                c.drawText(t, r.x, r.y, r.white)
             } else {
                 c.drawText(t, r.x, r.y, r.paint)
             }
         }
     }
 
+    // Made once per layout, not on every frame (the clock redraws as pages slide).
+    private var hardShader: BitmapShader? = null
+    private var softShader: BitmapShader? = null
+    private val frostPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val shadowFilter = android.graphics.PorterDuffColorFilter(Color.BLACK, android.graphics.PorterDuff.Mode.SRC_IN)
+    private var rimPaints: List<Paint> = emptyList()
+
     private fun buildMasks() {
-        hard?.recycle()
-        soft?.recycle()
+        // Not recycled by hand: a frame being drawn may still be using the old
+        // ones (recycling them early could crash or flash); they're freed normally.
         hard = null
         soft = null
         shader = null
+        hardShader = null
+        softShader = null
+        rimPaints = runs.map { r ->
+            Paint(r.paint).apply {
+                clearShadowLayer()
+                style = Paint.Style.STROKE
+                strokeWidth = max(1.2f, textSize * 0.018f)
+                color = Color.argb(220, 255, 255, 255)
+            }
+        }
         if (!glassNow || width <= 0 || height <= 0) return
         val h = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         drawRuns(Canvas(h), plain = true)
@@ -219,8 +238,13 @@ abstract class TextArt(context: Context) : View(context) {
         val sh = max(1, height / scale)
         val small = Bitmap.createScaledBitmap(h, sw, sh, true)
         val r = (runs.maxOfOrNull { it.paint.textSize } ?: 40f) / scale * 0.07f
-        soft = blurAlpha(small, r.toInt().coerceIn(1, 14))
-        small.recycle()
+        val sb = blurAlpha(small, r.toInt().coerceIn(1, 14))
+        soft = sb
+        if (small !== h) small.recycle()
+        hardShader = BitmapShader(h, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        softShader = BitmapShader(sb, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(Matrix().apply { setScale(width / sb.width.toFloat(), height / sb.height.toFloat()) })
+        }
     }
 
     /** Box blur of the alpha, three passes (close to Gaussian). */
@@ -263,6 +287,8 @@ abstract class TextArt(context: Context) : View(context) {
         val sb = soft ?: return
         val back = Glass.sharp()
         getLocationInWindow(loc)
+        val hs = hardShader ?: return
+        val ss = softShader ?: return
         val rs = if (back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
             (sharedText as? RuntimeShader) ?: try {
                 RuntimeShader(GLASS_TEXT).also { sharedText = it }
@@ -274,12 +300,10 @@ abstract class TextArt(context: Context) : View(context) {
         } else {
             null
         }
-        if (rs != null && back != null) {
+        if (rs != null && back != null && Build.VERSION.SDK_INT >= 33) {
             rs.setInputShader("image", back)
-            rs.setInputShader("hard", BitmapShader(hb, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP))
-            rs.setInputShader("soft", BitmapShader(sb, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
-                setLocalMatrix(Matrix().apply { setScale(width / sb.width.toFloat(), height / sb.height.toFloat()) })
-            })
+            rs.setInputShader("hard", hs)
+            rs.setInputShader("soft", ss)
             rs.setFloatUniform("origin", loc[0].toFloat(), loc[1].toFloat())
             val big = runs.maxOfOrNull { it.paint.textSize } ?: 60f
             rs.setFloatUniform("bend", big * 0.5f)
@@ -290,20 +314,16 @@ abstract class TextArt(context: Context) : View(context) {
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shaderPaint)
         } else {
             // Frosted: milky letters with a bright rim and a soft shadow under them.
-            val p = Paint(Paint.FILTER_BITMAP_FLAG)
+            val p = frostPaint
             p.alpha = 70
-            p.colorFilter = android.graphics.PorterDuffColorFilter(Color.BLACK, android.graphics.PorterDuff.Mode.SRC_IN)
+            p.colorFilter = shadowFilter
             canvas.drawBitmap(hb, 0f, dpf(1.5f), p)
             p.colorFilter = null
             p.alpha = 150
             canvas.drawBitmap(hb, 0f, 0f, p)
-            for (r in runs) {
+            for ((i, r) in runs.withIndex()) {
                 val t = r.text ?: continue
-                canvas.drawText(t, r.x, r.y, Paint(r.paint).apply {
-                    style = Paint.Style.STROKE
-                    strokeWidth = max(1.2f, textSize * 0.018f)
-                    color = Color.argb(220, 255, 255, 255)
-                })
+                canvas.drawText(t, r.x, r.y, rimPaints.getOrNull(i) ?: continue)
             }
         }
     }
