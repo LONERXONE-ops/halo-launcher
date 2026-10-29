@@ -257,7 +257,7 @@ object Icons {
         }
     }
 
-    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v3"
+    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v4"
 
     fun load(ctx: Context, app: App, style: Int, size: Int, done: (Result) -> Unit) {
         val k = keyOf(app, style, size)
@@ -320,9 +320,32 @@ object Icons {
             }
             else -> {
                 val badged = if (packed == null) ctx.packageManager.getUserBadgedIcon(icon, app.user) else icon
-                return Result(draw(badged, size, 1f))
+                return Result(roundIfSquare(draw(badged, size, 1f)))
             }
         }
+    }
+
+    /**
+     * Old-style icons that are a full square picture (no shape of their own)
+     * get the same rounded shape as everyone else, instead of sitting there square.
+     */
+    private fun roundIfSquare(b: Bitmap): Bitmap {
+        val n = b.width
+        if (n < 8) return b
+        val k = (n * 0.04f).toInt().coerceAtLeast(1)
+        val corners = listOf(b.getPixel(k, k), b.getPixel(n - 1 - k, k), b.getPixel(k, n - 1 - k), b.getPixel(n - 1 - k, n - 1 - k))
+        if (corners.any { android.graphics.Color.alpha(it) < 200 }) return b
+        val out = Bitmap.createBitmap(n, b.height, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+        // Slightly inset so it matches the size of shaped icons.
+        val inset = n * 0.04f
+        val r = android.graphics.RectF(inset, inset, n - inset, b.height - inset)
+        val rad = r.width() * 0.26f
+        c.drawRoundRect(r, rad, rad, p)
+        p.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+        c.drawBitmap(b, null, r, p)
+        return out
     }
 
     private fun monoGlyph(ctx: Context, app: App, icon: Drawable): Drawable? = try {

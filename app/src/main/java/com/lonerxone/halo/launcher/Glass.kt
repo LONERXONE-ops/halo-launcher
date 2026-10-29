@@ -380,16 +380,15 @@ object Glass {
             float2 c = size * 0.5;
             float2 q = abs(p - c) - (c - radius);
             float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-            float bevel = min(radius, 30.0);
+            // The bevel is a thin rim, never more than a fraction of a small pane
+            // (on a folder or icon a wide bevel looked like a pyramid).
+            float bevel = min(min(radius, 30.0), min(size.x, size.y) * 0.16);
             float e = clamp(1.0 + d / bevel, 0.0, 1.0);
-            float2 g;
-            if (q.x > 0.0 && q.y > 0.0) {
-                g = normalize(sign(p - c) * max(q, 0.0));
-            } else if (q.x > q.y) {
-                g = float2(sign(p.x - c.x), 0.0);
-            } else {
-                g = float2(0.0, sign(p.y - c.y));
-            }
+            // Which way the rim faces, blended smoothly round the corners
+            // (no hard seams running in from the corners).
+            float2 qq = max(q + bevel, 0.01);
+            float2 gv = sign(p - c) * qq * qq * qq;
+            float2 g = gv / max(length(gv), 0.000001);
             float k = pow(e, 2.2) * bend;
             float2 s = origin + p - g * k;
             half3 col;

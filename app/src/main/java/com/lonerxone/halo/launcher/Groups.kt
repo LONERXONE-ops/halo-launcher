@@ -73,8 +73,17 @@ class FolderTile(context: Context, val folderId: String, private val large: Bool
         pane.post {
             // A square pane, the theme's surface.
             val side = minOf(width, height) - if (large) 0 else dp(6)
+            if (side <= 0) return@post
             pane.layoutParams = LayoutParams(side, side, Gravity.CENTER)
-            pane.background = pane.surface(side * if (large) 0.16f else 0.2237f, 0.12f)
+            // Rounded like an app icon (clipped too, so nothing ever pokes out square).
+            val rad = side * if (large) 0.18f else 0.26f
+            pane.background = pane.surface(rad, 0.12f)
+            pane.outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(v: View, o: android.graphics.Outline) {
+                    o.setRoundRect(0, 0, v.width, v.height, rad)
+                }
+            }
+            pane.clipToOutline = true
             build(pane, apps, side)
         }
         setOnClickListener {
