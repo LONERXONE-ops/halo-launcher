@@ -466,8 +466,12 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             }
             id.startsWith("app:") -> {
                 val app = AppRepo.byKey(id.removePrefix("app:")) ?: return null
-                val icon = iconView(app, 56, true)
-                Cell(this, editor, "home", id, icon, longPressEdits = false, minusFromCentre = dp(56) / 2).apply {
+                // Bigger and without names by default (both in Settings → Icons).
+                val p = Prefs.get(this)
+                val labels = p.getBoolean(Prefs.SHOW_LABELS, false)
+                val size = listOf(54, 62, 70)[p.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (labels) 6 else 0
+                val icon = iconView(app, size, labels)
+                Cell(this, editor, "home", id, icon, longPressEdits = false, minusFromCentre = dp(size) / 2).apply {
                     onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
                 }
             }

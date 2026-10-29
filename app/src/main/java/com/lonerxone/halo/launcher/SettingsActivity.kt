@@ -528,6 +528,11 @@ class SettingsActivity : Activity() {
             col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
 
+        // Home screen apps
+        section(col, "Apps on the home screen")
+        col.addView(group(switchRow("Show names", "Names under apps you put on the home screen", Prefs.SHOW_LABELS, false)))
+        chips(col, "Size", Prefs.HOME_ICON_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
+
         // Installed packs
         section(col, "Icon pack")
         val current = IconPacks.current(this)

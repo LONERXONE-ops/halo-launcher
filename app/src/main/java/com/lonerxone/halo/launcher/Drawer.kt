@@ -48,6 +48,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private val usedTitle: TextView
     private val pill: LinearLayout
     private val letters: LetterStrip
+    /** Beyond apps: a calculator answer, and searching the web or the Play Store. */
+    private val extras: LinearLayout
     private val bubble: TextView
     private val adapter = AppsAdapter()
     private var shown: List<App> = emptyList()
@@ -132,6 +134,11 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             clipToPadding = false
             adapter = this@Drawer.adapter
         }
+        extras = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        content.addView(extras, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         content.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -201,6 +208,61 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         letters.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
         letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
+        showExtras(search.text?.toString()?.trim().orEmpty())
+    }
+
+    private fun showExtras(q: String) {
+        extras.removeAllViews()
+        extras.visibility = if (q.isEmpty()) View.GONE else View.VISIBLE
+        if (q.isEmpty()) return
+        fun row(icon: Int, title: String, sub: String, onTap: () -> Unit) {
+            val r = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(11), dp(14), dp(11))
+                background = context.round(Palette.TILE2, dpf(18f))
+                setOnClickListener {
+                    it.bounce()
+                    onTap()
+                }
+            }
+            r.addView(ImageView(context).apply {
+                setImageResource(icon)
+                imageTintList = android.content.res.ColorStateList.valueOf(Palette.INK)
+            }, LinearLayout.LayoutParams(dp(18), dp(18)))
+            val t = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+            }
+            t.addView(context.text(15f, Palette.INK, bold = true).apply { text = title })
+            t.addView(context.text(12f, Palette.GREY).apply { text = sub })
+            r.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            extras.addView(r, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+        }
+        Calc.eval(q)?.let { v ->
+            val shownV = Calc.format(v)
+            row(R.drawable.ic_info, "= $shownV", "Tap to copy") {
+                context.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("result", shownV))
+                android.widget.Toast.makeText(context, "Copied $shownV", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        row(R.drawable.ic_search, "Search the web", "\"$q\"") {
+            open(android.content.Intent(android.content.Intent.ACTION_WEB_SEARCH).putExtra(android.app.SearchManager.QUERY, q), "https://www.google.com/search?q=" + android.net.Uri.encode(q))
+        }
+        if (shown.isEmpty()) row(R.drawable.ic_apps, "Find \"$q\" on the Play Store", "Get an app") {
+            open(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=" + android.net.Uri.encode(q) + "&c=apps")), "https://play.google.com/store/search?q=" + android.net.Uri.encode(q) + "&c=apps")
+        }
+    }
+
+    private fun open(i: android.content.Intent, fallback: String) {
+        try {
+            context.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+            try {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(fallback)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun firstLetter(s: String): Char {
@@ -450,5 +512,79 @@ class LetterStrip(context: Context, private val onPick: (Char?) -> Unit) : View(
             }
         }
         return true
+    }
+}
+
+/** A small calculator for the search box: + - × ÷ ^ %, brackets, decimals. */
+object Calc {
+    fun eval(src: String): Double? {
+        val s = src.replace(" ", "").replace('×', '*').replace('x', '*').replace('÷', '/').replace(',', '.')
+        if (s.none { it in "+-*/^%" } || s.any { it !in "0123456789.+-*/^%()" }) return null
+        return try {
+            val p = P(s)
+            val v = p.expr()
+            if (p.i != s.length || v.isNaN() || v.isInfinite()) null else v
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun format(v: Double): String =
+        if (v == Math.floor(v) && Math.abs(v) < 1e15) v.toLong().toString() else String.format(java.util.Locale.US, "%.8f", v).trimEnd('0').trimEnd('.')
+
+    private class P(val s: String) {
+        var i = 0
+        fun expr(): Double {
+            var v = term()
+            while (i < s.length && (s[i] == '+' || s[i] == '-')) {
+                val op = s[i++]
+                val r = term()
+                v = if (op == '+') v + r else v - r
+            }
+            return v
+        }
+        fun term(): Double {
+            var v = power()
+            while (i < s.length && (s[i] == '*' || s[i] == '/' || s[i] == '%')) {
+                val op = s[i++]
+                if (op == '%' && (i >= s.length || s[i] in "+-*/)")) {
+                    v /= 100.0
+                    continue
+                }
+                val r = power()
+                v = when (op) {
+                    '*' -> v * r
+                    '/' -> v / r
+                    else -> v % r
+                }
+            }
+            return v
+        }
+        fun power(): Double {
+            val b = unary()
+            if (i < s.length && s[i] == '^') {
+                i++
+                return Math.pow(b, power())
+            }
+            return b
+        }
+        fun unary(): Double {
+            if (i < s.length && s[i] == '-') {
+                i++
+                return -unary()
+            }
+            return atom()
+        }
+        fun atom(): Double {
+            if (i < s.length && s[i] == '(') {
+                i++
+                val v = expr()
+                if (i < s.length && s[i] == ')') i++
+                return v
+            }
+            val st = i
+            while (i < s.length && (s[i].isDigit() || s[i] == '.')) i++
+            return s.substring(st, i).toDouble()
+        }
     }
 }

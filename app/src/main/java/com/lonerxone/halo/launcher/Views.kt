@@ -106,9 +106,11 @@ class AppIconView(
 
     override fun onDraw(canvas: Canvas) {
         val cx = width / 2f
+        // No name under it: sit in the middle of its space.
+        val top = if (!showLabel && height > px) (height - px) / 2f else iconTop
         result?.let {
             iconPaint.alpha = (255 * fade).toInt()
-            dst.set(cx - px / 2f, iconTop, cx + px / 2f, iconTop + px)
+            dst.set(cx - px / 2f, top, cx + px / 2f, top + px)
             if (it.glass) {
                 val t = tile ?: (
                     if (liveGlass) GlassDrawable(this, px * 0.2237f, darkness = 0.04f, bendPx = dpf(7f), owned = true)
@@ -121,13 +123,13 @@ class AppIconView(
             }
             canvas.drawBitmap(it.bitmap, null, dst, iconPaint)
         }
-        if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, iconTop + px + dpf(16f), labelPaint)
+        if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, top + px + dpf(16f), labelPaint)
         if (badge > 0) {
             val label = if (badge > 99) "99+" else badge.toString()
             val h = dpf(18f)
             val w = max(h, badgeText.measureText(label) + dpf(10f))
             val right = cx + px / 2f + dpf(5f)
-            pill.set(right - w, iconTop - dpf(6f), right, iconTop - dpf(6f) + h)
+            pill.set(right - w, top - dpf(6f), right, top - dpf(6f) + h)
             val rim = dpf(2f)
             canvas.drawRoundRect(pill.left - rim, pill.top - rim, pill.right + rim, pill.bottom + rim, h / 2f + rim, h / 2f + rim, rimPaint)
             canvas.drawRoundRect(pill, h / 2f, h / 2f, badgePaint)
@@ -315,7 +317,7 @@ class DockBar(context: Context) : LinearLayout(context) {
     /** One UI 9-style dock styles: glass, solid, clear, or tinted with the wallpaper's colour. */
     fun restyle() {
         val r = dpf(34f)
-        background = when (Prefs.get(context).getInt(Prefs.DOCK_STYLE, GLASS)) {
+        background = when (Prefs.get(context).getInt(Prefs.DOCK_STYLE, GLASS).let { if (it == TINTED) GLASS else it }) {
             SOLID -> context.round(Palette.TILE, r)
             CLEAR -> null
             TINTED -> {
@@ -333,7 +335,7 @@ class DockBar(context: Context) : LinearLayout(context) {
         const val SOLID = 1
         const val CLEAR = 2
         const val TINTED = 3
-        val NAMES = listOf("Glass", "Solid", "Clear", "Tinted")
+        val NAMES = listOf("Glass", "Solid", "Clear")
     }
 
     /** Icon size for this many apps. */

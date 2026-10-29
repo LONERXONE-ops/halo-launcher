@@ -147,7 +147,10 @@ object Prefs {
     const val WEATHER_AT = "w_at"
     const val FAHRENHEIT = "fahrenheit"
     const val LAUNCHES = "launches"
+    /** Names under apps on the home screen (off by default, like a clean iOS-style screen). */
     const val SHOW_LABELS = "labels"
+    /** Home screen app icon size: 0 normal, 1 large (default), 2 extra large. */
+    const val HOME_ICON_SIZE = "home_icon_size"
     /** Built-in widgets switched off (comma list of ids). */
     const val WIDGETS_OFF = "widgets_off"
     const val STEP_GOAL = "step_goal"
