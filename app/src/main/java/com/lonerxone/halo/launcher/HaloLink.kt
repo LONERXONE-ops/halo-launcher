@@ -147,6 +147,11 @@ object HaloLink {
     private var cacheKey = ""
 
     /** The last song that played, shown paused; null if there's never been one. */
+    /** Which song the saved cover belongs to (so an old cover never shows with a new song). */
+    private var artSavedFor = ""
+    /** Saves happen one after another, in order (never an older song over a newer one). */
+    private val saver = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     fun lastSong(c: Context): Music? {
         if (!cacheLoaded) {
             cacheLoaded = true
@@ -154,11 +159,14 @@ object HaloLink {
                 val p = c.getSharedPreferences("music_cache", Context.MODE_PRIVATE)
                 val t = p.getString("title", null)
                 if (!t.isNullOrEmpty()) {
+                    val k = "$t|${p.getString("artist", "")}"
+                    artSavedFor = p.getString("art_for", "").orEmpty()
                     val f = java.io.File(c.cacheDir, "last_cover.png")
-                    val art = if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.path) else null
+                    // Only this song's own cover.
+                    val art = if (artSavedFor == k && f.exists()) android.graphics.BitmapFactory.decodeFile(f.path) else null
                     cachedMusic = Music(t, p.getString("artist", "").orEmpty(), p.getString("app", "").orEmpty(), false, art,
                         p.getInt("accent", Palette.GRAPHITE), p.getLong("dur", 0L), p.getLong("pos", 0L), 0L, 1f)
-                    cacheKey = "$t|${p.getString("artist", "")}"
+                    cacheKey = k
                 }
             } catch (_: Exception) {
             }
@@ -166,24 +174,40 @@ object HaloLink {
         return cachedMusic
     }
 
+    /**
+     * Keeps the last song played, always the latest: every update from Halo
+     * replaces it (name, artist, app, colour, length, where you stopped), and
+     * the cover is saved as soon as it arrives (players often send the name
+     * first and the cover a moment later).
+     */
     private fun remember(c: Context, m: Music) {
         val k = "${m.title}|${m.artist}"
-        val newSong = k != cacheKey
         cacheKey = k
-        cachedMusic = Music(m.title, m.artist, m.app, false, m.art, m.accent, m.durationMs, m.position(), 0L, 1f)
         cacheLoaded = true
+        // Same song, cover not here yet: keep the cover we already have for it.
+        val art = m.art ?: cachedMusic?.takeIf { "${it.title}|${it.artist}" == k }?.art
+        cachedMusic = Music(m.title, m.artist, m.app, false, art, m.accent, m.durationMs, m.position(), 0L, 1f)
         val app = c.applicationContext
-        val art = m.art
         val pos = m.position()
-        Thread {
+        val saveArt = m.art != null && artSavedFor != k
+        if (saveArt) artSavedFor = k
+        val cover = m.art
+        saver.execute {
             try {
-                app.getSharedPreferences("music_cache", Context.MODE_PRIVATE).edit()
+                val e = app.getSharedPreferences("music_cache", Context.MODE_PRIVATE).edit()
                     .putString("title", m.title).putString("artist", m.artist).putString("app", m.app)
-                    .putInt("accent", m.accent).putLong("dur", m.durationMs).putLong("pos", pos).apply()
-                if (newSong && art != null) java.io.File(app.cacheDir, "last_cover.png").outputStream().use { art.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    .putInt("accent", m.accent).putLong("dur", m.durationMs).putLong("pos", pos)
+                if (saveArt && cover != null) {
+                    java.io.File(app.cacheDir, "last_cover.png").outputStream().use { cover.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    e.putString("art_for", k)
+                } else if (m.art == null && artSavedFor != k) {
+                    // A new song with no cover (yet): don't let the old cover stand in for it.
+                    e.putString("art_for", "")
+                }
+                e.apply()
             } catch (_: Exception) {
             }
-        }.start()
+        }
     }
 
     /** After you seek: show the new spot straight away (Halo confirms a moment later). */
