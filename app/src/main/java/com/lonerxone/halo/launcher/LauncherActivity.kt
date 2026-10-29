@@ -34,7 +34,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -77,7 +76,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private var wxFace: WeatherFace? = null
     private var musicTick: Runnable? = null
     /** An app's long-press menu that turns into a drag if the finger moves on. */
-    private var menuDrag: Triple<App, View, PopupMenu>? = null
+    private var menuDrag: Triple<App, View, HaloMenu>? = null
     private var downRawX = 0f
     private var downRawY = 0f
     private lateinit var editor: Editor
@@ -644,37 +643,26 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     /** "+": put a widget on the home screen, bring back the music player, or add an Android widget. */
     private fun addMenu(anchor: View) {
-        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
+        val m = HaloMenu(anchor).header("Add to home screen")
         val off = HomeWidgets.ALL.filter { !Prefs.widgetOn(this, it.id) }
-        off.forEachIndexed { i, spec -> m.menu.add(0, 100 + i, i, spec.name) }
-        if (!HomeLayout.has(this, "clock")) m.menu.add(1, 3, 40, "Clock")
-        if (!HomeLayout.has(this, "date")) m.menu.add(1, 4, 41, "Date")
-        if (!HomeLayout.has(this, "wx")) m.menu.add(1, 5, 42, "Weather (on the wallpaper)")
-        m.menu.add(1, 6, 45, "App…")
-        m.menu.add(1, 1, 60, "Android widget…")
-        m.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> {
-                    @Suppress("DEPRECATION")
-                    startActivityForResult(Intent(this, WidgetPickActivity::class.java), REQ_WIDGET)
-                }
-                3 -> addItem("clock", 2, 2)
-                4 -> addItem("date", 2, 1)
-                5 -> addItem("wx", 2, 1)
-                6 -> {
-                    // Open the app list; long-press an app there and drag it here (or use its menu).
-                    editor.exit()
-                    drawer.visibility = View.VISIBLE
-                    drawer.open()
-                    Toast.makeText(this, "Hold an app and drag it onto your home screen", Toast.LENGTH_SHORT).show()
-                }
-                else -> {
-                    val spec = off.getOrNull(item.itemId - 100) ?: return@setOnMenuItemClickListener true
-                    val (sx, sy) = HomeLayout.spansFor(spec.defaultSize)
-                    addItem("w:${spec.id}", sx, sy)
-                }
-            }
-            true
+        for (spec in off) m.add(spec.name, R.drawable.ic_widgets) {
+            val (sx, sy) = HomeLayout.spansFor(spec.defaultSize)
+            addItem("w:${spec.id}", sx, sy)
+        }
+        m.divider()
+        if (!HomeLayout.has(this, "clock")) m.add("Clock", R.drawable.ic_clock) { addItem("clock", 2, 2) }
+        if (!HomeLayout.has(this, "date")) m.add("Date", R.drawable.ic_clock) { addItem("date", 2, 1) }
+        if (!HomeLayout.has(this, "wx")) m.add("Weather on the wallpaper", R.drawable.w_sun) { addItem("wx", 2, 1) }
+        m.add("App…", R.drawable.ic_apps) {
+            // Open the app list; hold an app there and drag it here (or use its menu).
+            editor.exit()
+            drawer.visibility = View.VISIBLE
+            drawer.open()
+            Toast.makeText(this, "Hold an app and drag it onto your home screen", Toast.LENGTH_SHORT).show()
+        }
+        m.add("Android widget…", R.drawable.ic_plus) {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(this, WidgetPickActivity::class.java), REQ_WIDGET)
         }
         m.show()
     }
@@ -847,7 +835,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     /** Long-press: app shortcuts, then dock / hide / info / uninstall. */
     override fun appMenu(app: App, anchor: View) {
         anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-        val menu = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
+        val menu = HaloMenu(anchor).header(app.label)
         val la = getSystemService(LauncherApps::class.java)
         val shortcuts = try {
             if (la.hasShortcutHostPermission()) {
@@ -861,64 +849,68 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         } catch (_: Exception) {
             emptyList()
         }
-        shortcuts.forEachIndexed { i, s -> menu.menu.add(0, 100 + i, i, s.shortLabel ?: s.longLabel ?: "Shortcut") }
-        val inDock = dockApps().any { it.key == app.key }
-        val homeId = "app:${app.key}"
-        val onHome = HomeLayout.has(this, homeId)
-        menu.menu.add(1, 8, 9, if (onHome) "Remove from home screen" else "Add to home screen")
-        menu.menu.add(1, 1, 10, if (inDock) "Remove from dock" else "Add to dock")
-        menu.menu.add(1, 6, 11, "Change dock apps")
-        menu.menu.add(1, 7, 15, "Edit home screen")
-        menu.menu.add(1, 3, 12, "Hide app")
-        menu.menu.add(1, 4, 13, "App info")
-        menu.menu.add(1, 5, 14, "Uninstall")
-        menu.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                in 100..199 -> try {
-                    la.startShortcut(shortcuts[item.itemId - 100], null, null)
+        // The app's own shortcuts first, with their icons.
+        for (sc in shortcuts) {
+            val icon = try {
+                la.getShortcutIconDrawable(sc, resources.displayMetrics.densityDpi)
+            } catch (_: Exception) {
+                null
+            }
+            menu.addDrawable((sc.shortLabel ?: sc.longLabel ?: "Shortcut").toString(), icon) {
+                try {
+                    la.startShortcut(sc, null, null)
                 } catch (_: Exception) {
                     Toast.makeText(this, "Couldn't open that shortcut", Toast.LENGTH_SHORT).show()
                 }
-                1 -> {
-                    val cur = Prefs.list(this, Prefs.DOCK).ifEmpty { dockApps().map { it.key }.toMutableList() }
-                    if (inDock) cur.remove(app.key) else {
-                        if (cur.size >= DOCK_MAX) cur.removeAt(cur.size - 1)
-                        cur.add(app.key)
-                    }
-                    Prefs.setList(this, Prefs.DOCK, cur)
-                    rebuildApps()
-                }
-                8 -> if (onHome) {
-                    HomeLayout.remove(this, homeId)
-                    rebuildHome()
-                } else {
-                    if (drawer.isOpen) drawer.close()
-                    addItem(homeId, 1, 1)
-                }
-                6 -> pickDock()
-                7 -> {
-                    if (drawer.isOpen) drawer.close()
-                    editor.enter()
-                }
-                3 -> {
-                    val h = Prefs.list(this, Prefs.HIDDEN)
-                    if (app.key !in h) h.add(app.key)
-                    Prefs.setList(this, Prefs.HIDDEN, h)
-                    Toast.makeText(this, "${app.label} hidden. Search still finds it.", Toast.LENGTH_LONG).show()
-                    rebuildApps()
-                }
-                4 -> try {
-                    la.startAppDetailsActivity(app.component, app.user, null, null)
-                } catch (_: Exception) {
-                }
-                5 -> try {
-                    startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.pkg}")))
-                } catch (_: Exception) {
-                }
             }
-            true
         }
-        menu.setOnDismissListener { if (menuDrag?.third === menu) menuDrag = null }
+        menu.divider()
+        val inDock = dockApps().any { it.key == app.key }
+        val homeId = "app:${app.key}"
+        val onHome = HomeLayout.has(this, homeId)
+        menu.add(if (onHome) "Remove from home screen" else "Add to home screen", R.drawable.ic_home) {
+            if (onHome) {
+                HomeLayout.remove(this, homeId)
+                rebuildHome()
+            } else {
+                if (drawer.isOpen) drawer.close()
+                addItem(homeId, 1, 1)
+            }
+        }
+        menu.add(if (inDock) "Remove from dock" else "Add to dock", R.drawable.ic_dock) {
+            val cur = Prefs.list(this, Prefs.DOCK).ifEmpty { dockApps().map { it.key }.toMutableList() }
+            if (inDock) cur.remove(app.key) else {
+                if (cur.size >= DOCK_MAX) cur.removeAt(cur.size - 1)
+                cur.add(app.key)
+            }
+            Prefs.setList(this, Prefs.DOCK, cur)
+            rebuildApps()
+        }
+        menu.add("Edit home screen", R.drawable.ic_edit) {
+            if (drawer.isOpen) drawer.close()
+            editor.enter()
+        }
+        menu.divider()
+        menu.add("Hide app", R.drawable.ic_eye_off) {
+            val h = Prefs.list(this, Prefs.HIDDEN)
+            if (app.key !in h) h.add(app.key)
+            Prefs.setList(this, Prefs.HIDDEN, h)
+            Toast.makeText(this, "${app.label} hidden. Search still finds it.", Toast.LENGTH_LONG).show()
+            rebuildApps()
+        }
+        menu.add("App info", R.drawable.ic_info) {
+            try {
+                la.startAppDetailsActivity(app.component, app.user, null, null)
+            } catch (_: Exception) {
+            }
+        }
+        menu.add("Uninstall", R.drawable.ic_trash, danger = true) {
+            try {
+                startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.pkg}")))
+            } catch (_: Exception) {
+            }
+        }
+        menu.onDismiss = { if (menuDrag?.third === menu) menuDrag = null }
         menu.show()
         // Keep holding and move: the menu closes and the app comes with your finger.
         menuDrag = Triple(app, anchor, menu)
@@ -1307,11 +1299,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     override fun removeFromFolder(id: String, app: App, anchor: View) {
-        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
-        m.menu.add(0, 1, 0, "Take out of folder")
-        m.menu.add(0, 2, 1, "App info")
-        m.setOnMenuItemClickListener { item ->
-            if (item.itemId == 1) {
+        HaloMenu(anchor).header(app.label)
+            .add("Take out of folder", R.drawable.ic_arrow_up) {
                 val left = Groups.folderApps(this, id).filter { it != app.key }
                 Groups.setFolderApps(this, id, left)
                 val f = HomeLayout.get(this, id)
@@ -1324,15 +1313,14 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 if (!HomeLayout.has(this, "app:" + app.key)) HomeLayout.add(this, "app:" + app.key, 1, 1, preferPage = f?.page ?: pager.current)
                 sheet?.close()
                 rebuildHome()
-            } else {
+            }
+            .add("App info", R.drawable.ic_info) {
                 try {
                     getSystemService(LauncherApps::class.java).startAppDetailsActivity(app.component, app.user, null, null)
                 } catch (_: Exception) {
                 }
             }
-            true
-        }
-        m.show()
+            .show()
     }
 
     override fun closed() {
@@ -1342,12 +1330,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     /** Edit mode, tap a stack: take a widget out, or split the stack up. */
     private fun stackMenu(id: String, anchor: View) {
         val ids = Groups.stackWidgets(this, id)
-        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
-        ids.forEachIndexed { i, w -> m.menu.add(0, 10 + i, i, "Take out " + HomeWidgets.ALL.firstOrNull { it.id == w }?.name.orEmpty()) }
-        m.menu.add(1, 1, 50, "Split the stack")
-        m.setOnMenuItemClickListener { item ->
+        val m = HaloMenu(anchor).header("Widget stack")
+        fun takeOut(out: List<String>) {
             val st = HomeLayout.get(this, id)
-            val out = if (item.itemId == 1) ids.drop(1) else listOfNotNull(ids.getOrNull(item.itemId - 10))
             val keep = ids - out.toSet()
             Groups.setStackWidgets(this, id, keep)
             if (keep.size == 1) HomeLayout.swapId(this, id, "w:" + keep[0])
@@ -1357,8 +1342,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 HomeLayout.add(this, "w:$w", sx, sy, preferPage = st?.page ?: pager.current)
             }
             rebuildHome()
-            true
         }
+        for (w in ids) m.add("Take out " + HomeWidgets.ALL.firstOrNull { it.id == w }?.name.orEmpty(), R.drawable.ic_arrow_up) { takeOut(listOf(w)) }
+        m.divider()
+        m.add("Split the stack", R.drawable.ic_widgets) { takeOut(ids.drop(1)) }
         m.show()
     }
 

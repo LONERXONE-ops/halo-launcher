@@ -249,7 +249,10 @@ object Glass {
 
     private fun prepare(src: Bitmap, w: Int, h: Int): Prepared {
         val s = maxOf(w.toFloat() / src.width, h.toFloat() / src.height)
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        // 16-bit colour: half the memory of a full-screen picture (a wallpaper
+        // has no transparency), so Android is less likely to close the
+        // launcher while you're in another app.
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
         val m = Matrix().apply {
             setScale(s, s)
             postTranslate((w - src.width * s) / 2f, (h - src.height * s) / 2f)

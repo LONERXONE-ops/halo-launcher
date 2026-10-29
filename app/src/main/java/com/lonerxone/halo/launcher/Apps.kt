@@ -65,7 +65,19 @@ object AppRepo {
                 override fun onPackagesUnavailable(packageNames: Array<out String>, user: UserHandle, replacing: Boolean) = reload(app, null)
             }, main)
         }
-        reload(app, null)
+        if (apps.isEmpty()) {
+            // First start (or the launcher was closed by Android to save
+            // memory): read the app list right away so the dock and home
+            // icons appear in the very first frame instead of popping in.
+            apps = try {
+                query(app)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            for (l in listeners.toList()) l()
+        } else {
+            reload(app, null)
+        }
     }
 
     private fun reload(ctx: Context, changedPkg: String?) {
@@ -166,7 +178,7 @@ object Icons {
     /** [glass] = draw a glass tile behind the (transparent) symbol. */
     class Result(val bitmap: Bitmap, val glass: Boolean = false)
 
-    private val cache = object : LruCache<String, Result>(20 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Result>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Result) = value.bitmap.byteCount
     }
     private val io = Executors.newFixedThreadPool(2)
@@ -200,6 +212,51 @@ object Icons {
 
     fun cached(app: App, style: Int, size: Int): Result? = cache.get(keyOf(app, style, size))
 
+    /**
+     * Rendered icons are also kept on disk, so after Android closes the
+     * launcher (it does that to save memory while you're in a big app) the
+     * icons come straight back instead of being worked out again.
+     */
+    private fun diskFile(ctx: Context, app: App, style: Int, size: Int): java.io.File {
+        val stamp = try {
+            java.io.File(app.info.applicationInfo.sourceDir).lastModified()
+        } catch (_: Exception) {
+            0L
+        }
+        val dir = java.io.File(ctx.cacheDir, "icons")
+        return java.io.File(dir, Integer.toHexString((keyOf(app, style, size) + "|" + stamp).hashCode()) + ".png")
+    }
+
+    /** From memory, else from the disk cache (fast enough to do right away); null = render it. */
+    fun cachedOrDisk(ctx: Context, app: App, style: Int, size: Int): Result? {
+        cached(app, style, size)?.let { return it }
+        val f = diskFile(ctx, app, style, size)
+        val g = java.io.File(f.path + ".g")
+        if (!f.exists()) return null
+        val b = try {
+            android.graphics.BitmapFactory.decodeFile(f.path)
+        } catch (_: Throwable) {
+            null
+        } ?: return null
+        val r = Result(b, glass = g.exists())
+        cache.put(keyOf(app, style, size), r)
+        return r
+    }
+
+    private fun saveDisk(ctx: Context, app: App, style: Int, size: Int, r: Result) {
+        try {
+            val f = diskFile(ctx, app, style, size)
+            val dir = f.parentFile ?: return
+            dir.mkdirs()
+            // Keep the folder from growing forever.
+            if ((dir.list()?.size ?: 0) > 600) dir.listFiles()?.forEach { it.delete() }
+            f.outputStream().use { r.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val g = java.io.File(f.path + ".g")
+            if (r.glass) g.createNewFile() else g.delete()
+        } catch (_: Throwable) {
+        }
+    }
+
     private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v3"
 
     fun load(ctx: Context, app: App, style: Int, size: Int, done: (Result) -> Unit) {
@@ -214,6 +271,7 @@ object Icons {
             }
             if (r != null) {
                 cache.put(k, r)
+                saveDisk(c, app, style, size, r)
                 main.post { done(r) }
             }
         }

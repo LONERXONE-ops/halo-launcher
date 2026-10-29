@@ -87,7 +87,7 @@ class AppIconView(
         val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
         styleUsed = style
 
-        Icons.cached(app, style, px)?.let { result = it; invalidate(); return }
+        Icons.cachedOrDisk(context, app, style, px)?.let { result = it; invalidate(); return }
         fade = 0f
         Icons.load(context, app, style, px) { r ->
             result = r
