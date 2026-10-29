@@ -220,7 +220,7 @@ class FolderSheet(
             card.pivotY = (loc[1] + from.height / 2f - cl[1])
             card.scaleX = 0.3f
             card.scaleY = 0.3f
-            card.animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.PathInterpolator(0.16f, 1f, 0.3f, 1f)).setDuration(320).start()
+            card.animate().scaleX(1f).scaleY(1f).setInterpolator(Spring(0.45f)).setDuration(460).start()
         }
     }
 
@@ -279,7 +279,7 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
         to.visibility = VISIBLE
         to.translationY = h * dir
         to.alpha = 0.4f
-        to.animate().translationY(0f).alpha(1f).setDuration(300).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.2f, 1f)).start()
+        to.animate().translationY(0f).alpha(1f).setDuration(420).setInterpolator(Spring(0.4f)).start()
         from.animate().translationY(-h * dir * 0.6f).alpha(0f).setDuration(260).withEndAction {
             from.visibility = INVISIBLE
             from.translationY = 0f

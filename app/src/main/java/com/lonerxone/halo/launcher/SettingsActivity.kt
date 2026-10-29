@@ -62,6 +62,8 @@ class SettingsActivity : Activity() {
             "look" -> Page.LOOK
             "dock" -> Page.DOCK
             "icons" -> Page.ICONS
+            "gestures" -> Page.GESTURES
+            "motion" -> Page.MOTION
             else -> Page.MENU
         }
         if (AppRepo.apps.isEmpty()) {
@@ -101,6 +103,7 @@ class SettingsActivity : Activity() {
             setPadding(dp(16), dp(12), dp(16), dp(40))
         }
         header(col)
+        explain(col)
         when (page) {
             Page.MENU -> menuPage(col)
             Page.THEME -> themePage(col)
@@ -209,7 +212,36 @@ class SettingsActivity : Activity() {
             },
         ))
         section(col, "")
-        col.addView(group(nav(R.drawable.ic_info, "About", "Credits and licences") { go(Page.ABOUT) }))
+        col.addView(group(
+            nav(R.drawable.ic_info, "Take the tour", "How Halo Launcher works, and what every setting does") {
+                startActivity(Intent(this, OnboardingActivity::class.java))
+            },
+            nav(R.drawable.ic_info, "About", "Credits and licences") { go(Page.ABOUT) },
+        ))
+    }
+
+    /** A plain-words line at the top of each page: what the things here change. */
+    private fun explain(col: LinearLayout) {
+        val t = when (page) {
+            Page.THEME -> "How everything looks. Liquid Glass makes tiles, the dock and menus real glass that bends your wallpaper; Solid uses flat dark tiles. Adaptive colour tints them with your wallpaper's main colour."
+            Page.LOOK -> "The picture behind your home screen and app list. Leave it on your wallpaper, or pick one of your own photos just for Halo Launcher."
+            Page.CLOCK -> "The big clock on page 1. Pick a face, its colour, glass digits, alignment, and the style of the date under it. Tip: while editing the home screen, tap the clock to change it there."
+            Page.MOTION -> "How things move. App opening: the animation when you open and close an app. Turning pages: the effect when you swipe between home pages. Turn animations off for the snappiest feel."
+            Page.ICONS -> "How app icons look: Normal, Liquid Glass (frosted tiles) or an icon pack you installed or downloaded. Labels and icon size for the home screen are here too."
+            Page.DOCK -> "The floating bar at the bottom. Choose which apps sit in it (up to 5) and whether it's glass or solid."
+            Page.WIDGETS -> "Turn widgets on or off. On widgets appear on your home pages, where you can move and resize them. Drop one widget onto another of the same size to make a stack."
+            Page.GESTURES -> "What your fingers do on the home screen: swipe up for apps, swipe down for notifications (or Halo's center), double-tap to lock."
+            Page.WEATHER -> "Where the weather comes from: your location, or a city you type. Used by the weather item and widget."
+            Page.HALO -> "Halo is the dynamic island app. When both are installed they talk: music, timers and notifications show in the island, and swiping down can open Halo's notification center."
+            Page.BACKUP -> "Save your whole setup (layout, widgets, theme, dock, icons) to a file, and load it back on a new phone or after a reset."
+            else -> null
+        } ?: return
+        col.addView(text(13.5f, Palette.SILVER, lines = 6).apply {
+            text = t
+            setLineSpacing(0f, 1.15f)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = round(Color.argb(22, 255, 255, 255), dpf(16f))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
     }
 
     private fun updateCard(): View {

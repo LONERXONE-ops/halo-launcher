@@ -174,7 +174,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         // Counters and caches change all the time and don't change the look.
         // (Steps update as you walk; these used to make every return home rebuild everything.)
         if (k.startsWith("launch") || k.startsWith("w_") || k.startsWith("timer") || k.startsWith("steps_") ||
-            k.startsWith("stackpos_") || k.startsWith("cd_") || k == Prefs.WALL_DAY || k == Prefs.NOTE
+            k.startsWith("stackpos_") || k.startsWith("cd_") || k == Prefs.WALL_DAY || k == Prefs.NOTE || k == Prefs.ONBOARDED
         ) return@OnSharedPreferenceChangeListener
         dirty = true
     }
@@ -184,7 +184,20 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         // Never stay zoomed away (an app that didn't open, a quick return).
         if (pager.alpha < 1f && pager.animate() != null) root.postDelayed({ if (pager.alpha < 0.99f) animateIn() }, 450L)
         startMusicTick()
+        // The welcome tour: once for everyone, including people who set up before it existed.
+        if (!tourAsked && OnboardingActivity.due(this)) {
+            tourAsked = true
+            root.postDelayed({
+                if (!isFinishing) {
+                    startActivity(Intent(this, OnboardingActivity::class.java))
+                    @Suppress("DEPRECATION")
+                    overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                }
+            }, 700L)
+        }
     }
+
+    private var tourAsked = false
 
     override fun onPause() {
         super.onPause()
@@ -394,8 +407,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             v.scaleX = 1.08f
             v.scaleY = 1.08f
             v.alpha = 0f
-            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300)
-                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.2f, 1f))
+            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(360)
+                .setInterpolator(Spring(0.25f))
                 .withEndAction {
                     v.setLayerType(View.LAYER_TYPE_NONE, null)
                     v.invalidateGlass()
@@ -813,7 +826,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             for (v in listOf<View>(pager, dock)) {
                 v.animate().cancel()
                 v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                v.animate().scaleX(1.12f).scaleY(1.12f).alpha(0f).setDuration(260)
+                v.animate().scaleX(1.12f).scaleY(1.12f).alpha(0f).setDuration(210)
                     .setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f))
                     .withEndAction { v.setLayerType(View.LAYER_TYPE_NONE, null) }.start()
             }

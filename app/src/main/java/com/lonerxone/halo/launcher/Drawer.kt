@@ -379,8 +379,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         val a = android.animation.ValueAnimator.ofFloat(start, target)
         val fast = (abs(velocity) / 4000f).coerceIn(0f, 0.5f)
-        a.duration = ((if (target > start) 340 else 260) * (0.45f + 0.55f * dist) * (1f - fast)).toLong().coerceAtLeast(120)
-        a.interpolator = if (target > start) android.view.animation.PathInterpolator(0.16f, 1f, 0.3f, 1f) else android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
+        a.duration = ((if (target > start) 420 else 220) * (0.45f + 0.55f * dist) * (1f - fast)).toLong().coerceAtLeast(120)
+        a.interpolator = if (target > start) Spring(0.3f) else android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
         a.addUpdateListener { setProgress(it.animatedValue as Float) }
         setLayerType(View.LAYER_TYPE_HARDWARE, null)
         a.addListener(object : android.animation.AnimatorListenerAdapter() {

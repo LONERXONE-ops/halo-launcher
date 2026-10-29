@@ -163,7 +163,7 @@ class HaloMenu(private val anchor: View) {
             k.scaleX = 0.82f
             k.scaleY = 0.82f
             k.alpha = 0f
-            k.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(220).setInterpolator(PathInterpolator(0.16f, 1f, 0.3f, 1f)).start()
+            k.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(380).setInterpolator(Spring(0.5f)).start()
             c.alpha = 0f
             c.animate().alpha(1f).setDuration(160).start()
         }

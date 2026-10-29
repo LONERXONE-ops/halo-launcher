@@ -158,6 +158,7 @@ object Prefs {
     const val WIDGETS_OFF = "widgets_off"
     const val STEP_GOAL = "step_goal"
     const val ANIMATIONS = "animations"
+    const val ONBOARDED = "onboarded_v"
     /** Glass.THEME_GLASS or Glass.THEME_SOLID. */
     const val THEME = "theme"
     /** Order of the built-in widgets ("|" list of ids). */
@@ -264,9 +265,9 @@ fun View.bounce() {
 fun View.pressable() {
     setOnTouchListener { v, e ->
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> v.animate().setStartDelay(0).scaleX(0.96f).scaleY(0.96f).setInterpolator(DecelerateInterpolator()).setDuration(120L).start()
+            MotionEvent.ACTION_DOWN -> v.animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setInterpolator(DecelerateInterpolator(2f)).setDuration(90L).start()
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(OvershootInterpolator(2f)).setDuration(300L).start()
+                v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(Spring(0.6f)).setDuration(420L).start()
         }
         false
     }
@@ -279,4 +280,18 @@ fun View.enter(delay: Long, distance: Float = dpf(22f)) {
     translationY = distance
     animate().alpha(1f).translationY(0f).setStartDelay(delay).setDuration(460L)
         .setInterpolator(DecelerateInterpolator(2.2f)).start()
+}
+
+/**
+ * A spring, as an interpolator: it shoots slightly past the target and
+ * settles, the way iOS and One UI motion feels. [bounce] 0 = no overshoot,
+ * 1 = lively. Fast at the start, so things feel snappy.
+ */
+class Spring(private val bounce: Float = 0.5f) : android.view.animation.Interpolator {
+    private val k = 7.5f - 2.5f * bounce
+    private val w = 8.5f + 3f * bounce
+    override fun getInterpolation(t: Float): Float {
+        if (t >= 1f) return 1f
+        return (1.0 - Math.exp((-k * t).toDouble()) * Math.cos((w * t).toDouble())).toFloat()
+    }
 }

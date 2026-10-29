@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
  * to the nearest page with a fling.
  */
 class HomePager(context: Context) : ViewGroup(context) {
-    private val scroller = OverScroller(context, android.view.animation.DecelerateInterpolator(2.2f))
+    private val scroller = OverScroller(context, Spring(0.35f))
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity * 3
     private var tracker: VelocityTracker? = null
@@ -119,7 +119,7 @@ class HomePager(context: Context) : ViewGroup(context) {
         current = p
         val dx = p * width - scrollX
         if (animate) {
-            scroller.startScroll(scrollX, 0, dx, 0, (260 + abs(dx) / 6).coerceAtMost(420))
+            scroller.startScroll(scrollX, 0, dx, 0, (300 + abs(dx) / 8).coerceAtMost(420))
             postInvalidateOnAnimation()
         } else {
             scrollTo(p * width, 0)

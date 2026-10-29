@@ -120,6 +120,12 @@
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
         <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:label="Welcome"
+            android:taskAffinity="com.lonerxone.halo.launcher.settings" />
+
+        <activity
             android:name=".PickAppsActivity"
             android:exported="false"
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
