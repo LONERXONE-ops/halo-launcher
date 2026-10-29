@@ -294,20 +294,49 @@ fun Context.text(sp: Float, color: Int, bold: Boolean = false, lines: Int = 1, c
 }
 
 /** A light bounce on tap. */
+/**
+ * A tap's little dip. It never grows past its real size (growing past it,
+ * even briefly, is what made things overlap their neighbours).
+ */
 fun View.bounce() {
     animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setDuration(80L).withEndAction {
-        animate().scaleX(1f).scaleY(1f).setInterpolator(OvershootInterpolator(2.5f)).setDuration(260L).start()
+        animate().scaleX(1f).scaleY(1f).setInterpolator(DecelerateInterpolator(2f)).setDuration(220L).start()
     }.start()
 }
 
-/** Shrinks while pressed and springs back on release, like iOS widgets. Keeps clicks working. */
+/**
+ * Shrinks while pressed and eases back on release. The dip waits a moment
+ * (Android's tap delay), so starting a scroll never makes whatever was under
+ * your finger dip and pop; and it never grows past its size on the way back.
+ */
 @SuppressLint("ClickableViewAccessibility")
 fun View.pressable() {
+    val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    var downX = 0f
+    var downY = 0f
+    val press = Runnable { animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setInterpolator(DecelerateInterpolator(2f)).setDuration(90L).start() }
+    fun release(v: View) {
+        v.removeCallbacks(press)
+        if (v.scaleX != 1f || v.scaleY != 1f) v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(DecelerateInterpolator(2f)).setDuration(220L).start()
+    }
     setOnTouchListener { v, e ->
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> v.animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setInterpolator(DecelerateInterpolator(2f)).setDuration(90L).start()
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(Spring(0.6f)).setDuration(420L).start()
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x
+                downY = e.y
+                v.postDelayed(press, android.view.ViewConfiguration.getTapTimeout().toLong())
+            }
+            MotionEvent.ACTION_MOVE -> if (kotlin.math.abs(e.x - downX) > slop || kotlin.math.abs(e.y - downY) > slop) release(v)
+            MotionEvent.ACTION_UP -> {
+                // A quick tap: show the dip now, then come back.
+                if (v.scaleX == 1f && v.handler?.hasCallbacks(press) == true) {
+                    v.removeCallbacks(press)
+                    v.animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setDuration(70L).withEndAction { release(v) }.start()
+                } else {
+                    release(v)
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> release(v)
         }
         false
     }
@@ -328,8 +357,10 @@ fun View.enter(delay: Long, distance: Float = dpf(22f)) {
  * 1 = lively. Fast at the start, so things feel snappy.
  */
 class Spring(private val bounce: Float = 0.5f) : android.view.animation.Interpolator {
-    private val k = 7.5f - 2.5f * bounce
-    private val w = 8.5f + 3f * bounce
+    // Tuned so the overshoot stays small (about 2-6%): lively, but nothing
+    // swings far enough past its place to cross into its neighbours.
+    private val k = 9f - 2f * bounce
+    private val w = 7.5f + 2f * bounce
     override fun getInterpolation(t: Float): Float {
         if (t >= 1f) return 1f
         return (1.0 - Math.exp((-k * t).toDouble()) * Math.cos((w * t).toDouble())).toFloat()

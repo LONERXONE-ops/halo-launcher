@@ -405,9 +405,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         for (g in grids) for (i in 0 until g.childCount) ((g.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { if (it.app.key == key) views += it }
         for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { if (it.app.key == key) views += it }
         for (v in views) {
-            v.scaleX = 0.72f
-            v.scaleY = 0.72f
-            v.animate().scaleX(1f).scaleY(1f).setDuration(420).setInterpolator(android.view.animation.OvershootInterpolator(2.6f)).start()
+            v.scaleX = 0.8f
+            v.scaleY = 0.8f
+            v.animate().scaleX(1f).scaleY(1f).setDuration(360).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
         }
     }
 

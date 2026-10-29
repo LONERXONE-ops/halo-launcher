@@ -500,7 +500,7 @@ class Editor(private val host: Host) {
             .translationX((loc[0] - oloc[0]).toFloat())
             .translationY((loc[1] - oloc[1]).toFloat())
             .scaleX(1f).scaleY(1f).alpha(1f)
-            .setInterpolator(Spring(0.4f))
+            .setInterpolator(Spring(0f))
             .setDuration(320)
             .withEndAction { finish() }
             .start()
@@ -534,7 +534,7 @@ class Editor(private val host: Host) {
                     o.translationX = dx
                     o.translationY = dy
                     o.animate().translationX(0f).translationY(0f)
-                        .setInterpolator(Spring(0.45f))
+                        .setInterpolator(Spring(0f))
                         .setDuration(380).start()
                 }
                 return true

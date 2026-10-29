@@ -583,7 +583,7 @@ class SettingsActivity : Activity() {
                         for ((k, v) in views.withIndex()) style(v, k == i)
                         it.scaleX = 0.92f
                         it.scaleY = 0.92f
-                        it.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.55f)).start()
+                        it.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
                         refreshLive()
                         stale = false
                     } else {

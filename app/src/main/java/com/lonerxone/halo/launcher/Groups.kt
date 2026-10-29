@@ -285,6 +285,14 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
 
     init {
         clipChildren = true
+        // Clip to the widget's rounded shape: a widget flipping in or out
+        // stays inside the stack instead of sliding over its neighbours.
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, dpf(26f))
+            }
+        }
+        clipToOutline = true
         index = Prefs.get(context).getInt("stackpos_" + stackId, 0).coerceIn(0, (widgets.size - 1).coerceAtLeast(0))
         for ((i, w) in widgets.withIndex()) {
             addView(w, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))

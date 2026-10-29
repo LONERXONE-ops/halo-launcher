@@ -127,7 +127,7 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
         }
         setOnClickListener {
             it.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).withEndAction {
-                it.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.6f)).start()
+                it.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
             }.start()
             command("play_pause")
         }
@@ -552,7 +552,7 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             }
             setOnClickListener {
                 it.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).withEndAction {
-                    it.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.6f)).start()
+                    it.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
                 }.start()
                 command("play_pause")
             }
