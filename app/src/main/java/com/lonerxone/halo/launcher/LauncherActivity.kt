@@ -1065,7 +1065,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
      * too (no finger movement means no new touch events), so this runs on a
      * timer while the finger, or the item itself, is past the edge.
      */
-    private val edgeTick = Runnable {
+    private val edgeTick: Runnable = Runnable {
         edgeQueued = false
         val a = hoverArgs ?: return@Runnable
         val id = hoverId ?: return@Runnable
@@ -1082,7 +1082,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         edgeQueued = true
         root.postDelayed(edgeTickRef, 750L)
     }
-    private val edgeTickRef = Runnable { edgeTick.run() }
+    private val edgeTickRef: Runnable = Runnable { edgeTick.run() }
 
     /** -1 / +1 when the finger (or a good part of the item) is past the left / right edge. */
     private fun edgeDir(id: String, left: Float, fingerX: Float): Int {

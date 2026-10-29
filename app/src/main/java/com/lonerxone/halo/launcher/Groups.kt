@@ -65,9 +65,9 @@ object Groups {
  * opens the rest.
  */
 @SuppressLint("ViewConstructor")
-class FolderTile(context: Context, val id: String, private val large: Boolean, private val open: (View) -> Unit, private val launch: (App, View) -> Unit) : FrameLayout(context) {
+class FolderTile(context: Context, val folderId: String, private val large: Boolean, private val open: (View) -> Unit, private val launch: (App, View) -> Unit) : FrameLayout(context) {
     init {
-        val apps = Groups.folderApps(context, id).mapNotNull { AppRepo.byKey(it) }
+        val apps = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
         val pane = FrameLayout(context)
         addView(pane, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
         pane.post {
@@ -92,7 +92,7 @@ class FolderTile(context: Context, val id: String, private val large: Boolean, p
         val pad = if (large) side / 10 else side / 7
         if (large) {
             grid.addView(context.text(11f, Palette.SILVER, caps = true).apply {
-                text = Groups.folderName(context, id)
+                text = Groups.folderName(context, folderId)
                 setPadding(dp(4), 0, 0, dp(6))
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
@@ -139,7 +139,7 @@ class FolderTile(context: Context, val id: String, private val large: Boolean, p
 @SuppressLint("ViewConstructor")
 class FolderSheet(
     context: Context,
-    private val id: String,
+    private val folderId: String,
     private val host: Host,
 ) : FrameLayout(context) {
     interface Host {
@@ -170,22 +170,22 @@ class FolderSheet(
             gravity = Gravity.CENTER_VERTICAL
         }
         head.addView(context.text(24f, Palette.INK, bold = true).apply {
-            text = Groups.folderName(context, id)
-            setOnClickListener { host.rename(this@FolderSheet.id) }
+            text = Groups.folderName(context, folderId)
+            setOnClickListener { host.rename(this@FolderSheet.folderId) }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         head.addView(context.text(13f, Color.BLACK, bold = true).apply {
             text = "+  Add"
             setPadding(dp(14), dp(8), dp(14), dp(8))
             background = context.round(Palette.INK, dpf(16f))
             pressable()
-            setOnClickListener { host.addApps(this@FolderSheet.id) }
+            setOnClickListener { host.addApps(this@FolderSheet.folderId) }
         })
         card.addView(head)
         card.addView(context.text(11.5f, Palette.GREY).apply {
             text = "Tap the name to rename. Long-press an app to take it out."
             setPadding(0, dp(4), 0, dp(14))
         })
-        val apps = Groups.folderApps(context, id).mapNotNull { AppRepo.byKey(it) }
+        val apps = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
         var row: LinearLayout? = null
         for ((i, a) in apps.withIndex()) {
             if (i % 4 == 0) {
@@ -196,7 +196,7 @@ class FolderSheet(
                 badge = HaloLink.badges[a.pkg] ?: 0
                 setOnClickListener { host.launch(a, it) }
                 setOnLongClickListener {
-                    host.removeFromFolder(this@FolderSheet.id, a, it)
+                    host.removeFromFolder(this@FolderSheet.folderId, a, it)
                     true
                 }
                 enter(i * 25L, dpf(10f))
@@ -238,7 +238,7 @@ class FolderSheet(
  * show which one you're on. Sideways swipes still turn the home page.
  */
 @SuppressLint("ViewConstructor")
-class WidgetStack(context: Context, val id: String, private val widgets: List<BaseWidget>) : FrameLayout(context) {
+class WidgetStack(context: Context, val stackId: String, private val widgets: List<BaseWidget>) : FrameLayout(context) {
     private var index = 0
     private val dots = object : View(context) {
         private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
@@ -261,7 +261,7 @@ class WidgetStack(context: Context, val id: String, private val widgets: List<Ba
 
     init {
         clipChildren = true
-        index = Prefs.get(context).getInt("stackpos_" + id, 0).coerceIn(0, (widgets.size - 1).coerceAtLeast(0))
+        index = Prefs.get(context).getInt("stackpos_" + stackId, 0).coerceIn(0, (widgets.size - 1).coerceAtLeast(0))
         for ((i, w) in widgets.withIndex()) {
             addView(w, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             w.visibility = if (i == index) VISIBLE else INVISIBLE
@@ -274,7 +274,7 @@ class WidgetStack(context: Context, val id: String, private val widgets: List<Ba
         val from = widgets[index]
         index = Math.floorMod(index + dir, widgets.size)
         val to = widgets[index]
-        Prefs.get(context).edit().putInt("stackpos_" + id, index).apply()
+        Prefs.get(context).edit().putInt("stackpos_" + stackId, index).apply()
         val h = height.toFloat()
         to.visibility = VISIBLE
         to.translationY = h * dir
