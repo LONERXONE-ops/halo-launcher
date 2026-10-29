@@ -284,6 +284,8 @@ abstract class TextArt(context: Context) : View(context) {
             val big = runs.maxOfOrNull { it.paint.textSize } ?: 60f
             rs.setFloatUniform("bend", big * 0.5f)
             rs.setFloatUniform("stepPx", max(1.5f, big * 0.02f))
+            val hc = Palette.GLASS_TINT
+            rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
             shaderPaint.shader = rs
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shaderPaint)
         } else {
@@ -322,6 +324,7 @@ abstract class TextArt(context: Context) : View(context) {
             uniform float2 origin;
             uniform float bend;
             uniform float stepPx;
+            uniform float4 hue;
 
             half4 main(float2 p) {
                 float cov = float(hard.eval(p).a);
@@ -339,6 +342,7 @@ abstract class TextArt(context: Context) : View(context) {
                 col.g = float(image.eval(q).g);
                 col.b = float(image.eval(q - off * 0.08).b);
                 col = mix(col, float3(1.0), 0.14 + 0.16 * rim);
+                col = mix(col, hue.rgb * 1.5, hue.a * 0.7);
                 float2 L = normalize(float2(-0.55, -0.85));
                 float facing = clamp(gl * 6.0, 0.0, 1.0);
                 float spec = pow(max(dot(-g / gl, L), 0.0), 2.5) * facing;
@@ -387,7 +391,7 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
         val zero = p.getBoolean(Prefs.CLOCK_ZERO, true)
         val h = DateFormat.format(if (h24) (if (zero) "HH" else "H") else (if (zero) "hh" else "h"), d).toString()
         val m = DateFormat.format("mm", d).toString()
-        val ampm = if (!h24 && p.getBoolean(Prefs.CLOCK_AMPM, false)) DateFormat.format("a", d).toString().uppercase() else ""
+        val ampm = ""
         return "$h:$m" to ampm
     }
 

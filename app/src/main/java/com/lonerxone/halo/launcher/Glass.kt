@@ -373,6 +373,7 @@ object Glass {
         uniform float radius;
         uniform float bend;
         uniform float4 tint;
+        uniform float4 hue;
         uniform float light;
 
         half4 main(float2 p) {
@@ -395,14 +396,25 @@ object Glass {
             col.r = image.eval(s - g * k * 0.08).r;
             col.g = image.eval(s).g;
             col.b = image.eval(s + g * k * 0.08).b;
+            // Vibrancy: what shows through keeps its colour (like iOS glass), not washed grey.
+            half lum = dot(col, half3(0.299, 0.587, 0.114));
+            col = mix(half3(lum), col, half(1.2));
             col = mix(col, half3(tint.rgb), half(tint.a));
+            // Adaptive colour: a wash of your wallpaper's hue through the whole pane.
+            col = mix(col, half3(hue.rgb), half(hue.a));
             col *= 1.04;
             float2 L = normalize(float2(-0.55, -0.85));
             float rim = smoothstep(0.55, 1.0, e) * pow(max(dot(g, L), 0.0), 1.5);
             float rim2 = smoothstep(0.75, 1.0, e) * pow(max(dot(g, -L), 0.0), 2.0);
             float edge = smoothstep(0.9, 1.0, e);
-            col += half3(rim * 0.40 * light + rim2 * 0.14 * light + edge * 0.05);
-            return half4(col, 1.0);
+            // The light on the rim picks up a little of the hue too.
+            half3 lightCol = mix(half3(1.0), half3(hue.rgb) * 1.6, half(min(hue.a * 1.5, 0.3)));
+            col += lightCol * half(rim * 0.40 * light + rim2 * 0.14 * light) + half3(edge * 0.05);
+            // A soft sheen across the top third, and a touch of depth at the bottom.
+            float y = p.y / size.y;
+            col += half3(0.045 * light * (1.0 - smoothstep(0.0, 0.38, y)));
+            col *= half(1.0 - 0.06 * smoothstep(0.7, 1.0, y));
+            return half4(clamp(col, half3(0.0), half3(1.0)), 1.0);
         }
     """
 }
@@ -496,6 +508,8 @@ class GlassDrawable(
             // The glass's tint: neutral, or your wallpaper's hue with Adaptive colour.
             val t = Palette.TILE
             rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness)
+            val hc = Palette.GLASS_TINT
+            rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
             rs.setFloatUniform("light", if (rimLight) 1f else 0.4f)
             paint.shader = rs
             canvas.save()
@@ -522,11 +536,17 @@ class GlassDrawable(
             fallback.shader = null
             fallback.color = Color.argb((255 * darkness).toInt(), 10, 10, 12)
             canvas.drawRoundRect(rect, radius, radius, fallback)
+            if (Palette.GLASS_TINT_AMT > 0f) {
+                val hc = Palette.GLASS_TINT
+                fallback.color = Color.argb((255 * Palette.GLASS_TINT_AMT).toInt(), Color.red(hc), Color.green(hc), Color.blue(hc))
+                canvas.drawRoundRect(rect, radius, radius, fallback)
+            }
         } else {
             // No picture to bend (the phone's wallpaper is out of reach): smoked
             // glass, see-through and tinted with the wallpaper's colour.
             fallback.shader = null
-            val wc = Glass.wallColor(host.context) ?: Color.rgb(22, 22, 26)
+            // Tinted with your wallpaper's colour only when Adaptive colour is on.
+            val wc = if (Palette.GLASS_TINT_AMT > 0f) Palette.GLASS_TINT else Color.rgb(22, 22, 26)
             val a = (40 + 150 * darkness).toInt().coerceAtMost(200)
             fallback.color = Color.argb(
                 a,
@@ -554,12 +574,14 @@ class GlassDrawable(
         val sw = host.dpf(1.1f)
         rimPaint.strokeWidth = sw
         // Built once per size, not every frame.
-        val rk = (rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()
+        val rk = ((rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()) xor (Palette.GLASS_TINT.toLong() * 31)
         if (rimShader == null || rk != rimFor) {
             rimFor = rk
+            // The far edge glows faintly in the wallpaper's hue with Adaptive colour.
+            val far = if (Palette.GLASS_TINT_AMT > 0f) Palette.ACCENT.let { Color.argb(70, Color.red(it), Color.green(it), Color.blue(it)) } else Color.argb(55, 255, 255, 255)
             rimShader = LinearGradient(
                 rect.left, rect.top, rect.right, rect.bottom,
-                intArrayOf(Color.argb(if (rimLight) 120 else 60, 255, 255, 255), Color.argb(18, 255, 255, 255), Color.argb(55, 255, 255, 255)),
+                intArrayOf(Color.argb(if (rimLight) 120 else 60, 255, 255, 255), Color.argb(18, 255, 255, 255), far),
                 floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
             )
         }

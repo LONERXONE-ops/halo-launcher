@@ -73,11 +73,22 @@ class SettingsActivity : Activity() {
         check()
     }
 
+    /** Something changed since the page was drawn (a setting, or coming back from elsewhere). */
+    private var stale = true
+    private val watch = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> stale = true }
+
     override fun onResume() {
         super.onResume()
-        Palette.adapt(this)
+        Prefs.get(this).registerOnSharedPreferenceChangeListener(watch)
+        if (Palette.adapt(this)) stale = true
         ensureBackdrop()
-        render()
+        // Only redraw if something actually changed: no flash every time you come back.
+        if (stale || shown == null) render()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Prefs.get(this).unregisterOnSharedPreferenceChangeListener(watch)
     }
 
     @Deprecated("Deprecated in Java")
@@ -92,6 +103,8 @@ class SettingsActivity : Activity() {
     }
 
     private fun render() {
+        stale = false
+        live.clear()
         val same = shown == page
         shown?.let { old -> scroll?.let { scrollMemory[old] = it.scrollY } }
         // Same page: stay put. Back to the menu: return to where you were.
@@ -160,9 +173,14 @@ class SettingsActivity : Activity() {
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, dp(18))
             })
-            // Your home screen in small, as it looks right now.
-            val hero = preview(glass = Glass.enabled(this), small = true)
-            col.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)).apply { bottomMargin = dp(14) })
+            // Your home screen in small, as it looks right now (kept between visits).
+            val key = heroKey()
+            val hero = heroCache?.takeIf { heroCacheKey == key } ?: preview(glass = Glass.enabled(this), small = false).also {
+                heroCache = it
+                heroCacheKey = key
+            }
+            (hero.parent as? ViewGroup)?.removeView(hero)
+            col.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(210)).apply { bottomMargin = dp(14) })
             return
         }
         val back = ImageView(this).apply {
@@ -380,10 +398,37 @@ class SettingsActivity : Activity() {
         }.start()
     }
 
+    private var colourNote: TextView? = null
+    private var heroCache: View? = null
+    private var heroCacheKey = ""
+
+    /** Everything the home preview shows; it's rebuilt only when one of these changes. */
+    private fun heroKey(): String {
+        val p = Prefs.get(this)
+        return listOf(
+            p.getInt(Prefs.THEME, 0), p.getInt(Prefs.ADAPTIVE, 0), p.getString(Prefs.CLOCK_FACE, ""), p.getInt(Prefs.CLOCK_COLOR, 0),
+            p.getInt(Prefs.CLOCK_GLASS, 0), p.getInt(Prefs.CLOCK_TWOTONE, 0), p.getInt(Prefs.CLOCK_HOURS, 0), p.getBoolean(Prefs.CLOCK_ZERO, true),
+            p.getBoolean(Prefs.CLOCK_SHADOW, false), p.getInt(Prefs.DATE_STYLE, 0), Prefs.list(this, Prefs.DOCK).joinToString(), Icons.style(this),
+            IconPacks.current(this), System.identityHashCode(Glass.backdrop), Palette.TILE, Palette.GLASS_TINT,
+        ).joinToString("|")
+    }
+
+    /** Views on the current page that redraw in place when a setting changes. */
+    private val live = ArrayList<View>()
+
+    private fun refreshLive() {
+        for (v in live) {
+            if (v is TextArt) v.refresh() else v.invalidate()
+        }
+    }
+
     /** Makes sure the background is loaded here too (for the previews). */
     private fun ensureBackdrop() {
         val b = windowManager.currentWindowMetrics.bounds
-        Glass.load(this, b.width(), b.height()) { render() }
+        Glass.load(this, b.width(), b.height()) {
+            heroCache = null
+            render()
+        }
     }
 
     /**
@@ -405,10 +450,38 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(16), dp(10), dp(10))
         }
-        col.addView(ClockFace(this), LinearLayout.LayoutParams(dp(if (small) 70 else 86), dp(if (small) 62 else 76)))
+        val topRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        topRow.addView(ClockFace(this), LinearLayout.LayoutParams(dp(if (small) 70 else 92), dp(if (small) 62 else 80)))
+        if (!small) topRow.addView(DateFace(this), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+            marginStart = dp(10)
+            gravity = Gravity.CENTER_VERTICAL
+        })
+        col.addView(topRow)
         col.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
-        val musicPane = View(this)
+        // A little "now playing" card, so the glass has something on it.
+        val musicPane = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), 0, dp(10), 0)
+        }
         musicPane.background = if (glass) GlassDrawable(musicPane, dpf(14f), bendPx = dpf(8f)) else round(Palette.TILE, dpf(14f))
+        musicPane.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_music)
+            imageTintList = ColorStateList.valueOf(Palette.INK)
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            background = round(Color.argb(50, 255, 255, 255), dpf(8f))
+        }, LinearLayout.LayoutParams(dp(if (small) 24 else 30), dp(if (small) 24 else 30)))
+        val bars = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), 0, 0, 0)
+        }
+        bars.addView(View(this).apply { background = round(Color.argb(210, 255, 255, 255), dpf(3f)) }, LinearLayout.LayoutParams(dp(if (small) 46 else 80), dp(5)))
+        bars.addView(View(this).apply { background = round(Color.argb(90, 255, 255, 255), dpf(3f)) }, LinearLayout.LayoutParams(dp(if (small) 30 else 54), dp(4)).apply { topMargin = dp(5) })
+        musicPane.addView(bars, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        musicPane.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_play)
+            imageTintList = ColorStateList.valueOf(Palette.INK)
+        }, LinearLayout.LayoutParams(dp(16), dp(16)))
         col.addView(musicPane, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 40 else 50)))
         val dock = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -452,10 +525,19 @@ class SettingsActivity : Activity() {
         else -> Palette.INK
     }
 
-    private fun chips(col: LinearLayout, title: String, key: String, names: List<String>, def: Int = 0) {
+    /**
+     * [inPlace]: the chips and the previews on the page update where they
+     * are (smooth, no redraw of the whole page).
+     */
+    private fun chips(col: LinearLayout, title: String, key: String, names: List<String>, def: Int = 0, inPlace: Boolean = false) {
         section(col, title)
         val cur = Prefs.get(this).getInt(key, def)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val views = ArrayList<TextView>()
+        fun style(v: TextView, on: Boolean) {
+            v.setTextColor(if (on) Color.BLACK else Palette.INK)
+            v.background = round(if (on) Palette.INK else Palette.GRAPHITE, dpf(14f))
+        }
         for ((i, name) in names.withIndex()) {
             row.addView(chip(name, i == cur).apply {
                 gravity = Gravity.CENTER
@@ -463,9 +545,18 @@ class SettingsActivity : Activity() {
                 pressable()
                 setOnClickListener {
                     Prefs.get(this@SettingsActivity).edit().putInt(key, i).apply()
-                    render()
+                    if (inPlace) {
+                        for ((k, v) in views.withIndex()) style(v, k == i)
+                        it.scaleX = 0.92f
+                        it.scaleY = 0.92f
+                        it.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.55f)).start()
+                        refreshLive()
+                        stale = false
+                    } else {
+                        render()
+                    }
                 }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
+            }.also { views += it }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
         }
         col.addView(row)
     }
@@ -520,16 +611,16 @@ class SettingsActivity : Activity() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        top.addView(ClockFace(this), LinearLayout.LayoutParams(0, dp(150), 1f))
+        top.addView(ClockFace(this).also { live += it }, LinearLayout.LayoutParams(0, dp(150), 1f))
         val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        side.addView(DateFace(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        side.addView(WeatherFace(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        side.addView(DateFace(this).also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        side.addView(WeatherFace(this).also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         top.addView(side, LinearLayout.LayoutParams(0, dp(150), 1f).apply { marginStart = dp(8) })
         box.addView(top)
         pv.addView(box)
         col.addView(pv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
 
-        chips(col, "Liquid Glass digits", Prefs.CLOCK_GLASS, listOf("With theme", "On", "Off"))
+        chips(col, "Liquid Glass digits", Prefs.CLOCK_GLASS, listOf("With theme", "On", "Off"), inPlace = true)
         // Colour: a row of swatches (the second is your wallpaper's colour).
         section(col, "Colour")
         val curCol = Prefs.get(this).getInt(Prefs.CLOCK_COLOR, 0)
@@ -555,7 +646,16 @@ class SettingsActivity : Activity() {
                 pressable()
                 setOnClickListener {
                     Prefs.get(this@SettingsActivity).edit().putInt(Prefs.CLOCK_COLOR, i).apply()
-                    render()
+                    // Move the ring to this swatch and recolour the previews, without redrawing the page.
+                    for (k in 0 until swRow.childCount) {
+                        val d = swRow.getChildAt(k)
+                        val on = k == i
+                        ((d.background as? android.graphics.drawable.GradientDrawable))?.setStroke(dp(if (on) 3 else 1), if (on) Color.WHITE else Color.argb(60, 255, 255, 255))
+                        d.animate().scaleX(if (on) 1.12f else 1f).scaleY(if (on) 1.12f else 1f).setDuration(320).setInterpolator(Spring(0.5f)).start()
+                    }
+                    colourNote?.text = ClockFaces.COLOUR_NAMES[i] + if (i == 1) ": follows your wallpaper" else ""
+                    refreshLive()
+                    stale = false
                 }
             }
             swRow.addView(dot, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
@@ -565,16 +665,16 @@ class SettingsActivity : Activity() {
         }
         col.addView(swRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
         note(col, ClockFaces.COLOUR_NAMES.getOrElse(curCol) { "White" } + if (curCol == 1) ": follows your wallpaper" else "")
-        chips(col, "Two-tone minutes", Prefs.CLOCK_TWOTONE, listOf("Off", "Faded", "Wallpaper"))
-        chips(col, "Layout", Prefs.CLOCK_LAYOUT, listOf("Stacked", "One line"))
-        chips(col, "Align", Prefs.CLOCK_ALIGN, listOf("Left", "Centre", "Right"))
-        chips(col, "Hours", Prefs.CLOCK_HOURS, listOf("Phone", "24-hour", "12-hour"))
-        chips(col, "Separator (one line)", Prefs.CLOCK_SEP, listOf("9:41", "9.41", "9 41"))
+        colourNote = col.getChildAt(col.childCount - 1) as? TextView
+        chips(col, "Two-tone minutes", Prefs.CLOCK_TWOTONE, listOf("Off", "Faded", "Wallpaper"), inPlace = true)
+        chips(col, "Layout", Prefs.CLOCK_LAYOUT, listOf("Stacked", "One line"), inPlace = true)
+        chips(col, "Align", Prefs.CLOCK_ALIGN, listOf("Left", "Centre", "Right"), inPlace = true)
+        chips(col, "Hours", Prefs.CLOCK_HOURS, listOf("Phone", "24-hour", "12-hour"), inPlace = true)
+        chips(col, "Separator (one line)", Prefs.CLOCK_SEP, listOf("9:41", "9.41", "9 41"), inPlace = true)
         section(col, "")
         col.addView(group(
-            switchRow("Leading zero", "09:41 instead of 9:41", Prefs.CLOCK_ZERO, true) { window.decorView.postDelayed({ render() }, 180) },
-            switchRow("AM / PM", "A small AM or PM beside the time (12-hour)", Prefs.CLOCK_AMPM, false) { window.decorView.postDelayed({ render() }, 180) },
-            switchRow("Shadow", "A soft shadow so the clock and date read on busy wallpapers", Prefs.CLOCK_SHADOW, false) { window.decorView.postDelayed({ render() }, 180) },
+            switchRow("Leading zero", "09:41 instead of 9:41", Prefs.CLOCK_ZERO, true) { refreshLive(); stale = false },
+            switchRow("Shadow", "A soft shadow so the clock and date read on busy wallpapers", Prefs.CLOCK_SHADOW, false) { refreshLive(); stale = false },
         ))
 
         section(col, "Date style")
@@ -591,7 +691,7 @@ class SettingsActivity : Activity() {
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(10))
             val st = stage()
-            st.addView(DateFace(this, forceStyle = i), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            st.addView(DateFace(this, forceStyle = i).also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
             card.addView(text(12f, Palette.SILVER).apply {
                 text = name
@@ -615,7 +715,7 @@ class SettingsActivity : Activity() {
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(10))
             val st = stage()
-            st.addView(ClockFace(this, forceFace = f), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(10), dp(8), dp(10), dp(8)) })
+            st.addView(ClockFace(this, forceFace = f).also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(10), dp(8), dp(10), dp(8)) })
             card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118)))
             card.addView(text(13f, Palette.INK, bold = true).apply {
                 text = f.name
@@ -1125,10 +1225,10 @@ class SettingsActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
     }
 
-    private fun chip(t: String, on: Boolean): TextView = text(12f, if (on) Color.BLACK else Palette.INK, bold = true).apply {
+    private fun chip(t: String, on: Boolean): TextView = text(12.5f, if (on) Color.BLACK else Palette.INK, bold = true).apply {
         text = t
         setPadding(dp(12), dp(5), dp(12), dp(5))
-        background = round(if (on) Palette.INK else Palette.GRAPHITE, dpf(12f))
+        background = round(if (on) Palette.INK else Palette.GRAPHITE, dpf(14f))
     }
 
     private fun button(t: String, onClick: () -> Unit): TextView = text(15f, Color.BLACK, bold = true).apply {

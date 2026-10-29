@@ -144,6 +144,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
         registerReceiver(tick, f)
+        visibleNow = true
+        root.removeCallbacks(quietRebuild)
         // Only rebuild the home screen if a setting changed while we were
         // away; otherwise just bring the live bits up to date (much faster
         // coming back from an app).
@@ -179,6 +181,20 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             k.startsWith("stackpos_") || k.startsWith("cd_") || k == Prefs.WALL_DAY || k == Prefs.NOTE || k == Prefs.ONBOARDED
         ) return@OnSharedPreferenceChangeListener
         dirty = true
+        // Out of sight (in Settings): rebuild now, quietly, so coming home shows
+        // the new look straight away instead of flickering through a rebuild.
+        if (!visibleNow) {
+            root.removeCallbacks(quietRebuild)
+            root.postDelayed(quietRebuild, 350L)
+        }
+    }
+
+    private var visibleNow = false
+    private val quietRebuild = Runnable {
+        if (!visibleNow && dirty && !isFinishing && !isDestroyed) {
+            dirty = false
+            refreshLook()
+        }
     }
 
     override fun onResume() {
@@ -209,6 +225,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     override fun onStop() {
         super.onStop()
         wasAway = true
+        visibleNow = false
         try {
             unregisterReceiver(tick)
         } catch (_: Exception) {

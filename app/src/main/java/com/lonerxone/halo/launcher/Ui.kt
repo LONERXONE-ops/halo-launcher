@@ -52,6 +52,9 @@ object Palette {
 
     /** On-switches and highlights: the wallpaper's colour with Adaptive colour, else green. */
     var SWITCH = GREEN
+    /** Liquid Glass: the hue washed through every pane, and how strongly (0 = Adaptive colour off). */
+    var GLASS_TINT = 0xFF202024.toInt()
+    var GLASS_TINT_AMT = 0f
 
     private var lastKey = ""
 
@@ -74,6 +77,8 @@ object Palette {
             TILE2 = 0xFF1C1C1E.toInt()
             ACCENT = INK
             SWITCH = GREEN
+            GLASS_TINT = 0xFF202024.toInt()
+            GLASS_TINT_AMT = 0f
             return true
         }
         val hsv = FloatArray(3)
@@ -102,6 +107,13 @@ object Palette {
         SILVER = tone(s * 0.24f, 0.86f)
         ACCENT = if (grey) INK else Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.45f, 0.78f), 0.97f))
         // Switches: the wallpaper's colour once it's strong enough to read as "on".
+        // Glass: a mid-dark version of the hue, washed in more strongly per level.
+        GLASS_TINT = if (grey) Color.rgb(40, 40, 44) else Color.HSVToColor(floatArrayOf(h, (hsv[1] * 0.85f).coerceIn(0.3f, 0.85f), 0.42f))
+        GLASS_TINT_AMT = if (grey) 0.03f else when (mode) {
+            ADAPT_VIVID -> 0.24f
+            ADAPT_RICH -> 0.16f
+            else -> 0.09f
+        }
         SWITCH = if (grey || mode == ADAPT_SUBTLE) GREEN else Color.HSVToColor(floatArrayOf(h, hsv[1].coerceIn(0.5f, 0.8f), 0.88f))
         return true
     }

@@ -206,20 +206,28 @@ class OnboardingActivity : Activity() {
         phones += phone
         val scene = Scene()
         scenes += scene
-        // Build once the little screen has a size.
-        phone.screen.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
-            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
-                if (r - l <= 0) return
-                v.removeOnLayoutChangeListener(this)
-                v.post {
-                    s.build(phone.screen, scene)
-                    if (scenes.indexOf(scene) == active) {
-                        scene.enter()
-                        for (a in scene.loops) a.start()
-                    }
+        // Build when the little screen has its size, and again if that size
+        // changes (the window insets arrive a moment later and shrink it).
+        var builtW = 0
+        var builtH = 0
+        phone.screen.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            val w = r - l
+            val h = b - t
+            if (w <= 0 || h <= 0 || (w == builtW && h == builtH)) return@addOnLayoutChangeListener
+            builtW = w
+            builtH = h
+            v.post {
+                for (an in scene.loops) an.cancel()
+                scene.loops.clear()
+                scene.enter = {}
+                phone.screen.removeAllViews()
+                s.build(phone.screen, scene)
+                if (scenes.indexOf(scene) == active) {
+                    scene.enter()
+                    for (an in scene.loops) an.start()
                 }
             }
-        })
+        }
 
         val words = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
