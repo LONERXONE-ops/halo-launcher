@@ -27,24 +27,39 @@ object MusicArt {
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
         if (Build.VERSION.SDK_INT >= 31) {
             iv.setImageBitmap(art)
-            iv.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(iv.dpf(36f), iv.dpf(36f), android.graphics.Shader.TileMode.CLAMP))
+            // Just softened, so the cover is clearly there (not a blur of colour).
+            iv.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(iv.dpf(2.5f), iv.dpf(2.5f), android.graphics.Shader.TileMode.CLAMP))
         } else {
-            val small = Bitmap.createScaledBitmap(art, 16, 16, true)
-            iv.setImageBitmap(Bitmap.createScaledBitmap(small, 160, 160, true))
+            iv.setImageBitmap(art)
         }
-        iv.scaleX = 1.25f
-        iv.scaleY = 1.25f
+        iv.scaleX = 1.04f
+        iv.scaleY = 1.04f
     }
 
-    /** A dark wash over the blurred cover, tinted with the song's colour, so white text always reads. */
-    fun scrim(accent: Int): GradientDrawable {
-        val r = Color.red(accent)
-        val g = Color.green(accent)
-        val b = Color.blue(accent)
-        return GradientDrawable(
+    /**
+     * Over the cover: light at the top so the picture shows, deepening to the
+     * song's own colour at the bottom where the controls sit (the gradient
+     * from the cover), so white text always reads.
+     */
+    fun scrim(accent: Int): android.graphics.drawable.Drawable {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(accent, hsv)
+        hsv[1] = hsv[1].coerceIn(0.25f, 0.7f)
+        hsv[2] = 0.22f
+        val deep = Color.HSVToColor(hsv)
+        val r = Color.red(deep)
+        val g = Color.green(deep)
+        val b = Color.blue(deep)
+        val down = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(Color.argb(120, r / 4, g / 4, b / 4), Color.argb(150, r / 6, g / 6, b / 6), Color.argb(200, r / 8, g / 8, b / 8)),
+            intArrayOf(Color.argb(60, 0, 0, 0), Color.argb(120, r, g, b), Color.argb(225, r, g, b)),
         )
+        // And a little darker on the left, behind the song's name.
+        val side = GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.argb(90, 0, 0, 0), Color.argb(0, 0, 0, 0)),
+        )
+        return android.graphics.drawable.LayerDrawable(arrayOf(down, side))
     }
 
     fun appName(c: Context, pkg: String): String = try {
@@ -143,7 +158,13 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
             openPlayer()
         }
         wave.onSeek = { f ->
-            HaloLink.music?.let { m -> if (m.durationMs > 0) command("seek:" + (m.durationMs * f).toLong()) }
+            HaloLink.music?.let { m ->
+                if (m.durationMs > 0) {
+                    val ms = (m.durationMs * f).toLong()
+                    HaloLink.localSeek(ms)
+                    command("seek:$ms")
+                }
+            }
         }
         wave.onScrub = { f ->
             val m = HaloLink.music
@@ -186,112 +207,83 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
         for (x in v) (x.parent as? ViewGroup)?.removeView(x)
     }
 
+    /**
+     * The cover is the card's background, so there's no small cover here:
+     * app on top, the song, the controls and the wave. Every size keeps all
+     * of it inside the card.
+     */
     private fun build(kind: Int) {
         layoutKind = kind
         while (childCount > 2) removeViewAt(2)
         detach(cover, appIcon, app, queueBtn, title, artist, prev, play, next, wave, elapsed, total)
-        val pad = dp(16)
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad, dp(14), pad, dp(12))
+            setPadding(dp(16), dp(12), dp(14), dp(8))
         }
-        // App · queue
         val top = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        top.addView(appIcon, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(7) })
+        top.addView(appIcon, LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) })
         top.addView(app, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(queueBtn, LinearLayout.LayoutParams(dp(30), dp(30)))
-        // Cover · song
-        val song = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
         val texts = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         texts.addView(title)
-        texts.addView(artist.apply { maxLines = 1 }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
-        // Time · wave · time
+        texts.addView(artist.apply { maxLines = 1 }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1) })
         val prog = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         prog.addView(elapsed)
-        prog.addView(wave, LinearLayout.LayoutParams(0, dp(28), 1f).apply {
-            marginStart = dp(4)
-            marginEnd = dp(4)
+        prog.addView(wave, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
+            marginStart = dp(2)
+            marginEnd = dp(2)
         })
         prog.addView(total)
         val controls = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL
         }
-        controls.addView(prev, LinearLayout.LayoutParams(dp(44), dp(44)))
-        controls.addView(play, LinearLayout.LayoutParams(dp(52), dp(52)).apply {
-            marginStart = dp(18)
-            marginEnd = dp(18)
+        val big = kind == 1 || kind == 3
+        val ctl = dp(if (big) 42 else 36)
+        val pl = dp(if (big) 48 else 40)
+        controls.addView(prev, LinearLayout.LayoutParams(ctl, ctl))
+        controls.addView(play, LinearLayout.LayoutParams(pl, pl).apply {
+            marginStart = dp(6)
+            marginEnd = dp(6)
         })
-        controls.addView(next, LinearLayout.LayoutParams(dp(44), dp(44)))
+        controls.addView(next, LinearLayout.LayoutParams(ctl, ctl))
+        play.setPadding(pl / 4, pl / 4, pl / 4, pl / 4)
+        for (v in listOf(prev, next)) v.setPadding(ctl / 4, ctl / 4, ctl / 4, ctl / 4)
 
         when (kind) {
-            0 -> {
-                // Short and wide: cover, song and controls in a row, the wave under them.
-                col.setPadding(dp(14), dp(12), dp(14), dp(6))
-                song.addView(cover, LinearLayout.LayoutParams(dp(50), dp(50)))
-                song.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
-                controls.removeView(prev)
-                controls.removeView(next)
-                (play.layoutParams as LinearLayout.LayoutParams).apply { width = dp(44); height = dp(44); marginStart = 0; marginEnd = dp(4) }
-                controls.addView(next, LinearLayout.LayoutParams(dp(40), dp(40)))
-                song.addView(controls)
-                col.addView(song)
+            0, 1 -> {
+                // Wide: [app · up next] / [song ........ ◀ ▶ ▶] / [time ~~~~ time]
+                if (kind == 1) col.addView(top)
                 col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
-                col.addView(prog)
-            }
-            1 -> {
-                col.addView(top)
-                song.addView(cover, LinearLayout.LayoutParams(dp(56), dp(56)))
-                song.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
-                col.addView(song, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
-                col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
-                col.addView(prog)
-                col.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            }
-            3 -> {
-                // Large: a big cover on top.
-                col.addView(top)
-                val coverBox = object : FrameLayout(context) {
-                    override fun onMeasure(wm: Int, hm: Int) {
-                        val s = minOf(MeasureSpec.getSize(wm), MeasureSpec.getSize(hm))
-                        super.onMeasure(MeasureSpec.makeMeasureSpec(s, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(s, MeasureSpec.EXACTLY))
-                    }
+                val mid = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
                 }
-                coverBox.addView(cover, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-                col.addView(coverBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 0, 1f).apply {
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    topMargin = dp(10)
-                    bottomMargin = dp(10)
-                })
-                col.addView(texts)
-                col.addView(prog)
-                col.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                mid.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                mid.addView(controls)
+                col.addView(mid)
+                col.addView(prog, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
             }
             else -> {
-                // Square: song on top, wave and controls under it.
+                // Square: [app · up next] / song / wave / controls, centred.
+                col.setPadding(dp(14), dp(12), dp(14), dp(10))
                 col.addView(top)
-                song.addView(cover, LinearLayout.LayoutParams(dp(44), dp(44)))
-                song.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(10) })
-                col.addView(song, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
                 col.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
+                col.addView(texts)
                 elapsed.visibility = View.GONE
                 total.visibility = View.GONE
                 col.addView(prog)
-                for (v in listOf(prev, next)) (v.layoutParams as LinearLayout.LayoutParams).apply { width = dp(38); height = dp(38) }
-                (play.layoutParams as LinearLayout.LayoutParams).apply { width = dp(44); height = dp(44); marginStart = dp(8); marginEnd = dp(8) }
-                col.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                col.addView(controls, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER_HORIZONTAL })
             }
         }
-        title.textSize = if (kind == 3 || kind == 1) 17f else 15f
+        title.textSize = if (big) 17f else 15f
+        artist.textSize = if (big) 13.5f else 12.5f
         addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         bind(HaloLink.music, force = true)
     }
@@ -345,7 +337,7 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
         }
         val hasTime = m != null && m.durationMs > 0
         wave.visibility = if (hasTime) View.VISIBLE else View.INVISIBLE
-        val showTimes = hasTime && layoutKind != 2
+        val showTimes = hasTime && (layoutKind == 0 || layoutKind == 1)
         for (v in listOf<View>(elapsed, total)) v.visibility = if (showTimes) View.VISIBLE else View.GONE
         tick()
     }
@@ -484,7 +476,15 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         col.addView(song, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(16) })
         // Wave and times.
         wave = WaveBar(c)
-        wave.onSeek = { f -> HaloLink.music?.let { m -> if (m.durationMs > 0) command("seek:" + (m.durationMs * f).toLong()) } }
+        wave.onSeek = { f ->
+            HaloLink.music?.let { m ->
+                if (m.durationMs > 0) {
+                    val ms = (m.durationMs * f).toLong()
+                    HaloLink.localSeek(ms)
+                    command("seek:$ms")
+                }
+            }
+        }
         wave.onScrub = { f ->
             val m = HaloLink.music
             if (f != null && m != null) elapsed.text = MusicArt.fmt((m.durationMs * f).toLong()) else tick()

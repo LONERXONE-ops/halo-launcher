@@ -49,6 +49,7 @@ class WaveBar(context: Context) : View(context) {
     private var last = 0L
     private var dragging = false
     private var dragFrac = 0f
+    private var lastLiveSeek = 0L
 
     override fun onDraw(canvas: Canvas) {
         val now = System.nanoTime()
@@ -108,6 +109,12 @@ class WaveBar(context: Context) : View(context) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
+                // The home screen's hold-to-edit mustn't fire while you scrub.
+                var pp = parent
+                while (pp is View) {
+                    pp.cancelLongPress()
+                    pp = pp.parent
+                }
                 dragging = true
                 dragFrac = f
                 onScrub?.invoke(f)
@@ -116,6 +123,12 @@ class WaveBar(context: Context) : View(context) {
             MotionEvent.ACTION_MOVE -> {
                 dragFrac = f
                 onScrub?.invoke(f)
+                // Seek as you drag (a few times a second), so you hear where you are.
+                val now = System.currentTimeMillis()
+                if (now - lastLiveSeek > 250) {
+                    lastLiveSeek = now
+                    onSeek?.invoke(f)
+                }
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {

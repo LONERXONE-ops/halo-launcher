@@ -139,6 +139,12 @@ object HaloLink {
         quick = qid.indices.map { n -> Quick(qid[n], qlabel.getOrElse(n) { qid[n] }) }
     }
 
+    /** After you seek: show the new spot straight away (Halo confirms a moment later). */
+    fun localSeek(ms: Long) {
+        val m = music ?: return
+        music = Music(m.title, m.artist, m.app, m.playing, m.art, m.accent, m.durationMs, ms, SystemClock.elapsedRealtime(), m.speed)
+    }
+
     /** Sends a command to Halo; returns false when Halo isn't installed. */
     fun command(c: Context, cmd: String, arg: String? = null): Boolean {
         if (!installed(c)) return false

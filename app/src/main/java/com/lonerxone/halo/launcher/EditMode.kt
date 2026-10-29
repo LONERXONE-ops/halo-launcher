@@ -179,6 +179,12 @@ class Cell(
      * Otherwise it watches for a long-press, which starts edit mode; keep
      * holding and moving and you're straight into dragging, like iOS.
      */
+    /** Something inside (the music wave being dragged) has the touch: no long-press edit. */
+    override fun cancelLongPress() {
+        super.cancelLongPress()
+        removeCallbacks(longPress)
+    }
+
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         if (placeholder) return false
         when (e.actionMasked) {
