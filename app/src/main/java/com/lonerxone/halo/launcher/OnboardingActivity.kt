@@ -924,7 +924,7 @@ class OnboardingActivity : Activity() {
 
     companion object {
         /** Bump to show the tour again to everyone after a big update. */
-        const val VERSION = 1
+        const val VERSION = 2
 
         fun due(c: Context) = Prefs.get(c).getInt(Prefs.ONBOARDED, 0) < VERSION
     }
