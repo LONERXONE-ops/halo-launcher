@@ -160,6 +160,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             }, 280L)
         }
         root.postDelayed({ onMinute() }, 300L)
+        root.postDelayed({ updateMusicPresence() }, 450L)
         Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
@@ -226,6 +227,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         super.onStop()
         wasAway = true
         visibleNow = false
+        updateMusicPresence()
         try {
             unregisterReceiver(tick)
         } catch (_: Exception) {
@@ -305,6 +307,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         pager = HomePager(this)
         buildClockAndMusic()
         pager.onScrolled = { f -> onPagerScroll(f) }
+        pager.onPageChanged = { root.postDelayed({ updateMusicPresence() }, 380L) }
         root.addView(pager, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         dots = PageDots(this)
@@ -377,6 +380,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         dateFace?.refresh()
         wxFace?.refresh()
         loadBackdrop()
+        root.postDelayed({ updateMusicPresence() }, 300L)
     }
 
     /** Your picture, or the wallpaper, behind everything (the glass bends it). */
@@ -855,7 +859,30 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         AppRepo.launch(this, app, from)
     }
 
+    private var musicHomeSent: Boolean? = null
+    private var lastDrawerHalf = false
+    private val tmpRect = android.graphics.Rect()
+
+    /**
+     * Tells Halo whether the music card is on screen right now (home showing,
+     * its page in view, the app list closed), so the island's music steps back
+     * and only one player shows.
+     */
+    private fun updateMusicPresence() {
+        val on = visibleNow && drawer.progress() < 0.5f && widgets.any { w ->
+            w is MusicWidget && w.isShown && w.getGlobalVisibleRect(tmpRect) && tmpRect.width() > w.width / 2
+        }
+        if (on != musicHomeSent) {
+            musicHomeSent = on
+            HaloLink.command(this, "music_home", if (on) "1" else "0")
+        }
+    }
+
     override fun onDrawerProgress(progress: Float) {
+        if ((progress >= 0.5f) != (lastDrawerHalf)) {
+            lastDrawerHalf = progress >= 0.5f
+            updateMusicPresence()
+        }
         val s = 1f - progress * 0.06f
         for (v in listOf<View>(pager, dock, dots)) {
             v.alpha = 1f - progress
