@@ -1140,7 +1140,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         frame.addView(hv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // Tell the widget its size once it really has one (and again if it changes).
         frame.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, orr, ob ->
-            if (Build.VERSION.SDK_INT >= 31 && r - l > 0 && b - t > 0 && (r - l != orr - ol || b - t != ob - ot)) {
+            if (android.os.Build.VERSION.SDK_INT >= 31 && r - l > 0 && b - t > 0 && (r - l != orr - ol || b - t != ob - ot)) {
                 try {
                     val d = resources.displayMetrics.density
                     hv.updateAppWidgetSize(Bundle(), listOf(SizeF((r - l) / d, (b - t) / d)))
