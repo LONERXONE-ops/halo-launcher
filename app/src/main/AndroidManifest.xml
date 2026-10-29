@@ -125,6 +125,13 @@
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
         <activity
+            android:name=".WallpaperActivity"
+            android:exported="false"
+            android:label="Wallpapers"
+            android:windowSoftInputMode="adjustResize"
+            android:taskAffinity="com.lonerxone.halo.launcher.settings" />
+
+        <activity
             android:name=".WidgetPickActivity"
             android:exported="false" />
 

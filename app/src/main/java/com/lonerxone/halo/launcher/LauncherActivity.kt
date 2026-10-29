@@ -156,6 +156,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
+        WallpaperActivity.dailyShuffle(this) { loadBackdrop() }
         if (wasAway) animateIn()
         wasAway = false
     }
@@ -1118,7 +1119,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             }
         }
         bar.addView(pill("+") { addMenu(it) })
-        bar.addView(pill("Background") { openSettingsPage("look") }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        bar.addView(pill("Wallpaper") { startActivity(Intent(this, WallpaperActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         bar.addView(pill("Settings") { openSettings() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         bar.addView(pill("Done", primary = true) { editor.exit() })

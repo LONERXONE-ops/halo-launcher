@@ -78,6 +78,9 @@ object Prefs {
     /** Liquid Glass text: 0 follow the theme, 1 on, 2 off. */
     const val CLOCK_GLASS = "clock_glass"
     const val DATE_STYLE = "date_style"
+    /** Wallpapers: shuffle saved ones daily, and the day it last changed. */
+    const val WALL_DAILY = "wall_daily"
+    const val WALL_DAY = "wall_day"
     const val SHOW_WALLPAPER = "show_wallpaper"
     const val DOCK = "dock"
     const val FAVORITES = "favorites"

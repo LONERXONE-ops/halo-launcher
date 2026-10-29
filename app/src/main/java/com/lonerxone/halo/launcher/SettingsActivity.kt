@@ -187,6 +187,7 @@ class SettingsActivity : Activity() {
         section(col, "Look")
         col.addView(group(
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
+            nav(R.drawable.ic_image, "Wallpapers", "Browse, search, your photos, change daily") { startActivity(Intent(this, WallpaperActivity::class.java)) },
             nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
             nav(R.drawable.ic_clock, "Clock & date", ClockFaces.current(this).name) { go(Page.CLOCK) },
             nav(R.drawable.ic_apps, "Icons", (Icons.NAMES[Icons.style(this)] ?: "Normal") + IconPacks.current(this).let { p -> if (p.isEmpty()) "" else " · " + (IconPacks.installed(this).firstOrNull { it.pkg == p }?.label ?: "icon pack") }) { go(Page.ICONS) },
@@ -280,6 +281,7 @@ class SettingsActivity : Activity() {
             bottomMargin = dp(18)
         })
         val hasPic = Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L
+        col.addView(button("Browse wallpapers") { startActivity(Intent(this, WallpaperActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { bottomMargin = dp(12) })
         val rows = mutableListOf(pictureRow("Background picture", "Tap to choose. Empty = your wallpaper", Prefs.HERO_PIC))
         if (hasPic) {
             rows += row("Use as phone wallpaper too", "So your lock screen and recents match", chevron()) { setPhoneWallpaper() }
