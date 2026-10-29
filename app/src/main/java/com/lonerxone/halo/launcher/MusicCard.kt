@@ -178,7 +178,10 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
     private fun openPlayer() {
         val m = HaloLink.music
         if (m == null) {
-            command("open_music")
+            // The remembered song: open its app (or wake the last player).
+            val pkg = HaloLink.lastSong(context)?.app
+            val i = pkg?.let { context.packageManager.getLaunchIntentForPackage(it) }
+            if (i != null) context.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) else command("open_music")
             return
         }
         MusicSheet(this, command).show()
@@ -290,7 +293,9 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
         bind(HaloLink.music, force = true)
     }
 
-    fun bind(m: HaloLink.Music?, force: Boolean = false) {
+    fun bind(live: HaloLink.Music?, force: Boolean = false) {
+        // Nothing playing: keep showing the last song (paused) instead of going blank.
+        val m = live ?: HaloLink.lastSong(context)
         play.setImageResource(if (m?.playing == true) R.drawable.ic_pause else R.drawable.ic_play)
         wave.playing = m?.playing == true
         val k = m?.let { "${it.app}|${it.title}|${it.artist}|${it.art != null}" }
@@ -346,7 +351,7 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
 
     /** Called every second while playing. */
     fun tick() {
-        val m = HaloLink.music ?: return
+        val m = HaloLink.music ?: HaloLink.lastSong(context) ?: return
         if (m.durationMs <= 0) return
         val pos = m.position()
         wave.fraction = pos / m.durationMs.toFloat()
@@ -393,11 +398,27 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
     private fun dp(v: Int) = c.dp(v)
     private fun dpf(v: Float) = c.dpf(v)
 
+    /** A frame as tall as its content (the last child); the backdrop layers just fill it. */
+    private class ContentSized(c: Context) : FrameLayout(c) {
+        override fun onMeasure(wm: Int, hm: Int) {
+            val w = MeasureSpec.getSize(wm)
+            val content = getChildAt(childCount - 1) ?: return super.onMeasure(wm, hm)
+            content.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(hm), MeasureSpec.AT_MOST))
+            val h = content.measuredHeight
+            for (i in 0 until childCount - 1) getChildAt(i).measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
+            setMeasuredDimension(w, h)
+        }
+    }
+
+    /** 0 = the island's pill, 1 = the whole card. */
+    private var reveal = 1f
+    private var revealAnim: android.animation.ValueAnimator? = null
+
     @SuppressLint("ClickableViewAccessibility")
     fun show() {
         val host = (anchor.rootView as? ViewGroup) ?: return
         val r = FrameLayout(c).apply {
-            setBackgroundColor(Color.argb(70, 0, 0, 0))
+            setBackgroundColor(Color.argb(60, 0, 0, 0))
             isClickable = true
             isFocusableInTouchMode = true
             setOnClickListener { dismiss() }
@@ -411,29 +432,36 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             }
             elevation = dpf(30f)
         }
-        val k = FrameLayout(c).apply {
+        val radius = dpf(32f)
+        val k = ContentSized(c).apply {
             isClickable = true
+            // The outline grows from the island's pill to the full card (and back).
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(v: View, o: Outline) {
-                    o.setRoundRect(0, 0, v.width, v.height, dpf(34f))
+                    val f = reveal
+                    val pw = dpf(124f)
+                    val ph = dpf(36f)
+                    val l = lerp(v.width / 2f - pw / 2f, 0f, f)
+                    val rr = lerp(v.width / 2f + pw / 2f, v.width.toFloat(), f)
+                    val b = lerp(ph, v.height.toFloat(), f)
+                    o.setRoundRect(l.toInt(), 0, rr.toInt(), b.toInt(), lerp(ph / 2f, radius, f))
                 }
             }
             clipToOutline = true
-            setBackgroundColor(Color.rgb(16, 16, 18))
-            elevation = dpf(18f)
-            foreground = c.round(Color.TRANSPARENT, dpf(34f)).apply { setStroke(dp(1), Color.argb(46, 255, 255, 255)) }
+            setBackgroundColor(Color.rgb(14, 14, 16))
+            elevation = dpf(16f)
         }
         back = ImageView(c)
         scrim = View(c)
-        k.addView(back, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        k.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        k.addView(back)
+        k.addView(scrim)
 
         val col = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(12))
+            setPadding(dp(16), dp(16), dp(16), dp(8))
         }
         content = col
-        // Cover · song · open app
+        // Cover · song · open the app
         val song = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -442,44 +470,43 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             scaleType = ImageView.ScaleType.CENTER_CROP
             outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(v: View, o: Outline) {
-                    o.setRoundRect(0, 0, v.width, v.height, dpf(14f))
+                    o.setRoundRect(0, 0, v.width, v.height, dpf(12f))
                 }
             }
             clipToOutline = true
-            elevation = dpf(8f)
         }
-        song.addView(cover, LinearLayout.LayoutParams(dp(60), dp(60)))
+        song.addView(cover, LinearLayout.LayoutParams(dp(50), dp(50)))
         val texts = LinearLayout(c).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), 0, dp(8), 0)
+            setPadding(dp(12), 0, dp(8), 0)
         }
-        app = c.text(10.5f, Color.argb(200, 255, 255, 255), bold = true, caps = true)
-        title = c.text(17f, Color.WHITE, bold = true, lines = 1)
-        artist = c.text(13.5f, Color.argb(210, 255, 255, 255))
+        app = c.text(10f, Color.argb(190, 255, 255, 255), bold = true, caps = true)
+        title = c.text(16f, Color.WHITE, bold = true, lines = 1)
+        artist = c.text(13f, Color.argb(205, 255, 255, 255))
         texts.addView(app)
-        texts.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
+        texts.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(1) })
         texts.addView(artist)
         song.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         song.addView(ImageView(c).apply {
             setImageResource(R.drawable.ic_arrow_up_right)
             imageTintList = ColorStateList.valueOf(Color.WHITE)
-            setPadding(dp(9), dp(9), dp(9), dp(9))
-            background = c.round(Color.argb(56, 255, 255, 255), dpf(18f))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = c.round(Color.argb(50, 255, 255, 255), dpf(16f))
             contentDescription = "Open the app"
             setOnClickListener {
                 it.bounce()
                 command("open_music")
                 dismiss()
             }
-        }, LinearLayout.LayoutParams(dp(36), dp(36)))
+        }, LinearLayout.LayoutParams(dp(32), dp(32)))
         col.addView(song)
-        // Wave and times
+        // Wave · times
         val prog = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        elapsed = c.text(11f, Color.argb(210, 255, 255, 255), bold = true)
-        total = c.text(11f, Color.argb(210, 255, 255, 255), bold = true)
+        elapsed = c.text(10.5f, Color.argb(205, 255, 255, 255), bold = true)
+        total = c.text(10.5f, Color.argb(205, 255, 255, 255), bold = true)
         wave = WaveBar(c)
         wave.onSeek = { f ->
             HaloLink.music?.let { m ->
@@ -496,12 +523,12 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             if (f != null && m != null) elapsed.text = MusicArt.fmt((m.durationMs * f).toLong()) else tick()
         }
         prog.addView(elapsed)
-        prog.addView(wave, LinearLayout.LayoutParams(0, dp(34), 1f).apply {
-            marginStart = dp(4)
-            marginEnd = dp(4)
+        prog.addView(wave, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
+            marginStart = dp(2)
+            marginEnd = dp(2)
         })
         prog.addView(total)
-        col.addView(prog, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+        col.addView(prog, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         // Controls
         val controls = LinearLayout(c).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -510,7 +537,7 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         fun ctl(res: Int, cmd: String) = ImageView(c).apply {
             setImageResource(res)
             imageTintList = ColorStateList.valueOf(Color.WHITE)
-            setPadding(dp(11), dp(11), dp(11), dp(11))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             setOnClickListener {
                 it.bounce()
                 command(cmd)
@@ -518,7 +545,7 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         }
         play = ImageView(c).apply {
             imageTintList = ColorStateList.valueOf(Color.BLACK)
-            setPadding(dp(15), dp(15), dp(15), dp(15))
+            setPadding(dp(13), dp(13), dp(13), dp(13))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.WHITE)
@@ -530,38 +557,40 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
                 command("play_pause")
             }
         }
-        controls.addView(ctl(R.drawable.ic_prev, "prev"), LinearLayout.LayoutParams(dp(48), dp(48)))
-        controls.addView(play, LinearLayout.LayoutParams(dp(58), dp(58)).apply {
-            marginStart = dp(22)
-            marginEnd = dp(22)
+        controls.addView(ctl(R.drawable.ic_prev, "prev"), LinearLayout.LayoutParams(dp(44), dp(44)))
+        controls.addView(play, LinearLayout.LayoutParams(dp(50), dp(50)).apply {
+            marginStart = dp(20)
+            marginEnd = dp(20)
         })
-        controls.addView(ctl(R.drawable.ic_next, "next"), LinearLayout.LayoutParams(dp(48), dp(48)))
+        controls.addView(ctl(R.drawable.ic_next, "next"), LinearLayout.LayoutParams(dp(44), dp(44)))
         col.addView(controls)
-        // Up next (a few rows; scrolls)
+        // Up next: a few rows in a soft inset panel (scrolls for more).
         list = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
         val sc = android.widget.ScrollView(c).apply {
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(list)
         }
-        val maxList = dp(190)
+        val maxList = dp(156)
         col.addView(object : FrameLayout(c) {
             override fun onMeasure(wm: Int, hm: Int) {
                 super.onMeasure(wm, MeasureSpec.makeMeasureSpec(maxList, MeasureSpec.AT_MOST))
             }
-        }.apply { addView(sc) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
-        // Grab handle at the bottom: swipe up to put it away.
-        val handle = View(c).apply { background = c.round(Color.argb(140, 255, 255, 255), dpf(2f)) }
-        col.addView(handle, LinearLayout.LayoutParams(dp(38), dp(4)).apply {
+        }.apply {
+            addView(sc)
+            background = c.round(Color.argb(46, 0, 0, 0), dpf(18f))
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        val handle = View(c).apply { background = c.round(Color.argb(130, 255, 255, 255), dpf(2f)) }
+        col.addView(handle, LinearLayout.LayoutParams(dp(36), dp(4)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            topMargin = dp(10)
+            topMargin = dp(8)
         })
-        k.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        k.addView(col)
 
-        // Under the status bar, where the island is.
-        val top = host.rootWindowInsets?.getInsets(android.view.WindowInsets.Type.systemBars())?.top ?: dp(28)
+        // Right where the island sits, like Halo's own cards.
         r.addView(k, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP).apply {
-            topMargin = top + dp(6)
+            topMargin = dp(8)
             leftMargin = dp(10)
             rightMargin = dp(10)
         })
@@ -570,7 +599,7 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         card = k
         r.requestFocus()
 
-        // Swipe it up to close.
+        // Swipe it up to send it back into the island.
         var downY = 0f
         var vt: android.view.VelocityTracker? = null
         val drag = View.OnTouchListener { _, e ->
@@ -585,20 +614,14 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
                 android.view.MotionEvent.ACTION_MOVE -> {
                     vt?.addMovement(e)
                     val dy = e.rawY - downY
-                    k.translationY = if (dy < 0) dy else dy * 0.15f
-                    r.alpha = 1f - (-dy / k.height.coerceAtLeast(1)).coerceIn(0f, 1f) * 0.6f
+                    k.translationY = if (dy < 0) dy * 0.6f else dy * 0.12f
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     vt?.computeCurrentVelocity(1000)
                     val v = vt?.yVelocity ?: 0f
                     vt?.recycle()
                     vt = null
-                    if (k.translationY < -k.height * 0.2f || v < -1200f) {
-                        dismiss()
-                    } else {
-                        k.animate().translationY(0f).setDuration(380).setInterpolator(Spring(0.4f)).start()
-                        r.animate().alpha(1f).setDuration(200).start()
-                    }
+                    if (k.translationY < -dpf(40f) || v < -1000f) dismiss() else k.animate().translationY(0f).setDuration(380).setInterpolator(Spring(0.4f)).start()
                 }
             }
             true
@@ -610,23 +633,48 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         HaloLink.addListener(listener)
         ui.post(ticker)
         r.alpha = 0f
-        r.animate().alpha(1f).setDuration(220).start()
-        k.post { dropIn(k) }
+        r.animate().alpha(1f).setDuration(240).start()
+        reveal = 0f
+        content.alpha = 0f
+        k.post { animateReveal(k, 1f) }
     }
 
-    /** Grows down out of the island: starts as a small pill at the top centre and springs open. */
-    private fun dropIn(k: View) {
-        if (!Prefs.animations(c)) return
-        val pill = dpf(120f)
-        k.pivotX = k.width / 2f
-        k.pivotY = 0f
-        k.scaleX = (pill / k.width.coerceAtLeast(1)).coerceIn(0.2f, 1f)
-        k.scaleY = (dpf(36f) / k.height.coerceAtLeast(1)).coerceIn(0.05f, 1f)
-        k.translationY = -dpf(4f)
-        k.alpha = 0.7f
-        k.animate().scaleX(1f).scaleY(1f).translationY(0f).alpha(1f).setDuration(560).setInterpolator(Spring(0.32f)).start()
-        content.alpha = 0f
-        content.animate().alpha(1f).setStartDelay(130).setDuration(260).start()
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
+
+    /** Grows out of (or back into) the island: the shape morphs, the contents fade and settle. */
+    private fun animateReveal(k: View, to: Float, end: (() -> Unit)? = null) {
+        revealAnim?.cancel()
+        val from = reveal
+        val opening = to > from
+        if (!Prefs.animations(c)) {
+            reveal = to
+            k.invalidateOutline()
+            content.alpha = if (opening) 1f else 0f
+            end?.invoke()
+            return
+        }
+        revealAnim = android.animation.ValueAnimator.ofFloat(from, to).apply {
+            duration = if (opening) 620L else 280L
+            interpolator = if (opening) Spring(0.22f) else android.view.animation.PathInterpolator(0.5f, 0f, 0.7f, 1f)
+            addUpdateListener {
+                reveal = it.animatedValue as Float
+                k.invalidateOutline()
+                // Contents appear once there's room, and drop the last few px into place.
+                val f = ((reveal - 0.35f) / 0.65f).coerceIn(0f, 1f)
+                content.alpha = f
+                content.translationY = -dpf(12f) * (1f - f)
+            }
+            if (end != null) addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: android.animation.Animator) = end()
+            })
+            start()
+        }
+        // The cover pops as the card opens.
+        if (opening) {
+            cover.scaleX = 0.6f
+            cover.scaleY = 0.6f
+            cover.animate().scaleX(1f).scaleY(1f).setStartDelay(160).setDuration(560).setInterpolator(Spring(0.45f)).start()
+        }
     }
 
     fun dismiss() {
@@ -635,15 +683,13 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         root = null
         HaloLink.removeListener(listener)
         ui.removeCallbacks(ticker)
-        if (k != null && Prefs.animations(c)) {
-            // Back up into the island.
-            k.pivotX = k.width / 2f
-            k.pivotY = 0f
-            content.animate().alpha(0f).setDuration(90).start()
-            k.animate().scaleX((dpf(120f) / k.width.coerceAtLeast(1)).coerceIn(0.2f, 1f)).scaleY((dpf(36f) / k.height.coerceAtLeast(1)).coerceIn(0.05f, 1f))
-                .translationY(minOf(k.translationY, 0f)).alpha(0f).setDuration(240).setInterpolator(android.view.animation.PathInterpolator(0.4f, 0f, 0.6f, 1f)).start()
+        r.animate().alpha(0f).setStartDelay(80).setDuration(220).start()
+        if (k != null) {
+            k.animate().translationY(minOf(k.translationY, 0f) * 0.5f).setDuration(280).start()
+            animateReveal(k, 0f) { (r.parent as? ViewGroup)?.removeView(r) }
+        } else {
+            (r.parent as? ViewGroup)?.removeView(r)
         }
-        r.animate().alpha(0f).setStartDelay(60).setDuration(220).withEndAction { (r.parent as? ViewGroup)?.removeView(r) }.start()
     }
 
     private fun update() {
@@ -708,12 +754,13 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         })
         val at = q.indexOfFirst { it.id == HaloLink.queueActive }
         for ((i, t) in q.withIndex()) {
-            if (at >= 0 && i < at) continue
+            // The song playing is already at the top of the card.
+            if (at >= 0 && i <= at) continue
             val now = i == at
             val row = LinearLayout(c).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(8), dp(10), dp(8))
+                setPadding(dp(10), dp(7), dp(10), dp(7))
                 background = if (now) c.round(Color.argb(50, 255, 255, 255), dpf(14f)) else null
                 setOnClickListener {
                     it.bounce()

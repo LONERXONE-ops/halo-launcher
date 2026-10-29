@@ -81,6 +81,7 @@ object HaloLink {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != ACTION_STATE) return
             read(intent)
+            music?.let { remember(context, it) }
             for (l in listeners.toList()) l()
         }
     }
@@ -137,6 +138,52 @@ object HaloLink {
         val qid = i.getStringArrayExtra("q_id") ?: emptyArray()
         val qlabel = i.getStringArrayExtra("q_label") ?: emptyArray()
         quick = qid.indices.map { n -> Quick(qid[n], qlabel.getOrElse(n) { qid[n] }) }
+    }
+
+    // ----- The last song, remembered (so the music card isn't blank when nothing plays) -----
+
+    private var cachedMusic: Music? = null
+    private var cacheLoaded = false
+    private var cacheKey = ""
+
+    /** The last song that played, shown paused; null if there's never been one. */
+    fun lastSong(c: Context): Music? {
+        if (!cacheLoaded) {
+            cacheLoaded = true
+            try {
+                val p = c.getSharedPreferences("music_cache", Context.MODE_PRIVATE)
+                val t = p.getString("title", null)
+                if (!t.isNullOrEmpty()) {
+                    val f = java.io.File(c.cacheDir, "last_cover.png")
+                    val art = if (f.exists()) android.graphics.BitmapFactory.decodeFile(f.path) else null
+                    cachedMusic = Music(t, p.getString("artist", "").orEmpty(), p.getString("app", "").orEmpty(), false, art,
+                        p.getInt("accent", Palette.GRAPHITE), p.getLong("dur", 0L), p.getLong("pos", 0L), 0L, 1f)
+                    cacheKey = "$t|${p.getString("artist", "")}"
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return cachedMusic
+    }
+
+    private fun remember(c: Context, m: Music) {
+        val k = "${m.title}|${m.artist}"
+        val newSong = k != cacheKey
+        cacheKey = k
+        cachedMusic = Music(m.title, m.artist, m.app, false, m.art, m.accent, m.durationMs, m.position(), 0L, 1f)
+        cacheLoaded = true
+        val app = c.applicationContext
+        val art = m.art
+        val pos = m.position()
+        Thread {
+            try {
+                app.getSharedPreferences("music_cache", Context.MODE_PRIVATE).edit()
+                    .putString("title", m.title).putString("artist", m.artist).putString("app", m.app)
+                    .putInt("accent", m.accent).putLong("dur", m.durationMs).putLong("pos", pos).apply()
+                if (newSong && art != null) java.io.File(app.cacheDir, "last_cover.png").outputStream().use { art.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            } catch (_: Exception) {
+            }
+        }.start()
     }
 
     /** After you seek: show the new spot straight away (Halo confirms a moment later). */
