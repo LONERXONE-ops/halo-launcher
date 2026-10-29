@@ -112,9 +112,13 @@ class AppIconView(
             iconPaint.alpha = (255 * fade).toInt()
             dst.set(cx - px / 2f, top, cx + px / 2f, top + px)
             if (it.glass) {
+                // The tile follows the theme: real glass with Liquid Glass, a solid tile with Solid.
                 val t = tile ?: (
-                    if (liveGlass) GlassDrawable(this, px * 0.2237f, darkness = 0.04f, bendPx = dpf(7f), owned = true)
-                    else context.round(Color.argb(40, 255, 255, 255), px * 0.2237f).apply { setStroke(dp(1), Color.argb(60, 255, 255, 255)) }
+                    when {
+                        !Glass.enabled(context) -> context.round(Palette.GRAPHITE, px * 0.2237f).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
+                        liveGlass -> GlassDrawable(this, px * 0.2237f, darkness = 0.04f, bendPx = dpf(7f), owned = true)
+                        else -> context.round(Color.argb(40, 255, 255, 255), px * 0.2237f).apply { setStroke(dp(1), Color.argb(60, 255, 255, 255)) }
+                    }
                     ).also { d -> tile = d }
                 dst.round(tileRect)
                 t.bounds = tileRect

@@ -106,9 +106,9 @@ object ClockFaces {
 
     /** Liquid Glass digits: follow the theme, or always / never. */
     fun glass(c: Context): Boolean = when (Prefs.get(c).getInt(Prefs.CLOCK_GLASS, 0)) {
-        1 -> true
-        2 -> false
-        else -> Glass.enabled(c)
+        0 -> Glass.enabled(c)
+        // "Plain": never glass. (Glass digits only ever come with the Liquid Glass theme.)
+        else -> false
     }
 }
 

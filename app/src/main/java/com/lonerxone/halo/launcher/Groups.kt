@@ -66,14 +66,33 @@ object Groups {
  */
 @SuppressLint("ViewConstructor")
 class FolderTile(context: Context, val folderId: String, private val large: Boolean, private val open: (View) -> Unit, private val launch: (App, View) -> Unit) : FrameLayout(context) {
+    private val pane = FrameLayout(context)
+    private val apps: List<App> = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
+    private var builtSide = 0
+
     init {
-        val apps = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
-        val pane = FrameLayout(context)
         addView(pane, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER))
-        pane.post {
-            // A square pane, the theme's surface.
-            val side = minOf(width, height) - if (large) 0 else dp(6)
-            if (side <= 0) return@post
+        setOnClickListener {
+            it.bounce()
+            open(this)
+        }
+    }
+
+    /**
+     * Built when it actually has a size (not "a moment later", which can be
+     * before the home screen is even laid out when it's rebuilt in the
+     * background, and left the folder empty).
+     */
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        super.onSizeChanged(w, h, ow, oh)
+        val side = minOf(w, h) - if (large) 0 else dp(6)
+        if (side <= 0 || side == builtSide) return
+        builtSide = side
+        post { setup(side) }
+    }
+
+    private fun setup(side: Int) {
+        run {
             pane.layoutParams = LayoutParams(side, side, Gravity.CENTER)
             // Rounded like an app icon (clipped too, so nothing ever pokes out square).
             val rad = side * if (large) 0.18f else 0.26f
@@ -85,10 +104,6 @@ class FolderTile(context: Context, val folderId: String, private val large: Bool
             }
             pane.clipToOutline = true
             build(pane, apps, side)
-        }
-        setOnClickListener {
-            it.bounce()
-            open(this)
         }
     }
 

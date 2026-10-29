@@ -306,13 +306,22 @@ class SettingsActivity : Activity() {
     // =====================================================================
 
     private fun themePage(col: LinearLayout) {
-        note(col, "Liquid Glass bends the picture behind it like a real lens: frosted in the middle, refracting at the edges, light catching the rim. Solid uses plain dark tiles.")
+        note(col, "One switch for the whole launcher. Liquid Glass: tiles, folders, widgets, the dock, menus, the app list, icons and the clock digits are glass that bends the picture behind it. Solid: all of them become plain tiles. (Picking a theme also sets icons, dock and clock back to follow it.)")
         if (Build.VERSION.SDK_INT < 33) note(col, "Your Android version gets frosted glass; the full lens needs Android 13 or newer.")
         val cur = Prefs.get(this).getInt(Prefs.THEME, Glass.THEME_GLASS)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for ((i, name) in listOf("Liquid Glass", "Solid").withIndex()) {
             val card = choiceCard(cur == i) {
-                Prefs.get(this).edit().putInt(Prefs.THEME, i).apply()
+                // One switch for everything: icons, dock, clock digits, folders,
+                // widgets, menus and the app list all follow the theme again.
+                Prefs.get(this).edit()
+                    .putInt(Prefs.THEME, i)
+                    .remove(Prefs.ICON_STYLE)
+                    .putInt(Prefs.DOCK_STYLE, DockBar.GLASS)
+                    .putInt(Prefs.CLOCK_GLASS, 0)
+                    .apply()
+                Icons.forgetAll()
+                heroCache = null
                 render()
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(12))
@@ -620,7 +629,7 @@ class SettingsActivity : Activity() {
         pv.addView(box)
         col.addView(pv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
 
-        chips(col, "Liquid Glass digits", Prefs.CLOCK_GLASS, listOf("With theme", "On", "Off"), inPlace = true)
+        chips(col, "Digits", Prefs.CLOCK_GLASS, listOf("Glass with the theme", "Plain"), inPlace = true)
         // Colour: a row of swatches (the second is your wallpaper's colour).
         section(col, "Colour")
         val curCol = Prefs.get(this).getInt(Prefs.CLOCK_COLOR, 0)
