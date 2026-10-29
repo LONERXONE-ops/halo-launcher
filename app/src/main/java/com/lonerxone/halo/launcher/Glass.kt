@@ -498,8 +498,19 @@ class GlassDrawable(
         val ox = loc[0] + b.left.toFloat()
         val oy = loc[1] + b.top.toFloat()
         val frost = Glass.frost()
-        if (frost != null && Build.VERSION.SDK_INT >= 33) {
-            val rs = (runtime as? RuntimeShader) ?: RuntimeShader(Glass.AGSL).also { runtime = it }
+        val rs0 = if (frost != null && Build.VERSION.SDK_INT >= 33 && !shaderBroken) {
+            (runtime as? RuntimeShader) ?: try {
+                RuntimeShader(Glass.AGSL).also { runtime = it }
+            } catch (_: Throwable) {
+                // A GPU that won't take the shader: frosted glass instead, never a crash.
+                shaderBroken = true
+                null
+            }
+        } else {
+            null
+        }
+        if (frost != null && rs0 != null) {
+            val rs = rs0
             rs.setInputShader("image", frost)
             rs.setFloatUniform("size", rect.width(), rect.height())
             rs.setFloatUniform("origin", ox, oy)
@@ -592,6 +603,11 @@ class GlassDrawable(
 
     override fun setAlpha(alpha: Int) {
         paint.alpha = alpha
+    }
+
+    companion object {
+        @Volatile
+        private var shaderBroken = false
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {}
