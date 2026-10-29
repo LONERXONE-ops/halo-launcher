@@ -127,23 +127,23 @@ object AppRepo {
 
     fun launches(ctx: Context, app: App) = Prefs.get(ctx).getInt(Prefs.LAUNCHES + ":" + app.key, 0)
 
-    /** Groups for the capsule folders, from the category each app declares. */
-    fun group(app: App): String = when (app.category) {
-        ApplicationInfo.CATEGORY_AUDIO, ApplicationInfo.CATEGORY_VIDEO, ApplicationInfo.CATEGORY_GAME -> "Entertainment"
-        ApplicationInfo.CATEGORY_SOCIAL, ApplicationInfo.CATEGORY_NEWS -> "Social"
-        ApplicationInfo.CATEGORY_IMAGE -> "Photos"
-        ApplicationInfo.CATEGORY_PRODUCTIVITY, ApplicationInfo.CATEGORY_MAPS -> "Tools"
-        else -> guess(app)
-    }
-
-    /** Many apps don't declare a category; a few well-known names help. */
-    private fun guess(app: App): String {
+    /** The kind of app, for the sorted app list (Social, Games, Music & video…). */
+    fun group(app: App): String {
         val p = app.pkg.lowercase()
+        fun has(vararg w: String) = w.any { p.contains(it) }
         return when {
-            listOf("whatsapp", "instagram", "facebook", "twitter", "telegram", "snapchat", "tiktok", "musically", "discord", "reddit", "pinterest", "threads", "messenger", "x.android").any { p.contains(it) } -> "Social"
-            listOf("spotify", "youtube", "netflix", "music", "boomplay", "audiomack", "crunchyroll", "player", "video", "game").any { p.contains(it) } -> "Entertainment"
-            listOf("camera", "gallery", "photo", "lightroom", "snapseed", "picsart", "canva").any { p.contains(it) } -> "Photos"
-            else -> "Tools"
+            app.category == ApplicationInfo.CATEGORY_GAME || has("game", "pubg", "freefire", "dts.freefireth", "codm", "efootball", "supercell", "roblox", "minecraft") -> "Games"
+            has("bank", "pay", "wallet", "opay", "palmpay", "kuda", "moniepoint", "gtworld", "zenith", "access", "uba", "firstbank", "binance", "bybit", "crypto", "finance") -> "Money"
+            app.category == ApplicationInfo.CATEGORY_SOCIAL || has("whatsapp", "instagram", "facebook", "twitter", "telegram", "snapchat", "tiktok", "musically", "discord", "reddit", "pinterest", "threads", "messenger", "x.android", "linkedin") -> "Social"
+            app.category == ApplicationInfo.CATEGORY_AUDIO || app.category == ApplicationInfo.CATEGORY_VIDEO || has("spotify", "youtube", "netflix", "music", "boomplay", "audiomack", "crunchyroll", "player", "video", "showmax", "anime") -> "Music & video"
+            app.category == ApplicationInfo.CATEGORY_IMAGE || has("camera", "gallery", "photo", "lightroom", "snapseed", "picsart", "canva", "capcut", "editor") -> "Photos"
+            has("jumia", "konga", "amazon", "temu", "shein", "aliexpress", "shop", "store") && !has("vending") -> "Shopping"
+            has("duolingo", "classroom", "school", "study", "learn", "edu", "quizlet", "notion", "docs", "sheets", "slides", "office", "word", "excel") -> "Study & work"
+            has("chrome", "browser", "opera", "firefox", "brave", "edge") -> "Web"
+            app.category == ApplicationInfo.CATEGORY_NEWS || has("news") -> "News"
+            app.category == ApplicationInfo.CATEGORY_MAPS || has("maps", "uber", "bolt", "indrive", "waze") -> "Travel"
+            has("com.android.", "com.samsung.", "com.sec.", "com.google.android.apps.", "settings", "clock", "calculator", "calendar", "contacts", "dialer", "messaging", "files") -> "Phone"
+            else -> "Other"
         }
     }
 }

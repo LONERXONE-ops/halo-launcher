@@ -50,6 +50,10 @@ object HomeWidgets {
         WidgetSpec("screen", "Screen time", "Time on your phone today; bigger sizes list your top apps.", SMALL),
         WidgetSpec("note", "Note", "A note to yourself, always in view.", SMALL),
         WidgetSpec("photo", "Photo", "A picture you love, edge to edge (like Nothing's Collector and iOS Photos).", SMALL),
+        WidgetSpec("analog", "Clock face", "An analog clock with a sweeping hour and minute hand.", SMALL),
+        WidgetSpec("month", "Month", "This month at a glance, today marked in your colour.", SMALL),
+        WidgetSpec("countdown", "Countdown", "Days until something you're waiting for. Tap to set it.", SMALL),
+        WidgetSpec("storage", "Storage", "How full your phone is.", SMALL),
         WidgetSpec("timer", "Timer", "One tap starts a countdown (like Nothing's Glyph Timer); your clock app rings when it's done.", SMALL),
     )
 
@@ -64,6 +68,10 @@ object HomeWidgets {
         "note" -> NoteWidget(c, a)
         "photo" -> PhotoWidget(c, a)
         "timer" -> TimerWidget(c, a)
+        "analog" -> AnalogWidget(c, a)
+        "month" -> MonthWidget(c, a)
+        "countdown" -> CountdownWidget(c, a)
+        "storage" -> StorageWidget(c, a)
         else -> null
     }?.also { it.size = sizeOf(c, id) }
 
@@ -681,5 +689,221 @@ class TimerWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Timer") {
 class SquareFrame(context: Context) : FrameLayout(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY))
+    }
+}
+
+
+/** An analog clock: a clean face, twelve ticks, hour and minute hands, your colour on the centre. */
+@SuppressLint("ViewConstructor")
+class AnalogWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Clock") {
+    override val id = "analog"
+    private val face = object : View(c) {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { strokeCap = android.graphics.Paint.Cap.ROUND }
+        override fun onDraw(cv: android.graphics.Canvas) {
+            val r = minOf(width, height) / 2f * 0.94f
+            val cx = width / 2f
+            val cy = height / 2f
+            p.style = android.graphics.Paint.Style.STROKE
+            for (i in 0 until 60) {
+                val major = i % 5 == 0
+                p.color = if (major) Palette.INK else android.graphics.Color.argb(70, 255, 255, 255)
+                p.strokeWidth = if (major) r * 0.035f else r * 0.015f
+                val a = Math.toRadians(i * 6.0)
+                val o = r
+                val inner = r * if (major) 0.84f else 0.9f
+                cv.drawLine(cx + (Math.sin(a) * inner).toFloat(), cy - (Math.cos(a) * inner).toFloat(), cx + (Math.sin(a) * o).toFloat(), cy - (Math.cos(a) * o).toFloat(), p)
+            }
+            val t = java.util.Calendar.getInstance()
+            val m = t.get(java.util.Calendar.MINUTE) + t.get(java.util.Calendar.SECOND) / 60f
+            val h = t.get(java.util.Calendar.HOUR) + m / 60f
+            fun hand(deg: Float, len: Float, w: Float, col: Int) {
+                p.color = col
+                p.strokeWidth = w
+                val a = Math.toRadians(deg.toDouble())
+                cv.drawLine(cx, cy, cx + (Math.sin(a) * len).toFloat(), cy - (Math.cos(a) * len).toFloat(), p)
+            }
+            hand(h * 30f, r * 0.5f, r * 0.075f, Palette.INK)
+            hand(m * 6f, r * 0.76f, r * 0.05f, Palette.INK)
+            p.style = android.graphics.Paint.Style.FILL
+            p.color = if (Palette.ACCENT == Palette.INK) Palette.RED else Palette.ACCENT
+            cv.drawCircle(cx, cy, r * 0.07f, p)
+        }
+    }
+
+    init {
+        removeView(header)
+        setPadding(dp(10), dp(10), dp(10), dp(10))
+        addView(face, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setOnClickListener {
+            try {
+                context.startActivity(android.content.Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override fun refresh() {
+        face.invalidate()
+    }
+}
+
+/** This month: a small calendar with today circled in your colour. */
+@SuppressLint("ViewConstructor")
+class MonthWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Month") {
+    override val id = "month"
+    private val grid = object : View(c) {
+        private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = Fonts.semibold(c)
+        }
+        override fun onDraw(cv: android.graphics.Canvas) {
+            val cal = java.util.Calendar.getInstance()
+            val today = cal.get(java.util.Calendar.DAY_OF_MONTH)
+            val days = cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            cal.set(java.util.Calendar.DAY_OF_MONTH, 1)
+            val first = cal.firstDayOfWeek
+            val offset = Math.floorMod(cal.get(java.util.Calendar.DAY_OF_WEEK) - first, 7)
+            val rows = (offset + days + 6) / 7 + 1
+            val cw = width / 7f
+            val ch = height / rows.toFloat()
+            p.textSize = minOf(cw, ch) * 0.52f
+            val names = java.text.DateFormatSymbols.getInstance().shortWeekdays
+            for (i in 0 until 7) {
+                p.color = Palette.GREY
+                val wd = ((first - 1 + i) % 7) + 1
+                cv.drawText(names[wd].take(1).uppercase(), cw * (i + 0.5f), ch * 0.7f, p)
+            }
+            for (d in 1..days) {
+                val pos = offset + d - 1
+                val x = cw * (pos % 7 + 0.5f)
+                val y = ch * (pos / 7 + 1) + ch * 0.68f
+                if (d == today) {
+                    p.color = if (Palette.ACCENT == Palette.INK) Palette.RED else Palette.ACCENT
+                    cv.drawCircle(x, y - p.textSize * 0.35f, minOf(cw, ch) * 0.46f, p)
+                    p.color = android.graphics.Color.WHITE
+                } else {
+                    p.color = Palette.INK
+                }
+                cv.drawText(d.toString(), x, y, p)
+            }
+        }
+    }
+
+    init {
+        addView(grid, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(6) })
+        setOnClickListener { actions.openCalendar() }
+        refresh()
+    }
+
+    override fun refresh() {
+        titleView.text = DateFormat.format("MMMM", Date())
+        grid.invalidate()
+    }
+}
+
+/** Days until a date you pick ("Exams", "Birthday"…). */
+@SuppressLint("ViewConstructor")
+class CountdownWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Countdown") {
+    override val id = "countdown"
+    private val days = big()
+    private val sub = small()
+
+    init {
+        spacer()
+        addView(days)
+        addView(sub.apply { setPadding(0, dp(6), 0, 0) })
+        setOnClickListener { pick() }
+        refresh()
+    }
+
+    private fun pick() {
+        val cal = java.util.Calendar.getInstance()
+        val at = Prefs.get(context).getLong("cd_date", 0L)
+        if (at > 0) cal.timeInMillis = at
+        android.app.DatePickerDialog(context, android.R.style.Theme_DeviceDefault_Dialog_Alert, { _, y, m, d ->
+            val t = java.util.Calendar.getInstance().apply {
+                set(y, m, d, 0, 0, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val input = android.widget.EditText(android.view.ContextThemeWrapper(context, android.R.style.Theme_DeviceDefault)).apply {
+                hint = "What is it? (e.g. Exams)"
+                setText(Prefs.get(context).getString("cd_title", ""))
+            }
+            android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Counting down to")
+                .setView(FrameLayout(context).apply {
+                    setPadding(dp(20), dp(8), dp(20), 0)
+                    addView(input)
+                })
+                .setPositiveButton("Save") { _, _ ->
+                    Prefs.get(context).edit().putLong("cd_date", t.timeInMillis).putString("cd_title", input.text.toString().trim()).apply()
+                    refresh()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }, cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH), cal.get(java.util.Calendar.DAY_OF_MONTH)).show()
+    }
+
+    override fun refresh() {
+        val p = Prefs.get(context)
+        val at = p.getLong("cd_date", 0L)
+        days.textSize = bigSize()
+        if (at == 0L) {
+            titleView.text = "Countdown"
+            days.text = "—"
+            sub.text = "Tap to pick a date"
+            return
+        }
+        val today = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val n = Math.round((at - today) / 86_400_000.0).toInt()
+        titleView.text = p.getString("cd_title", "").orEmpty().ifEmpty { "Countdown" }
+        days.text = kotlin.math.abs(n).toString()
+        sub.text = when {
+            n == 0 -> "It's today"
+            n == 1 -> "day to go · " + DateFormat.format("d MMM", Date(at))
+            n > 0 -> "days to go · " + DateFormat.format("d MMM", Date(at))
+            else -> "days ago · " + DateFormat.format("d MMM", Date(at))
+        }
+    }
+}
+
+/** Storage: used and free, in dots. */
+@SuppressLint("ViewConstructor")
+class StorageWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Storage") {
+    override val id = "storage"
+    private val pct = big()
+    private val dots = DotsView(c)
+    private val sub = small()
+
+    init {
+        spacer()
+        addView(pct)
+        addView(dots, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)).apply { topMargin = dp(10) })
+        addView(sub.apply { setPadding(0, dp(8), 0, 0) })
+        setOnClickListener {
+            try {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+            }
+        }
+        refresh()
+    }
+
+    override fun refresh() {
+        val st = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+        val total = st.totalBytes.toDouble()
+        val free = st.availableBytes.toDouble()
+        val used = ((total - free) / total).coerceIn(0.0, 1.0)
+        pct.textSize = bigSize()
+        pct.text = "${(used * 100).toInt()}%"
+        dots.count = if (size == HomeWidgets.SMALL) 10 else 20
+        dots.fraction = used.toFloat()
+        dots.accent = if (used > 0.9) Palette.RED else null
+        sub.text = String.format(java.util.Locale.getDefault(), "%.0f GB free of %.0f GB", free / 1e9, total / 1e9)
     }
 }

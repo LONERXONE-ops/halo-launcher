@@ -54,7 +54,7 @@ import kotlin.math.abs
  * Long-press anything to edit (iOS style): everything jiggles and can be
  * dragged to a new place, resized or removed.
  */
-class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
+class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, FolderSheet.Host {
 
     private lateinit var root: GestureRoot
     private lateinit var bg: BackgroundView
@@ -229,6 +229,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         when {
+            sheet != null -> sheet?.close()
             editor.editing -> editor.exit()
             drawer.isOpen -> drawer.close()
             pager.current != 0 -> pager.snapTo(0)
@@ -501,6 +502,38 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
                 }
             }
             id.startsWith("aw:") -> androidWidgetCell(item)
+            id.startsWith("folder:") -> {
+                if (Groups.folderApps(this, id).isEmpty()) return null
+                val large = item.sx >= 2
+                val tile = FolderTile(this, id, large, open = { v -> openFolder(id, v) }, launch = { a, v -> launch(a, v) })
+                Cell(this, editor, "home", id, tile, sizeLabel = if (large) "Large" else "Small", longPressEdits = true).apply {
+                    onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
+                    onSize = {
+                        changed { if (large) HomeLayout.resize(this@LauncherActivity, id, 1, 1) else HomeLayout.resize(this@LauncherActivity, id, 2, 2) }
+                        snapToItem(id)
+                    }
+                    onEditTap = { openFolder(id, this) }
+                }
+            }
+            id.startsWith("stack:") -> {
+                val list = Groups.stackWidgets(this, id).mapNotNull { wid -> HomeWidgets.create(this, wid, this) }
+                if (list.isEmpty()) return null
+                val size = HomeLayout.sizeOf(item)
+                for (w in list) {
+                    w.size = size
+                    widgets += w
+                }
+                val stack = WidgetStack(this, id, list)
+                Cell(this, editor, "home", id, stack, sizeLabel = HomeWidgets.SIZE_NAMES[size]).apply {
+                    onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
+                    onSize = {
+                        val (sx, sy) = HomeLayout.spansFor((size + 1) % 3)
+                        changed { HomeLayout.resize(this@LauncherActivity, id, sx, sy) }
+                        snapToItem(id)
+                    }
+                    onEditTap = { stackMenu(id, this) }
+                }
+            }
             else -> null
         }
     }
@@ -1021,8 +1054,53 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     private var dropAt: IntArray? = null
     private var edgeSince = 0L
 
-    override fun homeHover(id: String, left: Float, top: Float, fingerX: Float) {
+    /** Where an item dropped right now would go into (a folder or stack), or null. */
+    private var mergeInto: String? = null
+    private var hoverArgs: FloatArray? = null
+    private var hoverId: String? = null
+    private var edgeQueued = false
+
+    /**
+     * Turning the page while dragging. Holding still at the edge must work
+     * too (no finger movement means no new touch events), so this runs on a
+     * timer while the finger, or the item itself, is past the edge.
+     */
+    private val edgeTick = Runnable {
+        edgeQueued = false
+        val a = hoverArgs ?: return@Runnable
+        val id = hoverId ?: return@Runnable
+        if (editor.draggingZone != "home") return@Runnable
+        val dir = edgeDir(id, a[0], a[2])
+        if (dir == 0) return@Runnable
+        val to = pager.current + dir
+        if (to in grids.indices) {
+            pager.snapTo(to)
+            root.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            // Once the page has turned, show where it would land there.
+            root.postDelayed({ editor.rehover() }, 320L)
+        }
+        edgeQueued = true
+        root.postDelayed(edgeTickRef, 750L)
+    }
+    private val edgeTickRef = Runnable { edgeTick.run() }
+
+    /** -1 / +1 when the finger (or a good part of the item) is past the left / right edge. */
+    private fun edgeDir(id: String, left: Float, fingerX: Float): Int {
+        val item = HomeLayout.get(this, id) ?: return 0
+        val g = grids.getOrNull(pager.current) ?: return 0
+        val w = item.sx * g.cellW()
+        val edge = dp(40)
+        return when {
+            fingerX < edge || left < -w * 0.3f -> -1
+            fingerX > root.width - edge || left + w > root.width + w * 0.3f -> 1
+            else -> 0
+        }
+    }
+
+    override fun homeHover(id: String, left: Float, top: Float, fingerX: Float, fingerY: Float) {
         val item = HomeLayout.get(this, id) ?: return
+        hoverArgs = floatArrayOf(left, top, fingerX, fingerY)
+        hoverId = id
         // Make sure there's an empty page at the end to drag onto.
         if (grids.size < HomeLayout.pages(this) + 1) {
             grids += newGrid(grids.size).also {
@@ -1031,26 +1109,53 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             }
             dots.pages = grids.size
         }
-        // Hold at the screen's edge to turn the page.
-        val edge = dp(28)
-        val atEdge = fingerX < edge || fingerX > root.width - edge
-        val now = System.currentTimeMillis()
-        if (!atEdge) {
-            edgeSince = 0L
-        } else if (edgeSince == 0L) {
-            edgeSince = now
-        } else if (now - edgeSince > 520) {
-            edgeSince = now + 300
-            val to = pager.current + if (fingerX < edge) -1 else 1
-            if (to in grids.indices) {
-                pager.snapTo(to)
-                root.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        if (edgeDir(id, left, fingerX) != 0) {
+            if (!edgeQueued) {
+                edgeQueued = true
+                root.postDelayed(edgeTickRef, 380L)
             }
+        } else if (edgeQueued) {
+            edgeQueued = false
+            root.removeCallbacks(edgeTickRef)
         }
         val page = pager.current
         val g = grids.getOrNull(page) ?: return
         val loc = IntArray(2)
         g.getLocationOnScreen(loc)
+
+        // Over another item that this one can go into? (an app onto an app
+        // or folder; a widget onto a widget or stack of the same size)
+        val fc = g.cellAt(fingerX - loc[0], fingerY - loc[1])
+        val under = HomeLayout.all(this).firstOrNull { o ->
+            o.id != id && o.page == page && fc.first >= o.col && fc.first < o.col + o.sx && fc.second >= o.row && fc.second < o.row + o.sy
+        }
+        val canMerge = under != null && (
+            (id.startsWith("app:") && (under.id.startsWith("app:") || under.id.startsWith("folder:"))) ||
+                (id.startsWith("w:") && (under.id.startsWith("w:") || under.id.startsWith("stack:")) && under.sx == item.sx && under.sy == item.sy)
+            )
+        if (canMerge && under != null) {
+            val r = g.rectOf(under.col, under.row, under.sx, under.sy, android.graphics.RectF())
+            val fx = fingerX - loc[0]
+            val fy = fingerY - loc[1]
+            val inX = abs(fx - r.centerX()) < r.width() * 0.32f
+            val inY = abs(fy - r.centerY()) < r.height() * 0.32f
+            if (inX && inY) {
+                if (mergeInto != under.id) {
+                    mergeInto = under.id
+                    dropAt = null
+                    for (o in grids) o.preview = null
+                    g.merging = true
+                    g.preview = intArrayOf(under.col, under.row, under.sx, under.sy)
+                    g.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                }
+                return
+            }
+        }
+        if (mergeInto != null) {
+            mergeInto = null
+            g.merging = false
+        }
+
         // The cell under the item's top-left corner (rounded to the nearest).
         val col = Math.round((left - loc[0] - g.paddingLeft) / g.cellW())
         val row = Math.round((top - loc[1] - g.paddingTop) / g.cellH())
@@ -1059,16 +1164,150 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         if (next == null || dropAt?.contentEquals(next) != true) {
             if (next != null && dropAt != null) g.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
             dropAt = next
-            for (o in grids) o.preview = null
+            for (o in grids) {
+                o.preview = null
+                o.merging = false
+            }
             if (next != null) g.preview = intArrayOf(next[1], next[2], item.sx, item.sy)
         }
     }
 
     override fun homeDrop(id: String): IntArray? {
+        root.removeCallbacks(edgeTickRef)
+        edgeQueued = false
+        val m = mergeInto
+        mergeInto = null
+        for (o in grids) o.merging = false
+        if (m != null) {
+            val target = HomeLayout.get(this, m)
+            merge(id, m)
+            return target?.let { screenOf(it.page, it.col, it.row, it.sx, it.sy) }
+        }
         val d = dropAt ?: return HomeLayout.get(this, id)?.let { screenOf(it.page, it.col, it.row, it.sx, it.sy) }
         HomeLayout.moveTo(this, id, d[0], d[1], d[2])
         val item = HomeLayout.get(this, id) ?: return null
         return screenOf(d[0], item.col, item.row, item.sx, item.sy)
+    }
+
+    /** Puts [id] into [into]: app + app = new folder; app + folder; widget + widget = new stack; widget + stack. */
+    private fun merge(id: String, into: String) {
+        when {
+            id.startsWith("app:") && into.startsWith("app:") -> {
+                val f = Groups.newFolderId()
+                Groups.setFolderApps(this, f, listOf(into.removePrefix("app:"), id.removePrefix("app:")))
+                HomeLayout.swapId(this, into, f)
+                HomeLayout.remove(this, id)
+                Toast.makeText(this, "Folder made: tap it to name it", Toast.LENGTH_SHORT).show()
+            }
+            id.startsWith("app:") && into.startsWith("folder:") -> {
+                Groups.setFolderApps(this, into, Groups.folderApps(this, into) + id.removePrefix("app:"))
+                HomeLayout.remove(this, id)
+            }
+            id.startsWith("w:") && into.startsWith("w:") -> {
+                val st = Groups.newStackId()
+                Groups.setStackWidgets(this, st, listOf(into.removePrefix("w:"), id.removePrefix("w:")))
+                HomeLayout.swapId(this, into, st)
+                HomeLayout.remove(this, id)
+                Toast.makeText(this, "Stack made: swipe up or down on it", Toast.LENGTH_SHORT).show()
+            }
+            id.startsWith("w:") && into.startsWith("stack:") -> {
+                Groups.setStackWidgets(this, into, Groups.stackWidgets(this, into) + id.removePrefix("w:"))
+                HomeLayout.remove(this, id)
+            }
+        }
+    }
+
+    // ----- folders (FolderSheet.Host) -----
+
+    private var sheet: FolderSheet? = null
+
+    private fun openFolder(id: String, from: View) {
+        sheet?.let { overlayLayer.removeView(it) }
+        val s = FolderSheet(this, id, this)
+        sheet = s
+        overlayLayer.addView(s, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        s.show(from)
+    }
+
+    override fun rename(id: String) {
+        val input = EditText(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault)).apply {
+            setText(Groups.folderName(this@LauncherActivity, id))
+            setSelection(text.length)
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Folder name")
+            .setView(FrameLayout(this).apply {
+                setPadding(dp(20), dp(8), dp(20), 0)
+                addView(input)
+            })
+            .setPositiveButton("Save") { _, _ ->
+                Groups.setFolderName(this, id, input.text.toString())
+                sheet?.close()
+                rebuildHome()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun addApps(id: String) {
+        sheet?.close()
+        startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", "fapps_" + id.removePrefix("folder:")).putExtra("max", 0).putExtra("title", Groups.folderName(this, id)))
+    }
+
+    override fun removeFromFolder(id: String, app: App, anchor: View) {
+        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
+        m.menu.add(0, 1, 0, "Take out of folder")
+        m.menu.add(0, 2, 1, "App info")
+        m.setOnMenuItemClickListener { item ->
+            if (item.itemId == 1) {
+                val left = Groups.folderApps(this, id).filter { it != app.key }
+                Groups.setFolderApps(this, id, left)
+                val f = HomeLayout.get(this, id)
+                when {
+                    left.isEmpty() -> HomeLayout.remove(this, id)
+                    // One app left: the folder becomes that app again.
+                    left.size == 1 -> HomeLayout.swapId(this, id, "app:" + left[0], 1, 1)
+                }
+                // The app goes back on the home screen next to where the folder is.
+                if (!HomeLayout.has(this, "app:" + app.key)) HomeLayout.add(this, "app:" + app.key, 1, 1, preferPage = f?.page ?: pager.current)
+                sheet?.close()
+                rebuildHome()
+            } else {
+                try {
+                    getSystemService(LauncherApps::class.java).startAppDetailsActivity(app.component, app.user, null, null)
+                } catch (_: Exception) {
+                }
+            }
+            true
+        }
+        m.show()
+    }
+
+    override fun closed() {
+        sheet = null
+    }
+
+    /** Edit mode, tap a stack: take a widget out, or split the stack up. */
+    private fun stackMenu(id: String, anchor: View) {
+        val ids = Groups.stackWidgets(this, id)
+        val m = PopupMenu(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault), anchor)
+        ids.forEachIndexed { i, w -> m.menu.add(0, 10 + i, i, "Take out " + HomeWidgets.ALL.firstOrNull { it.id == w }?.name.orEmpty()) }
+        m.menu.add(1, 1, 50, "Split the stack")
+        m.setOnMenuItemClickListener { item ->
+            val st = HomeLayout.get(this, id)
+            val out = if (item.itemId == 1) ids.drop(1) else listOfNotNull(ids.getOrNull(item.itemId - 10))
+            val keep = ids - out.toSet()
+            Groups.setStackWidgets(this, id, keep)
+            if (keep.size == 1) HomeLayout.swapId(this, id, "w:" + keep[0])
+            if (keep.isEmpty()) HomeLayout.remove(this, id)
+            for (w in out) {
+                val (sx, sy) = if (st != null) st.sx to st.sy else HomeLayout.spansFor(HomeWidgets.spec(w).defaultSize)
+                HomeLayout.add(this, "w:$w", sx, sy, preferPage = st?.page ?: pager.current)
+            }
+            rebuildHome()
+            true
+        }
+        m.show()
     }
 
     private fun screenOf(page: Int, col: Int, row: Int, sx: Int, sy: Int): IntArray? {

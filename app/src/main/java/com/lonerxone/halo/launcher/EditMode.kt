@@ -273,7 +273,7 @@ class Editor(private val host: Host) {
          * top-left on screen and the finger, so the host can show where it
          * would land and turn the page at the screen's edge.
          */
-        fun homeHover(id: String, left: Float, top: Float, fingerX: Float)
+        fun homeHover(id: String, left: Float, top: Float, fingerX: Float, fingerY: Float)
 
         /** Commit the drop; returns where (on screen) the item now sits, or null to just rebuild. */
         fun homeDrop(id: String): IntArray?
@@ -295,6 +295,12 @@ class Editor(private val host: Host) {
     private var pendingUp = false
 
     fun isFloating(c: Cell) = floating === c
+
+    /** Re-run the hover check without the finger moving (e.g. after the page turned). */
+    fun rehover() {
+        val c = floating ?: return
+        if (draggingZone == "home") host.homeHover(c.itemId, lastX - grabX, lastY - grabY, lastX, lastY)
+    }
     val isDragging: Boolean get() = floating != null || pendingDrag
     private var pendingDrag = false
 
@@ -428,7 +434,7 @@ class Editor(private val host: Host) {
         val c = floating ?: return
         val zone = draggingZone ?: return
         if (zone == "home") {
-            host.homeHover(c.itemId, lastX - grabX, lastY - grabY, lastX)
+            host.homeHover(c.itemId, lastX - grabX, lastY - grabY, lastX, lastY)
             return
         }
         val now = System.currentTimeMillis()

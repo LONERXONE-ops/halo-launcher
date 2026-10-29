@@ -50,6 +50,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private val letters: LetterStrip
     /** Beyond apps: a calculator answer, and searching the web or the Play Store. */
     private val extras: LinearLayout
+    /** Sorted for you: the app list by kind (Social, Games, Photos…). */
+    private val cats: LinearLayout
+    private var cat: String? = null
     private val bubble: TextView
     private val adapter = AppsAdapter()
     private var shown: List<App> = emptyList()
@@ -106,6 +109,15 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         pill.addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         content.addView(pill, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)))
 
+        cats = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        content.addView(android.widget.HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(cats)
+        })
         usedTitle = context.text(10.5f, Palette.GREY, caps = true).apply {
             text = "Most used"
             setPadding(dp(6), dp(18), 0, dp(6))
@@ -180,7 +192,29 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         visibility = View.INVISIBLE
     }
 
+    private fun drawCats() {
+        cats.removeAllViews()
+        val hidden = Prefs.list(context, Prefs.HIDDEN).toSet()
+        val groups = AppRepo.apps.filter { it.key !in hidden }.groupingBy { AppRepo.group(it) }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key }
+        for (g in listOf<String?>(null) + groups) {
+            val on = g == cat
+            cats.addView(context.text(12.5f, if (on) Color.BLACK else Palette.INK, bold = true).apply {
+                text = g ?: "All"
+                setPadding(dp(14), dp(7), dp(14), dp(7))
+                background = context.round(if (on) Palette.INK else Palette.GRAPHITE, dpf(16f))
+                setOnClickListener {
+                    cat = g
+                    drawCats()
+                    filter()
+                    grid.setSelection(0)
+                }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
+        }
+    }
+
     fun refresh() {
+        drawCats()
         filter()
         usedRow.removeAllViews()
         val hidden = Prefs.list(context, Prefs.HIDDEN).toSet()
@@ -200,9 +234,13 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val q = search.text?.toString()?.trim()?.lowercase().orEmpty()
         val hidden = Prefs.list(context, Prefs.HIDDEN).toSet()
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
-        shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
-            .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
-        val v = if (q.isEmpty()) View.VISIBLE else View.GONE
+        val c = cat
+        shown = if (q.isEmpty()) {
+            if (c == null) all else all.filter { AppRepo.group(it) == c }
+        } else {
+            all.filter { it.label.lowercase().contains(q) }.sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
+        }
+        val v = if (q.isEmpty() && c == null) View.VISIBLE else View.GONE
         usedRow.visibility = v
         usedTitle.visibility = v
         letters.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE

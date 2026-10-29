@@ -186,7 +186,7 @@ object Prefs {
     private const val WIDGETS_ON = "widgets_on"
 
     /** Is this Halo widget on the home screen? */
-    fun widgetOn(c: Context, id: String): Boolean = HomeLayout.has(c, "w:$id")
+    fun widgetOn(c: Context, id: String): Boolean = HomeLayout.has(c, "w:$id") || Groups.inStack(c, id)
 
     /** Put a Halo widget on the home screen (first free spot from page 2) or take it off. */
     fun setWidget(c: Context, id: String, on: Boolean) {

@@ -38,7 +38,7 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
         MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), ICONS("Icons"), DOCK("Dock"),
-        WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), ABOUT("About"),
+        WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
     }
 
     private var page = Page.MENU
@@ -112,6 +112,7 @@ class SettingsActivity : Activity() {
             Page.GESTURES -> gesturesPage(col)
             Page.WEATHER -> weatherPage(col)
             Page.HALO -> haloPage(col)
+            Page.BACKUP -> backupPage(col)
             Page.ABOUT -> aboutPage(col)
         }
         val sv = ScrollView(this).apply {
@@ -200,6 +201,7 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_gesture, "Gestures", "Swipe, double-tap, long-press") { go(Page.GESTURES) },
             nav(R.drawable.w_sun, "Weather", Prefs.get(this).getString(Prefs.WEATHER_CITY, "").orEmpty().ifEmpty { if (Weather.locationAllowed(this)) "Your location" else "Not set" }) { go(Page.WEATHER) },
             nav(R.drawable.ic_halo, "Halo", if (HaloLink.alive()) "Linked" else if (HaloLink.installed(this)) "Not running" else "Not installed") { go(Page.HALO) },
+            nav(R.drawable.ic_arrow_down, "Backup & restore", "Keep your whole setup in a file") { go(Page.BACKUP) },
             nav(R.drawable.ic_eye_off, "Hidden apps", "${Prefs.list(this, Prefs.HIDDEN).size} hidden") {
                 startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.HIDDEN).putExtra("max", 0))
             },
@@ -816,6 +818,32 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(14) })
     }
 
+    private var backupStatus = ""
+
+    private fun backupPage(col: LinearLayout) {
+        note(col, "Saves your home screen (layout, folders, stacks, dock), widgets' settings, theme, clock, icons, weather city, notes and your background picture into one file. Keep it in Google Drive or Downloads, and restore it on this phone or a new one.")
+        if (backupStatus.isNotEmpty()) note(col, backupStatus)
+        col.addView(button("Back up now") {
+            val name = "halo-launcher-backup-" + android.text.format.DateFormat.format("yyyy-MM-dd", java.util.Date()) + ".json"
+            try {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json").putExtra(Intent.EXTRA_TITLE, name), 41)
+            } catch (_: Exception) {
+                Toast.makeText(this, "No file picker found", Toast.LENGTH_SHORT).show()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { bottomMargin = dp(10) })
+        col.addView(group(row("Restore from a file", "Replaces your current setup", chevron()) {
+            try {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), 42)
+            } catch (_: Exception) {
+                Toast.makeText(this, "No file picker found", Toast.LENGTH_SHORT).show()
+            }
+        }))
+        note(col, "")
+        note(col, "Widgets from other apps can't move between installs (Android's rule), so after a restore add those again with +.")
+    }
+
     private fun aboutPage(col: LinearLayout) {
         col.addView(group(
             row("Made by LONERXONE", "github.com/LONERXONE-ops/halo-launcher", chevron()) { open("https://github.com/LONERXONE-ops/halo-launcher") },
@@ -1069,6 +1097,28 @@ class SettingsActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if ((requestCode == 41 || requestCode == 42) && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            Thread {
+                val msg = try {
+                    if (requestCode == 41) {
+                        Backup.write(this, uri)
+                        "Backed up. Keep that file somewhere safe."
+                    } else {
+                        Backup.read(this, uri)
+                        "Restored. Go home to see it."
+                    }
+                } catch (e: Exception) {
+                    "Didn't work: " + (e.message ?: "unknown problem").take(80)
+                }
+                runOnUiThread {
+                    backupStatus = msg
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    render()
+                }
+            }.start()
+            return
+        }
         if (requestCode != 9 || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         val key = pickingKey ?: return

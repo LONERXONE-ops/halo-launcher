@@ -20,11 +20,12 @@ class PickAppsActivity : Activity() {
         window.setDecorFitsSystemWindows(false)
         val key = intent.getStringExtra("key") ?: Prefs.HIDDEN
         val max = intent.getIntExtra("max", 0)
-        val title = when (key) {
+        val title = intent.getStringExtra("title") ?: when (key) {
             Prefs.DOCK -> "Dock apps"
             Prefs.FAVORITES -> "Favourites"
             else -> "Hidden apps"
         }
+        val folder = key.startsWith("fapps_")
         val chosen = Prefs.list(this, key)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -35,7 +36,11 @@ class PickAppsActivity : Activity() {
             setPadding(dp(6), dp(20), 0, dp(4))
         })
         col.addView(text(13.5f, Palette.WHITE70, lines = 2).apply {
-            text = if (max > 0) "Pick up to $max, in the order you want them." else "Hidden apps leave the drawer and home screen; search still finds them."
+            text = when {
+                folder -> "Tick the apps that belong in this folder."
+                max > 0 -> "Pick up to $max, in the order you want them."
+                else -> "Hidden apps leave the drawer and home screen; search still finds them."
+            }
             setPadding(dp(6), 0, 0, dp(16))
         })
         val card = LinearLayout(this).apply {

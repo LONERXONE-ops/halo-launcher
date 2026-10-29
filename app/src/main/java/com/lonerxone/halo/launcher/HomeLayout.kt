@@ -225,6 +225,21 @@ object HomeLayout {
         save(c)
     }
 
+    /** Gives an item a new id in the same place (an app becoming a folder, a widget a stack). */
+    fun swapId(c: Context, old: String, new: String, sx: Int? = null, sy: Int? = null) {
+        val list = all(c)
+        val i = list.indexOfFirst { it.id == old }
+        if (i < 0) return
+        val o = list[i]
+        list[i] = Item(new, o.page, o.col, o.row, sx ?: o.sx, sy ?: o.sy)
+        save(c)
+    }
+
+    /** Drop the cached layout (after a restore). */
+    fun forget() {
+        items = null
+    }
+
     fun moveTo(c: Context, id: String, page: Int, col: Int, row: Int) {
         val it = get(c, id) ?: return
         it.page = page
@@ -277,6 +292,17 @@ class HomeGrid(context: Context, val page: Int) : ViewGroup(context) {
         pathEffect = DashPathEffect(floatArrayOf(dpf(8f), dpf(6f)), 0f)
     }
     private val previewFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(34, 255, 255, 255) }
+    /** True when the drop will put the item into another (a folder or a stack). */
+    var merging = false
+        set(v) {
+            field = v
+            invalidate()
+        }
+    private val mergeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(70, 255, 255, 255) }
+    private val mergeRim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.WHITE
+    }
     private val r = RectF()
 
     init {
@@ -339,8 +365,16 @@ class HomeGrid(context: Context, val page: Int) : ViewGroup(context) {
         }
         preview?.let { p ->
             rectOf(p[0], p[1], p[2], p[3], r)
-            canvas.drawRoundRect(r, dpf(26f), dpf(26f), previewFill)
-            canvas.drawRoundRect(r, dpf(26f), dpf(26f), previewPaint)
+            if (merging) {
+                // Grows a little, solid: "drop to put it in here".
+                r.inset(-dpf(4f), -dpf(4f))
+                mergeRim.strokeWidth = dpf(2.5f)
+                canvas.drawRoundRect(r, dpf(24f), dpf(24f), mergeFill)
+                canvas.drawRoundRect(r, dpf(24f), dpf(24f), mergeRim)
+            } else {
+                canvas.drawRoundRect(r, dpf(26f), dpf(26f), previewFill)
+                canvas.drawRoundRect(r, dpf(26f), dpf(26f), previewPaint)
+            }
         }
     }
 }
