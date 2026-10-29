@@ -137,8 +137,10 @@ abstract class TextArt(context: Context) : View(context) {
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val loc = IntArray(2)
     private var glassNow = false
+    /** In a Settings preview: frosted glass that doesn't follow the screen (matches the miniature background, light to scroll). */
+    var preview = false
     private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
-        if (glassNow) {
+        if (glassNow && !preview) {
             val x = loc[0]
             val y = loc[1]
             getLocationInWindow(loc)
@@ -289,7 +291,7 @@ abstract class TextArt(context: Context) : View(context) {
         getLocationInWindow(loc)
         val hs = hardShader ?: return
         val ss = softShader ?: return
-        val rs = if (back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
+        val rs = if (!preview && back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
             (sharedText as? RuntimeShader) ?: try {
                 RuntimeShader(GLASS_TEXT).also { sharedText = it }
             } catch (_: Throwable) {

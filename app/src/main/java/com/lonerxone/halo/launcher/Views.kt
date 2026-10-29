@@ -298,8 +298,17 @@ class StackedClock(context: Context) : View(context) {
  * with a soft shade at the top and bottom so white text always reads. With
  * nothing to draw it stays clear and the phone's own wallpaper shows.
  */
-class BackgroundView(context: Context) : View(context) {
-    private val p = Paint(Paint.FILTER_BITMAP_FLAG)
+class BackgroundView(
+    context: Context,
+    /**
+     * A miniature: the whole home-screen background shrunk to fit this view
+     * (for the phone previews in Settings), instead of the slice of it that
+     * happens to be behind this spot on screen.
+     */
+    private val miniature: Boolean = false,
+) : View(context) {
+    private val p = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val m = android.graphics.Matrix()
     private val shade = Paint()
     private val loc = IntArray(2)
 
@@ -327,16 +336,28 @@ class BackgroundView(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        viewTreeObserver.addOnPreDrawListener(follow)
+        // A miniature doesn't depend on where it is: no redrawing as you scroll.
+        if (!miniature) viewTreeObserver.addOnPreDrawListener(follow)
     }
 
     override fun onDetachedFromWindow() {
-        viewTreeObserver.removeOnPreDrawListener(follow)
+        if (!miniature) viewTreeObserver.removeOnPreDrawListener(follow)
         super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {
         val bmp = Glass.backdrop
+        if (miniature) {
+            if (bmp != null && width > 0 && height > 0) {
+                // The whole screen's picture, scaled down to this view (cropped to its shape, centred).
+                val s = maxOf(width / bmp.width.toFloat(), height / bmp.height.toFloat())
+                m.setScale(s, s)
+                m.postTranslate((width - bmp.width * s) / 2f, (height - bmp.height * s) / 2f)
+                canvas.drawBitmap(bmp, m, p)
+            }
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
+            return
+        }
         getLocationInWindow(loc)
         drawnAt[0] = loc[0]
         drawnAt[1] = loc[1]

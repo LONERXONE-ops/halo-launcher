@@ -408,6 +408,9 @@ class SettingsActivity : Activity() {
     }
 
     private var colourNote: TextView? = null
+
+    /** Clock, date and weather in a preview here: frosted, not following the screen. */
+    private fun <T : TextArt> T.pv(): T = apply { preview = true }
     private var heroCache: View? = null
     private var heroCacheKey = ""
 
@@ -454,14 +457,14 @@ class SettingsActivity : Activity() {
                 }
             }
         }
-        f.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        f.addView(BackgroundView(this, miniature = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(16), dp(10), dp(10))
         }
         val topRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        topRow.addView(ClockFace(this), LinearLayout.LayoutParams(dp(if (small) 70 else 92), dp(if (small) 62 else 80)))
-        if (!small) topRow.addView(DateFace(this), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+        topRow.addView(ClockFace(this).pv(), LinearLayout.LayoutParams(dp(if (small) 70 else 92), dp(if (small) 62 else 80)))
+        if (!small) topRow.addView(DateFace(this).pv(), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
             marginStart = dp(10)
             gravity = Gravity.CENTER_VERTICAL
         })
@@ -473,7 +476,7 @@ class SettingsActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), 0, dp(10), 0)
         }
-        musicPane.background = if (glass) GlassDrawable(musicPane, dpf(14f), bendPx = dpf(8f)) else round(Palette.TILE, dpf(14f))
+        musicPane.background = if (glass) previewGlass(dpf(14f)) else round(Palette.TILE, dpf(14f))
         musicPane.addView(ImageView(this).apply {
             setImageResource(R.drawable.ic_music)
             imageTintList = ColorStateList.valueOf(Palette.INK)
@@ -496,9 +499,9 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        dock.background = if (glass) GlassDrawable(dock, dpf(18f), darkness = 0.22f, bendPx = dpf(8f)) else round(Palette.TILE, dpf(18f))
+        dock.background = if (glass) previewGlass(dpf(18f)) else round(Palette.TILE, dpf(18f))
         val apps = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(if (small) 4 else 5)
-        for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 38 else 46)).apply { topMargin = dp(8) })
         f.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (Glass.backdrop == null) {
@@ -510,6 +513,28 @@ class SettingsActivity : Activity() {
         return f
     }
 
+    /**
+     * Glass in a miniature preview: frosted, tinted like the real glass, with
+     * a bright rim and a sheen. (Live glass would bend the full-size picture
+     * at that spot on screen, which doesn't match the shrunken one behind it.)
+     */
+    private fun previewGlass(radius: Float): android.graphics.drawable.Drawable {
+        val tint = Palette.GLASS_TINT
+        val a = (255 * (0.18f + Palette.GLASS_TINT_AMT)).toInt().coerceIn(0, 255)
+        val base = android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.argb(70, 255, 255, 255),
+                Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
+                Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)),
+            ),
+        ).apply {
+            cornerRadius = radius
+            setStroke(dp(1), Color.argb(90, 255, 255, 255))
+        }
+        return base
+    }
+
     /** A small window onto your background, for previews that sit on it. */
     private fun stage(radius: Float = dpf(18f)): FrameLayout = FrameLayout(this).apply {
         clipToOutline = true
@@ -519,7 +544,7 @@ class SettingsActivity : Activity() {
             }
         }
         background = round(Color.rgb(40, 40, 44), radius)
-        addView(BackgroundView(this@SettingsActivity), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        addView(BackgroundView(this@SettingsActivity, miniature = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
     /** A row of choice chips bound to an int setting. */
@@ -620,10 +645,10 @@ class SettingsActivity : Activity() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        top.addView(ClockFace(this).also { live += it }, LinearLayout.LayoutParams(0, dp(150), 1f))
+        top.addView(ClockFace(this).pv().also { live += it }, LinearLayout.LayoutParams(0, dp(150), 1f))
         val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        side.addView(DateFace(this).also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        side.addView(WeatherFace(this).also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        side.addView(DateFace(this).pv().also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        side.addView(WeatherFace(this).pv().also { live += it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         top.addView(side, LinearLayout.LayoutParams(0, dp(150), 1f).apply { marginStart = dp(8) })
         box.addView(top)
         pv.addView(box)
@@ -700,7 +725,7 @@ class SettingsActivity : Activity() {
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(10))
             val st = stage()
-            st.addView(DateFace(this, forceStyle = i).also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            st.addView(DateFace(this, forceStyle = i).pv().also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
             card.addView(text(12f, Palette.SILVER).apply {
                 text = name
@@ -724,7 +749,7 @@ class SettingsActivity : Activity() {
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(10))
             val st = stage()
-            st.addView(ClockFace(this, forceFace = f).also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(10), dp(8), dp(10), dp(8)) })
+            st.addView(ClockFace(this, forceFace = f).pv().also { live += it }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(10), dp(8), dp(10), dp(8)) })
             card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118)))
             card.addView(text(13f, Palette.INK, bold = true).apply {
                 text = f.name
@@ -766,7 +791,7 @@ class SettingsActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(4), dp(8), dp(4), dp(6))
             }
-            for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             st.addView(row)
             card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
@@ -856,11 +881,15 @@ class SettingsActivity : Activity() {
                 }
             }
         }
-        frame.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val dock = DockBar(this).apply { setPadding(dp(8), 0, dp(8), 0) }
+        frame.addView(BackgroundView(this, miniature = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val dock = DockBar(this).apply {
+            setPadding(dp(8), 0, dp(8), 0)
+            // On the miniature background, glass is shown frosted (see previewGlass).
+            if (background is GlassDrawable) background = previewGlass(dpf(34f))
+        }
         val keys = Prefs.list(this, Prefs.DOCK)
         val apps = keys.mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(LauncherActivity.DOCK_MAX)
-        for (a in apps) dock.addView(AppIconView(this, a, dock.iconFor(apps.size) - 4, false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { gravity = Gravity.CENTER_VERTICAL })
+        for (a in apps) dock.addView(AppIconView(this, a, dock.iconFor(apps.size) - 4, false, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { gravity = Gravity.CENTER_VERTICAL })
         frame.addView(dock, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(80), Gravity.BOTTOM).apply {
             leftMargin = dp(10)
             rightMargin = dp(10)
@@ -931,8 +960,9 @@ class SettingsActivity : Activity() {
                     }
                 }
             }
-            stage.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            stage.addView(BackgroundView(this, miniature = true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             val w = HomeWidgets.create(this, spec.id, actions)
+            if (w != null && w.background is GlassDrawable) w.background = previewGlass(dpf(26f))
             if (w != null) {
                 val wW = if (size == HomeWidgets.SMALL) unit else ViewGroup.LayoutParams.MATCH_PARENT
                 val wH = if (size == HomeWidgets.LARGE) unit * 2 + dp(12) else unit
