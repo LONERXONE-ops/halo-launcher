@@ -76,6 +76,19 @@ object Glass {
 
     fun frost(): BitmapShader? = blurredShader
 
+    private var sharpShader: BitmapShader? = null
+    private var sharpOf: Bitmap? = null
+
+    /** The background itself, unblurred (for glass digits, which bend it clearly). */
+    fun sharp(): BitmapShader? {
+        val b = backdrop ?: return null
+        if (sharpOf !== b) {
+            sharpOf = b
+            sharpShader = BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        }
+        return sharpShader
+    }
+
     /** The blurred copy (1/SCALE size) for drawables that need their own shader. */
     fun blurredBitmap(): Bitmap? = blurred
 
@@ -108,6 +121,16 @@ object Glass {
         wallColorCache = col
         wallColorId = id
         return col
+    }
+
+    /** A vivid version of the wallpaper's main colour (for the clock and accents). */
+    fun accent(c: Context): Int {
+        val base = wallColor(c) ?: return 0xFFFFB340.toInt()
+        val hsv = FloatArray(3)
+        Color.colorToHSV(base, hsv)
+        hsv[1] = hsv[1].coerceIn(0.4f, 0.8f)
+        hsv[2] = 0.97f
+        return Color.HSVToColor(hsv)
     }
 
     private var avgOf: Bitmap? = null
@@ -355,7 +378,13 @@ class GlassDrawable(
     /** Lens strength in px at the rim. */
     private val bendPx: Float = host.dpf(16f),
     private val rimLight: Boolean = true,
+    /** Drawn by hand inside a view (an icon tile), not as its background. */
+    private val owned: Boolean = false,
 ) : Drawable() {
+    private var rimFor = 0L
+    private var rimShader: Shader? = null
+    private var sheenFor = 0L
+    private var sheenShader: Shader? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val fallback = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -372,11 +401,11 @@ class GlassDrawable(
      * scroll, an animation) and if so redraw it so the lens follows.
      */
     private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
-        if (host.background !== this && host.foreground !== this) {
+        if (!owned && host.background !== this && host.foreground !== this) {
             unhook()
         } else {
             host.getLocationInWindow(now)
-            if (now[0] != drawnAt[0] || now[1] != drawnAt[1]) invalidateSelf()
+            if (now[0] != drawnAt[0] || now[1] != drawnAt[1]) { if (owned) host.invalidate() else invalidateSelf() }
         }
         true
     }
@@ -398,7 +427,7 @@ class GlassDrawable(
     init {
         host.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
-                if (host.background === this@GlassDrawable) hook()
+                if (owned || host.background === this@GlassDrawable) hook()
             }
 
             override fun onViewDetachedFromWindow(v: View) = unhook()
@@ -465,22 +494,33 @@ class GlassDrawable(
             canvas.drawRoundRect(rect, radius, radius, fallback)
             // A pale sheen, brightest at the top, so it reads as glass and
             // not as a solid tile.
-            fallback.shader = LinearGradient(
-                rect.left, rect.top, rect.left, rect.bottom,
-                intArrayOf(Color.argb(46, 255, 255, 255), Color.argb(14, 255, 255, 255), Color.argb(22, 255, 255, 255)),
-                floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP,
-            )
+            val sk = (rect.top.toLong() shl 32) xor rect.bottom.toLong()
+            if (sheenShader == null || sk != sheenFor) {
+                sheenFor = sk
+                sheenShader = LinearGradient(
+                    rect.left, rect.top, rect.left, rect.bottom,
+                    intArrayOf(Color.argb(46, 255, 255, 255), Color.argb(14, 255, 255, 255), Color.argb(22, 255, 255, 255)),
+                    floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP,
+                )
+            }
+            fallback.shader = sheenShader
             canvas.drawRoundRect(rect, radius, radius, fallback)
             fallback.shader = null
         }
         // A crisp hairline that's bright where the light hits.
         val sw = host.dpf(1.1f)
         rimPaint.strokeWidth = sw
-        rimPaint.shader = LinearGradient(
-            rect.left, rect.top, rect.right, rect.bottom,
-            intArrayOf(Color.argb(if (rimLight) 120 else 60, 255, 255, 255), Color.argb(18, 255, 255, 255), Color.argb(55, 255, 255, 255)),
-            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
-        )
+        // Built once per size, not every frame.
+        val rk = (rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()
+        if (rimShader == null || rk != rimFor) {
+            rimFor = rk
+            rimShader = LinearGradient(
+                rect.left, rect.top, rect.right, rect.bottom,
+                intArrayOf(Color.argb(if (rimLight) 120 else 60, 255, 255, 255), Color.argb(18, 255, 255, 255), Color.argb(55, 255, 255, 255)),
+                floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
+            )
+        }
+        rimPaint.shader = rimShader
         rect.inset(sw / 2f, sw / 2f)
         canvas.drawRoundRect(rect, radius - sw / 2f, radius - sw / 2f, rimPaint)
     }

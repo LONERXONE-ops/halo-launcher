@@ -37,6 +37,31 @@
         tools:ignore="ScopedStorage" />
 
     <queries>
+        <!-- Icon packs (the standard Nova / ADW / Lawnchair formats) -->
+        <intent>
+            <action android:name="org.adw.launcher.THEMES" />
+        </intent>
+        <intent>
+            <action android:name="org.adw.ActivityStarter.THEMES" />
+        </intent>
+        <intent>
+            <action android:name="com.novalauncher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="com.teslacoilsw.launcher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="com.gau.go.launcherex.theme" />
+        </intent>
+        <intent>
+            <action android:name="com.anddoes.launcher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="com.dlto.atom.launcher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="app.lawnchair.icons.THEMED_ICON" />
+        </intent>
         <package android:name="com.lonerxone.halo" />
         <provider android:authorities="com.android.calendar" />
         <intent>

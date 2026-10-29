@@ -227,7 +227,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
     }
 
-    private fun iconFor(a: App): AppIconView = AppIconView(context, a, 54, true).apply {
+    private fun iconFor(a: App): AppIconView = AppIconView(context, a, 54, true, liveGlass = false).apply {
         badge = HaloLink.badges[a.pkg] ?: 0
         setOnClickListener { host.launch(a, it) }
         setOnLongClickListener {

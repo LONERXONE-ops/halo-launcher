@@ -62,6 +62,7 @@ object HomeLayout {
         val list = if (raw == null) defaults(c) else parse(raw)
         items = list
         if (raw == null) save(c)
+        upgrade(c)
         normalize(c)
         return list
     }
@@ -102,7 +103,9 @@ object HomeLayout {
         val p = Prefs.get(c)
         val list = mutableListOf<Item>()
         items = list
-        list += Item("clock", 0, 0, 0, 4, 2)
+        list += Item("clock", 0, 0, 0, 2, 2)
+        list += Item("date", 0, 2, 0, 2, 1)
+        list += Item("wx", 0, 2, 1, 2, 1)
         if (!p.getBoolean(Prefs.MUSIC_OFF, false)) list += Item("music", 0, 0, rows - 2, 4, 2)
         for (id in HomeWidgets.order(c)) {
             if (!Prefs.widgetOnLegacy(c, id)) continue
@@ -120,6 +123,24 @@ object HomeLayout {
         val dm = c.resources.displayMetrics
         val cellDp = (dm.widthPixels / dm.density - 32f) / COLS
         return (hDp / cellDp).roundToInt().coerceIn(1, 4)
+    }
+
+    /**
+     * Older layouts had the date and weather inside the clock (4 wide).
+     * Now they're their own items: shrink the clock and put them beside it.
+     */
+    private fun upgrade(c: Context) {
+        val p = Prefs.get(c)
+        if (p.getBoolean("layout_v2", false)) return
+        val list = items ?: return
+        val clock = list.firstOrNull { it.id == "clock" }
+        if (clock != null && list.none { it.id == "date" }) {
+            if (clock.sx == 4) clock.sx = 2
+            place(c, Item("date", clock.page, 2, clock.row, 2, 1), clock.page, 2 to clock.row)
+            place(c, Item("wx", clock.page, 2, clock.row + 1, 2, 1), clock.page, 2 to clock.row + 1)
+        }
+        p.edit().putBoolean("layout_v2", true).apply()
+        save(c)
     }
 
     /** Pull anything that no longer fits (fewer rows) back onto the grid. */

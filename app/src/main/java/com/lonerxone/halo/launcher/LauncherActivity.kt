@@ -72,22 +72,26 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     // Live views
     /** One grid per home page. */
     private val grids = ArrayList<HomeGrid>()
-    private var clock: StackedClock? = null
-    private var sideInfo: LinearLayout? = null
-    private var dateLine: TextView? = null
-    private var tempText: TextView? = null
-    private var tempIcon: ImageView? = null
-    private var weatherDesc: TextView? = null
+    private var clockFace: ClockFace? = null
+    private var dateFace: DateFace? = null
+    private var wxFace: WeatherFace? = null
     private var music: MusicCard? = null
     private var musicTick: Runnable? = null
-    private var clockRow: LinearLayout? = null
+    /** An app's long-press menu that turns into a drag if the finger moves on. */
+    private var menuDrag: Triple<App, View, PopupMenu>? = null
+    private var downRawX = 0f
+    private var downRawY = 0f
     private lateinit var editor: Editor
     private lateinit var overlayLayer: FrameLayout
     private lateinit var editBar: LinearLayout
     private val widgets = ArrayList<BaseWidget>()
     private var lastScreenTime = 0L
 
-    private val appsChanged: () -> Unit = { rebuildApps() }
+    private val appsChanged: () -> Unit = {
+        rebuildApps()
+        // Home-screen app icons too (an app was added, removed or updated).
+        if (!editor.isDragging && HomeLayout.all(this).any { it.id.startsWith("app:") }) rebuildHome()
+    }
     private val haloChanged: () -> Unit = { onHalo() }
     private val glassChanged: () -> Unit = {
         bg.invalidate()
@@ -118,6 +122,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         HaloLink.addListener(haloChanged)
         HaloLink.start(this)
         Glass.addListener(glassChanged)
+        Prefs.get(this).registerOnSharedPreferenceChangeListener(prefsWatch)
     }
 
     override fun onStart() {
@@ -136,12 +141,33 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
         registerReceiver(tick, f)
-        refreshLook()
+        // Only rebuild the home screen if a setting changed while we were
+        // away; otherwise just bring the live bits up to date (much faster
+        // coming back from an app).
+        if (dirty) {
+            dirty = false
+            refreshLook()
+        } else {
+            refreshWidgets(null)
+            music?.bind(HaloLink.music)
+            loadBackdrop()
+        }
         onMinute()
         Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
-        animateIn()
+        if (wasAway) animateIn()
+        wasAway = false
+    }
+
+    /** Set when a setting changes, so the next return home rebuilds. */
+    private var dirty = true
+    private var wasAway = true
+    private val prefsWatch = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        val k = key ?: ""
+        // Counters and caches change all the time and don't change the look.
+        if (k.startsWith("launch") || k.startsWith("w_") || k.startsWith("timer") || k == Prefs.NOTE) return@OnSharedPreferenceChangeListener
+        dirty = true
     }
 
     override fun onResume() {
@@ -156,6 +182,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
 
     override fun onStop() {
         super.onStop()
+        wasAway = true
         try {
             unregisterReceiver(tick)
         } catch (_: Exception) {
@@ -175,6 +202,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         AppRepo.removeListener(appsChanged)
         HaloLink.removeListener(haloChanged)
         Glass.removeListener(glassChanged)
+        Prefs.get(this).unregisterOnSharedPreferenceChangeListener(prefsWatch)
         super.onDestroy()
     }
 
@@ -286,12 +314,14 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
 
     private fun refreshLook() {
         root.setBackgroundColor(Color.TRANSPARENT)
-        clock?.style = Prefs.get(this).getInt(Prefs.CLOCK_STYLE, StackedClock.VARSITY)
         dock.restyle()
         music?.restyle()
         drawer.restyle()
         rebuildApps()
         rebuildHome()
+        clockFace?.refresh()
+        dateFace?.refresh()
+        wxFace?.refresh()
         loadBackdrop()
     }
 
@@ -325,52 +355,24 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     // ----- The clock block and the music player (placed on the grid like widgets) -----
 
     private fun buildClockAndMusic() {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-        }
-        clockRow = row
-        val c = StackedClock(this)
-        clock = c
-        c.setOnClickListener {
-            it.bounce()
-            openClockApp()
-        }
-        row.addView(c, LinearLayout.LayoutParams(dp(160), ViewGroup.LayoutParams.MATCH_PARENT))
-        row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        val right = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
-            setPadding(0, dp(8), dp(2), 0)
+        clockFace = ClockFace(this).apply {
             setOnClickListener {
                 it.bounce()
-                pager.snapTo(1)
+                openClockApp()
             }
         }
-        sideInfo = right
-        val dl = text(12f, Palette.INK, caps = true)
-        dateLine = dl
-        right.addView(dl)
-        val wRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(14), 0, 0)
+        dateFace = DateFace(this).apply {
+            setOnClickListener {
+                it.bounce()
+                openCalendar()
+            }
         }
-        val ti = ImageView(this).apply { imageTintList = ColorStateList.valueOf(Palette.INK) }
-        tempIcon = ti
-        wRow.addView(ti, LinearLayout.LayoutParams(dp(20), dp(20)))
-        val tt = text(34f, Palette.INK).apply {
-            typeface = Fonts.dots(this@LauncherActivity)
-            setPadding(dp(8), 0, 0, 0)
+        wxFace = WeatherFace(this).apply {
+            setOnClickListener {
+                it.bounce()
+                if (!Weather.hasPlace(this@LauncherActivity)) openSettingsPage("weather") else refreshWeather()
+            }
         }
-        tempText = tt
-        wRow.addView(tt)
-        right.addView(wRow)
-        val wd = text(10.5f, Palette.SILVER, caps = true).apply { setPadding(0, dp(6), 0, 0) }
-        weatherDesc = wd
-        right.addView(wd)
-        row.addView(right)
-
         val m = MusicCard(this) { cmd -> if (!HaloLink.command(this, cmd)) noHalo() }
         music = m
     }
@@ -438,16 +440,43 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             rebuildHome()
         }
         return when {
-            id == "clock" -> {
-                val v = clockRow ?: return null
+            id == "clock" || id == "date" || id == "wx" -> {
+                val v: TextArt = when (id) {
+                    "clock" -> clockFace
+                    "date" -> dateFace
+                    else -> wxFace
+                } ?: return null
                 (v.parent as? ViewGroup)?.removeView(v)
-                Cell(this, editor, "home", id, v, removable = false)
+                val sizes = TEXT_SIZES[id]!!
+                val at = sizes.indexOfFirst { it.first == item.sx && it.second == item.sy }.coerceAtLeast(0)
+                Cell(this, editor, "home", id, v, sizeLabel = listOf("Small", "Wide", "Large")[at]).apply {
+                    onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
+                    onSize = {
+                        val n = sizes[(at + 1) % sizes.size]
+                        changed { HomeLayout.resize(this@LauncherActivity, id, n.first, n.second) }
+                        snapToItem(id)
+                    }
+                    // Tap it while editing to restyle it.
+                    onEditTap = { openSettingsPage("clock") }
+                }
+            }
+            id.startsWith("app:") -> {
+                val app = AppRepo.byKey(id.removePrefix("app:")) ?: return null
+                val icon = iconView(app, 56, true)
+                Cell(this, editor, "home", id, icon, longPressEdits = false, minusFromCentre = dp(56) / 2).apply {
+                    onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
+                }
             }
             id == "music" -> {
                 val v = music ?: return null
                 (v.parent as? ViewGroup)?.removeView(v)
-                Cell(this, editor, "home", id, v).apply {
+                val wide = item.sx >= 4
+                Cell(this, editor, "home", id, v, sizeLabel = if (wide) "Wide" else "Small").apply {
                     onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
+                    onSize = {
+                        changed { HomeLayout.resize(this@LauncherActivity, id, if (wide) 2 else 4, 2) }
+                        snapToItem(id)
+                    }
                 }
             }
             id.startsWith("w:") -> {
@@ -466,6 +495,49 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             id.startsWith("aw:") -> androidWidgetCell(item)
             else -> null
         }
+    }
+
+    /**
+     * Drag an app out of its long-press menu: one already on the home screen
+     * just moves; one from the app list or the dock lands as a new home icon.
+     */
+    private fun dragApp(app: App, anchor: View, x: Float, y: Float) {
+        var v: View? = anchor
+        var cell: Cell? = null
+        while (v != null) {
+            if (v is Cell && v.zone == "home") {
+                cell = v
+                break
+            }
+            v = v.parent as? View
+        }
+        editor.enter()
+        editor.willDrag(x, y)
+        if (cell != null) {
+            val c = cell
+            c.post { editor.startDrag(c, x, y) }
+            return
+        }
+        if (drawer.isOpen) drawer.close()
+        val id = "app:${app.key}"
+        if (!HomeLayout.has(this, id)) HomeLayout.add(this, id, 1, 1, preferPage = pager.current)
+        rebuildHome()
+        val fresh = grids.flatMap { g -> (0 until g.childCount).map { g.getChildAt(it) } }.firstOrNull { (it as? Cell)?.itemId == id } as? Cell ?: return
+        afterLayout(fresh) { editor.startDrag(fresh, x, y, centred = true) }
+    }
+
+    /** Runs [then] once [v] has been laid out. */
+    private fun afterLayout(v: View, then: () -> Unit) {
+        if (v.isLaidOut && v.width > 0) {
+            v.post(then)
+            return
+        }
+        v.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(view: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, orr: Int, ob: Int) {
+                view.removeOnLayoutChangeListener(this)
+                view.post(then)
+            }
+        })
     }
 
     /** Turn to the page an item is on (after it moved because it didn't fit). */
@@ -502,6 +574,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         val off = HomeWidgets.ALL.filter { !Prefs.widgetOn(this, it.id) }
         off.forEachIndexed { i, spec -> m.menu.add(0, 100 + i, i, spec.name) }
         if (musicOff()) m.menu.add(1, 2, 50, "Music player")
+        if (!HomeLayout.has(this, "clock")) m.menu.add(1, 3, 40, "Clock")
+        if (!HomeLayout.has(this, "date")) m.menu.add(1, 4, 41, "Date")
+        if (!HomeLayout.has(this, "wx")) m.menu.add(1, 5, 42, "Weather (on the wallpaper)")
+        m.menu.add(1, 6, 45, "App…")
         m.menu.add(1, 1, 60, "Android widget…")
         m.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -510,6 +586,16 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
                     startActivityForResult(Intent(this, WidgetPickActivity::class.java), REQ_WIDGET)
                 }
                 2 -> addItem("music", 4, 2)
+                3 -> addItem("clock", 2, 2)
+                4 -> addItem("date", 2, 1)
+                5 -> addItem("wx", 2, 1)
+                6 -> {
+                    // Open the app list; long-press an app there and drag it here (or use its menu).
+                    editor.exit()
+                    drawer.visibility = View.VISIBLE
+                    drawer.open()
+                    Toast.makeText(this, "Hold an app and drag it onto your home screen", Toast.LENGTH_SHORT).show()
+                }
                 else -> {
                     val spec = off.getOrNull(item.itemId - 100) ?: return@setOnMenuItemClickListener true
                     val (sx, sy) = HomeLayout.spansFor(spec.defaultSize)
@@ -542,23 +628,19 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     // ----- Weather / time -----
 
     private fun onWeather() {
-        val w = Weather.now
-        if (w != null) {
-            tempIcon?.setImageResource(Weather.icon(w.code, w.isDay))
-            tempText?.text = "${w.temp}°"
-            weatherDesc?.text = listOf(Weather.describe(w.code), w.city).filter { it.isNotBlank() }.joinToString(" · ")
-        } else {
-            tempIcon?.setImageDrawable(null)
-            tempText?.text = ""
-            weatherDesc?.text = if (Weather.hasPlace(this)) "" else "Set your city"
-        }
+        wxFace?.refresh()
         refreshWidgets("weather")
     }
 
+    private var lastDay = ""
+
     private fun onMinute() {
-        clock?.tick()
-        val now = Date()
-        dateLine?.text = DateFormat.format("EEE d MMM", now)
+        clockFace?.tick()
+        val day = DateFormat.format("yyyyMMdd", Date()).toString()
+        if (day != lastDay) {
+            lastDay = day
+            dateFace?.refresh()
+        }
         refreshWidgets("agenda")
         refreshWidgets("battery")
         refreshWidgets("screen")
@@ -692,6 +774,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
         }
         shortcuts.forEachIndexed { i, s -> menu.menu.add(0, 100 + i, i, s.shortLabel ?: s.longLabel ?: "Shortcut") }
         val inDock = dockApps().any { it.key == app.key }
+        val homeId = "app:${app.key}"
+        val onHome = HomeLayout.has(this, homeId)
+        menu.menu.add(1, 8, 9, if (onHome) "Remove from home screen" else "Add to home screen")
         menu.menu.add(1, 1, 10, if (inDock) "Remove from dock" else "Add to dock")
         menu.menu.add(1, 6, 11, "Change dock apps")
         menu.menu.add(1, 7, 15, "Edit home screen")
@@ -713,6 +798,13 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
                     }
                     Prefs.setList(this, Prefs.DOCK, cur)
                     rebuildApps()
+                }
+                8 -> if (onHome) {
+                    HomeLayout.remove(this, homeId)
+                    rebuildHome()
+                } else {
+                    if (drawer.isOpen) drawer.close()
+                    addItem(homeId, 1, 1)
                 }
                 6 -> pickDock()
                 7 -> {
@@ -737,7 +829,10 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
             }
             true
         }
+        menu.setOnDismissListener { if (menuDrag?.third === menu) menuDrag = null }
         menu.show()
+        // Keep holding and move: the menu closes and the app comes with your finger.
+        menuDrag = Triple(app, anchor, menu)
     }
 
     // =====================================================================
@@ -1099,6 +1194,23 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
 
         /** While something is being dragged, every touch goes to the editor. */
         override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                downRawX = e.rawX
+                downRawY = e.rawY
+                menuDrag = null
+            }
+            val md = menuDrag
+            if (md != null && e.actionMasked == MotionEvent.ACTION_MOVE && Math.hypot((e.rawX - downRawX).toDouble(), (e.rawY - downRawY).toDouble()) > slop * 2.2) {
+                menuDrag = null
+                md.third.dismiss()
+                dragApp(md.first, md.second, e.rawX, e.rawY)
+                // Tell whoever had the touch that it's over.
+                val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                return true
+            }
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) menuDrag = null
             if (editor.isDragging) {
                 editor.onTouch(e)
                 return true
@@ -1162,6 +1274,12 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host {
     companion object {
         const val WIDGET_HOST_ID = 4207
         const val DOCK_MAX = 6
+        /** Sizes the clock, date and weather text can take (cells across x down). */
+        val TEXT_SIZES = mapOf(
+            "clock" to listOf(2 to 2, 4 to 2, 4 to 3),
+            "date" to listOf(2 to 1, 4 to 1, 4 to 2),
+            "wx" to listOf(2 to 1, 4 to 1, 2 to 2),
+        )
         private const val REQ_WIDGET = 31
         private const val REQ_PHOTO = 32
     }

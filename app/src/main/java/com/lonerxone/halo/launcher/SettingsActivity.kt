@@ -37,7 +37,7 @@ import android.widget.Toast
  */
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
-        MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock"), ICONS("Icons"), DOCK("Dock"),
+        MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), ICONS("Icons"), DOCK("Dock"),
         WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), ABOUT("About"),
     }
 
@@ -188,8 +188,8 @@ class SettingsActivity : Activity() {
         col.addView(group(
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
             nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
-            nav(R.drawable.ic_clock, "Clock", StackedClock.NAMES[clockStyle()]) { go(Page.CLOCK) },
-            nav(R.drawable.ic_apps, "Icons", Icons.NAMES.getOrElse(Icons.style(this)) { "Dark" }) { go(Page.ICONS) },
+            nav(R.drawable.ic_clock, "Clock & date", ClockFaces.current(this).name) { go(Page.CLOCK) },
+            nav(R.drawable.ic_apps, "Icons", (Icons.NAMES[Icons.style(this)] ?: "Normal") + IconPacks.current(this).let { p -> if (p.isEmpty()) "" else " · " + (IconPacks.installed(this).firstOrNull { it.pkg == p }?.label ?: "icon pack") }) { go(Page.ICONS) },
             nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(Prefs.get(this).getInt(Prefs.DOCK_STYLE, 0)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
         ))
@@ -336,7 +336,7 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(16), dp(10), dp(10))
         }
-        col.addView(StackedClock(this).apply { style = clockStyle() }, LinearLayout.LayoutParams(dp(if (small) 58 else 72), dp(if (small) 62 else 76)))
+        col.addView(ClockFace(this), LinearLayout.LayoutParams(dp(if (small) 70 else 86), dp(if (small) 62 else 76)))
         col.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         val musicPane = View(this)
         musicPane.background = if (glass) GlassDrawable(musicPane, dpf(14f), bendPx = dpf(8f)) else round(Palette.TILE, dpf(14f))
@@ -359,67 +359,213 @@ class SettingsActivity : Activity() {
         return f
     }
 
-    private fun clockPage(col: LinearLayout) {
-        note(col, "The big clock on page 1. Tap a style; the digits roll up each minute.")
-        val cur = clockStyle()
-        var row: LinearLayout? = null
-        for ((i, name) in StackedClock.NAMES.withIndex()) {
-            if (i % 2 == 0) {
-                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+    /** A small window onto your background, for previews that sit on it. */
+    private fun stage(radius: Float = dpf(18f)): FrameLayout = FrameLayout(this).apply {
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, radius)
             }
-            val card = choiceCard(i == cur) {
-                Prefs.get(this).edit().putInt(Prefs.CLOCK_STYLE, i).apply()
-                render()
-            }
-            card.addView(StackedClock(this).apply { style = i }, LinearLayout.LayoutParams(dp(110), dp(118)).apply { gravity = Gravity.CENTER_HORIZONTAL })
-            card.addView(text(13f, Palette.INK, bold = true).apply {
-                text = name
-                gravity = Gravity.CENTER
-                setPadding(0, dp(10), 0, 0)
-            })
-            row?.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 2 == 1) marginStart = dp(12) })
         }
+        background = round(Color.rgb(40, 40, 44), radius)
+        addView(BackgroundView(this@SettingsActivity), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
+    /** A row of choice chips bound to an int setting. */
+    private fun chips(col: LinearLayout, title: String, key: String, names: List<String>, def: Int = 0) {
+        section(col, title)
+        val cur = Prefs.get(this).getInt(key, def)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((i, name) in names.withIndex()) {
+            row.addView(chip(name, i == cur).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(9), dp(4), dp(9))
+                pressable()
+                setOnClickListener {
+                    Prefs.get(this@SettingsActivity).edit().putInt(key, i).apply()
+                    render()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
+        }
+        col.addView(row)
+    }
+
+    private fun clockPage(col: LinearLayout) {
+        note(col, "The clock, the date and the weather are separate pieces now: on the home screen, long-press and drag each one anywhere, or tap its size pill. Tap one while editing to come here.")
+        // Live preview of all three on your background.
+        val pv = stage(dpf(24f))
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+        }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        top.addView(ClockFace(this), LinearLayout.LayoutParams(0, dp(150), 1f))
+        val side = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        side.addView(DateFace(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        side.addView(WeatherFace(this), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        top.addView(side, LinearLayout.LayoutParams(0, dp(150), 1f).apply { marginStart = dp(8) })
+        box.addView(top)
+        pv.addView(box)
+        col.addView(pv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+
+        chips(col, "Liquid Glass digits", Prefs.CLOCK_GLASS, listOf("With theme", "On", "Off"))
+        chips(col, "Colour", Prefs.CLOCK_COLOR, listOf("White", "Wallpaper", "Grey", "Black"))
+        chips(col, "Layout", Prefs.CLOCK_LAYOUT, listOf("Stacked", "One line"))
+        chips(col, "Align", Prefs.CLOCK_ALIGN, listOf("Left", "Centre", "Right"))
+
+        section(col, "Date style")
+        val ds = Prefs.get(this).getInt(Prefs.DATE_STYLE, 0)
+        var drow: LinearLayout? = null
+        for ((i, name) in DateFace.NAMES.withIndex()) {
+            if (i % 2 == 0) {
+                drow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                col.addView(drow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+            }
+            val card = choiceCard(i == ds) {
+                Prefs.get(this).edit().putInt(Prefs.DATE_STYLE, i).apply()
+                render()
+            }
+            card.setPadding(dp(8), dp(8), dp(8), dp(10))
+            val st = stage()
+            st.addView(DateFace(this, forceStyle = i), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
+            card.addView(text(12f, Palette.SILVER).apply {
+                text = name
+                gravity = Gravity.CENTER
+                setPadding(0, dp(6), 0, 0)
+            })
+            drow?.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 2 == 1) marginStart = dp(10) })
+        }
+
+        section(col, "Clock face (${ClockFaces.ALL.size})")
+        val cur = ClockFaces.current(this)
+        var row: LinearLayout? = null
+        for ((i, f) in ClockFaces.ALL.withIndex()) {
+            if (i % 2 == 0) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
+            }
+            val card = choiceCard(f.id == cur.id) {
+                Prefs.get(this).edit().putString(Prefs.CLOCK_FACE, f.id).apply()
+                render()
+            }
+            card.setPadding(dp(8), dp(8), dp(8), dp(10))
+            val st = stage()
+            st.addView(ClockFace(this, forceFace = f), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply { setMargins(dp(10), dp(8), dp(10), dp(8)) })
+            card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(118)))
+            card.addView(text(13f, Palette.INK, bold = true).apply {
+                text = f.name
+                gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, 0)
+            })
+            row?.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 2 == 1) marginStart = dp(10) })
+        }
+        note(col, "")
+        note(col, "Faces use free fonts from Google Fonts (SIL Open Font License): Bebas Neue, Big Shoulders, Unbounded, Syne, Rubik Mono One, Bungee, Fraunces, DM Serif Display, Instrument Serif, Shrikhand, Outfit, Major Mono Display, Space Mono, Orbitron, Righteous, Monoton, Doto, Silkscreen, Six Caps, Nunito, Anton, Graduate and Inter.")
+    }
+
+    private var packStatus = ""
+
     private fun iconsPage(col: LinearLayout) {
-        note(col, "How app icons look in the dock and the app list. Here are your own apps in each style, on your background.")
+        note(col, "Pick a look, and (if you like) an icon pack. Icon packs are real packs made by designers; any pack that works with Nova or Lawnchair works here.")
         val samples = sampleApps()
-        val about = listOf(
-            "Like iOS dark mode: each app's own symbol in its colours, centred on a black tile, all the same size.",
-            "Just the white symbol, like Android's themed icons.",
-            "Icons as the apps made them.",
+        val style = Icons.style(this)
+        val followTheme = !Prefs.get(this).contains(Prefs.ICON_STYLE)
+        val about = mapOf(
+            Icons.ORIGINAL to "The icons as the app (or your icon pack) draws them.",
+            Icons.GLASS to "iOS 26 style: each app's symbol floating on a pane of Liquid Glass that bends your background. Works with any phone and any icon pack.",
+            Icons.MONO to "Just the white symbol, like Android's themed icons.",
         )
-        for (i in listOf(Icons.DARK, Icons.MONO, Icons.ORIGINAL)) {
-            val card = choiceCard(Icons.style(this) == i) {
+        for (i in listOf(Icons.GLASS, Icons.ORIGINAL, Icons.MONO)) {
+            val card = choiceCard(style == i) {
                 Prefs.get(this).edit().putInt(Prefs.ICON_STYLE, i).apply()
+                Icons.forgetAll()
                 render()
             }
             card.gravity = Gravity.START
-            card.addView(text(15f, Palette.INK, bold = true).apply { text = Icons.NAMES[i] })
+            card.addView(text(15f, Palette.INK, bold = true).apply { text = Icons.NAMES[i] + if (followTheme && style == i) "  ·  with theme" else "" })
             card.addView(text(12.5f, Palette.GREY, lines = 3).apply {
                 text = about[i]
                 setPadding(0, dp(3), 0, dp(10))
             })
-            // Shown on your background, as they'll be on the home screen.
-            val stage = FrameLayout(this).apply {
-                clipToOutline = true
-                outlineProvider = object : android.view.ViewOutlineProvider() {
-                    override fun getOutline(v: View, o: android.graphics.Outline) {
-                        o.setRoundRect(0, 0, v.width, v.height, dpf(16f))
-                    }
-                }
-            }
-            stage.addView(BackgroundView(this), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            val st = stage(dpf(16f))
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(4), dp(6), dp(4), dp(4))
+                setPadding(dp(4), dp(8), dp(4), dp(6))
             }
             for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            stage.addView(row)
-            card.addView(stage, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            st.addView(row)
+            card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         }
+
+        // Installed packs
+        section(col, "Icon pack")
+        val current = IconPacks.current(this)
+        val packs = IconPacks.installed(this)
+        val rows = ArrayList<View>()
+        rows += row("App icons", "No pack: each app's own icon", chip(if (current.isEmpty()) "Using" else "Use", current.isEmpty())) { usePack("") }
+        for (pk in packs) {
+            val r = row(pk.label, pk.pkg, chip(if (current == pk.pkg) "Using" else "Use", current == pk.pkg)) { usePack(pk.pkg) }
+            try {
+                r.addView(ImageView(this).apply { setImageDrawable(packageManager.getApplicationIcon(pk.pkg)) }, 0, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(12) })
+            } catch (_: Exception) {
+            }
+            rows += r
+        }
+        col.addView(group(*rows.toTypedArray()))
+        if (packs.isEmpty()) note(col, "No icon packs installed yet. Get a free one below, or any from the Play Store.")
+
+        // Free packs to get
+        section(col, "Get free icon packs")
+        if (packStatus.isNotEmpty()) note(col, packStatus)
+        val get = ArrayList<View>()
+        for (src in IconPacks.CATALOG) {
+            val have = IconPacks.isInstalled(this, src.pkg)
+            get += row(src.name, src.about + "\nBy " + src.by + " · open source", chip(if (have) "Installed" else "Get", have)) {
+                if (have) usePack(src.pkg) else getPack(src)
+            }
+        }
+        col.addView(group(*get.toTypedArray()))
+        section(col, "")
+        col.addView(group(
+            row("Liquid Glass icon packs", "Search the Play Store for Liquid Glass and iOS 26 packs", chevron()) { store("liquid glass icon pack") },
+            row("More icon packs", "Thousands more on the Play Store", chevron()) { store("icon pack") },
+            row("Make your own pack", "Renkin (free, open source) builds an icon pack on your phone", chevron()) { open("https://f-droid.org/packages/dev.renkinProject.renkin/") },
+        ))
+    }
+
+    private fun usePack(pkg: String) {
+        Prefs.get(this).edit().putString(Prefs.ICON_PACK, pkg).apply()
+        Icons.forgetAll()
+        render()
+    }
+
+    private fun store(q: String) {
+        val u = Uri.encode(q)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=$u&c=apps")))
+        } catch (_: Exception) {
+            open("https://play.google.com/store/search?q=$u&c=apps")
+        }
+    }
+
+    /** Downloads the pack's official APK (F-Droid / IzzyOnDroid) and asks Android to install it. */
+    private fun getPack(src: IconPacks.Source) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow Halo Launcher to install apps, then tap Get again", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        packStatus = "Getting ${src.name}…"
+        render()
+        Updater.installUrl(this, "", -1L, src.pkg, progress = { f ->
+            packStatus = if (f >= 1f) "Confirm the install of ${src.name}, then tap Use" else "Downloading ${src.name} ${(f * 100).toInt()}%"
+            if (page == Page.ICONS) render()
+        }, failed = { msg ->
+            packStatus = "Couldn't get ${src.name}: ${msg.take(60)}"
+            if (page == Page.ICONS) render()
+        }, resolve = { IconPacks.latestApk(src)?.first })
     }
 
     private fun dockPage(col: LinearLayout) {
@@ -810,7 +956,6 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun clockStyle() = Prefs.get(this).getInt(Prefs.CLOCK_STYLE, StackedClock.VARSITY).coerceIn(0, 3)
 
     private fun sampleApps(): List<App> {
         val wanted = listOf("com.whatsapp", "com.google.android.youtube", "com.spotify.music", "com.android.vending", "com.instagram.android", "com.twitter.android")

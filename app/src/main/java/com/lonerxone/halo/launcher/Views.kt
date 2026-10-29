@@ -33,7 +33,11 @@ class AppIconView(
     private val showLabel: Boolean,
     private val labelColor: Int = Palette.INK,
     private val forceStyle: Int = -1,
+    /** Liquid Glass tiles bend the background live (home and dock); elsewhere a frosted tile. */
+    private val liveGlass: Boolean = true,
 ) : View(context) {
+    private var tile: android.graphics.drawable.Drawable? = null
+    private val tileRect = android.graphics.Rect()
     private var result: Icons.Result? = null
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -41,6 +45,8 @@ class AppIconView(
         textSize = dpf(11.5f)
         typeface = Fonts.regular(context)
         textAlign = Paint.Align.CENTER
+        // Labels sit on your picture, so give them a soft shadow.
+        setShadowLayer(dpf(3f), 0f, dpf(1f), Color.argb(150, 0, 0, 0))
     }
     private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.RED }
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -103,6 +109,16 @@ class AppIconView(
         result?.let {
             iconPaint.alpha = (255 * fade).toInt()
             dst.set(cx - px / 2f, iconTop, cx + px / 2f, iconTop + px)
+            if (it.glass) {
+                val t = tile ?: (
+                    if (liveGlass) GlassDrawable(this, px * 0.2237f, darkness = 0.04f, bendPx = dpf(7f), owned = true)
+                    else context.round(Color.argb(40, 255, 255, 255), px * 0.2237f).apply { setStroke(dp(1), Color.argb(60, 255, 255, 255)) }
+                    ).also { d -> tile = d }
+                dst.round(tileRect)
+                t.bounds = tileRect
+                t.alpha = (255 * fade).toInt()
+                t.draw(canvas)
+            }
             canvas.drawBitmap(it.bitmap, null, dst, iconPaint)
         }
         if (showLabel) canvas.drawText(ellipsize(app.label, width - dp(4)), cx, iconTop + px + dpf(16f), labelPaint)

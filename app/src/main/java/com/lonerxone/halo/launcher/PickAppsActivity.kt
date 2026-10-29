@@ -48,7 +48,7 @@ class PickAppsActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12), dp(6), dp(16), dp(6))
             }
-            row.addView(AppIconView(this, a, 38, false), LinearLayout.LayoutParams(dp(50), dp(40)))
+            row.addView(AppIconView(this, a, 38, false, liveGlass = false), LinearLayout.LayoutParams(dp(50), dp(40)))
             row.addView(text(15f, Palette.INK, bold = true).apply {
                 text = a.label
                 setPadding(dp(10), 0, 0, 0)

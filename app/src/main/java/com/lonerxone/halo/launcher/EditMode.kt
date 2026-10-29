@@ -63,6 +63,8 @@ class Cell(
     private val slop = ViewConfiguration.get(context).scaledTouchSlop * 0.6f
     var onRemove: (() -> Unit)? = null
     var onSize: (() -> Unit)? = null
+    /** A tap in edit mode (not on a badge): e.g. open this item's settings. */
+    var onEditTap: (() -> Unit)? = null
     /** An empty slot that keeps the place of the item being dragged. */
     val placeholder = content == null
 
@@ -226,6 +228,7 @@ class Cell(
                             performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
                             onSize?.invoke()
                         }
+                        else -> onEditTap?.invoke()
                     }
                 }
                 dragging = false
@@ -366,7 +369,8 @@ class Editor(private val host: Host) {
 
     // ----- dragging -----
 
-    fun startDrag(c: Cell, rawX: Float, rawY: Float) {
+    /** Lifts [c] under the finger; [centred] = hold it by its middle (a new item dragged in from elsewhere). */
+    fun startDrag(c: Cell, rawX: Float, rawY: Float, centred: Boolean = false) {
         pendingDrag = false
         if (floating != null || !editing) return
         if (pendingUp) {
@@ -402,8 +406,8 @@ class Editor(private val host: Host) {
         c.translationY = (loc[1] - oloc[1]).toFloat()
         c.elevation = c.dpf(16f)
         c.animate().scaleX(1.06f).scaleY(1.06f).alpha(0.96f).setDuration(160).start()
-        grabX = rawX - loc[0]
-        grabY = rawY - loc[1]
+        grabX = if (centred) w / 2f else rawX - loc[0]
+        grabY = if (centred) h / 2f else rawY - loc[1]
         dragTo(lastX, lastY)
         host.scrollerFor(c.zone)?.postOnAnimation(autoScroll)
     }

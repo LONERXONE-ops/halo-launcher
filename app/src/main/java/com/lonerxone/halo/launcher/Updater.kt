@@ -74,22 +74,28 @@ object Updater {
     /** Streams the APK into a PackageInstaller session; Android then asks to confirm. */
     fun install(ctx: Context, release: Release, progress: (Float) -> Unit, failed: (String) -> Unit) {
         val url = release.apkUrl ?: return failed("This release has no APK")
+        installUrl(ctx, url, release.size, ctx.packageName, progress, failed)
+    }
+
+    /** Downloads any APK (an update, or an icon pack) into a PackageInstaller session. */
+    fun installUrl(ctx: Context, url: String, size: Long, pkg: String, progress: (Float) -> Unit, failed: (String) -> Unit, resolve: (() -> String?)? = null) {
         val app = ctx.applicationContext
         Thread {
             try {
+                val realUrl = resolve?.invoke() ?: url
                 val installer = app.packageManager.packageInstaller
                 val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-                params.setAppPackageName(app.packageName)
+                params.setAppPackageName(pkg)
                 val id = installer.createSession(params)
                 installer.openSession(id).use { session ->
-                    val c = URL(url).openConnection() as HttpURLConnection
+                    val c = URL(realUrl).openConnection() as HttpURLConnection
                     c.setRequestProperty("User-Agent", "HaloLauncher-Android")
                     c.instanceFollowRedirects = true
                     c.connectTimeout = 15_000
                     c.readTimeout = 30_000
-                    val total = if (c.contentLengthLong > 0) c.contentLengthLong else release.size
+                    val total = if (c.contentLengthLong > 0) c.contentLengthLong else size
                     c.inputStream.use { input ->
-                        session.openWrite("halo-launcher.apk", 0, if (total > 0) total else -1).use { out ->
+                        session.openWrite("$pkg.apk", 0, if (total > 0) total else -1).use { out ->
                             val buf = ByteArray(64 * 1024)
                             var done = 0L
                             var lastShown = 0L

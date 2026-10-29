@@ -66,7 +66,18 @@ object Prefs {
     const val CAPSULE_PIC = "capsule_pic"
     const val CLOCK_STYLE = "clock_style" // StackedClock.VARSITY / DOTS / BOLD / THIN
     const val MONO_ICONS = "mono_icons"
-    const val ICON_STYLE = "icon_style" // Icons.DARK / MONO / ORIGINAL
+    const val ICON_STYLE = "icon_style" // Icons.ORIGINAL / GLASS / MONO (unset = follow the theme)
+    /** Package of the icon pack in use ("" = the apps' own icons). */
+    const val ICON_PACK = "icon_pack"
+    /** Clock face id (ClockFaces.ALL), layout (0 auto/stacked, 1 one line), alignment (0 start, 1 centre, 2 end). */
+    const val CLOCK_FACE = "clock_face"
+    const val CLOCK_LAYOUT = "clock_layout"
+    const val CLOCK_ALIGN = "clock_align"
+    /** 0 white, 1 wallpaper colour, 2 grey, 3 black. */
+    const val CLOCK_COLOR = "clock_color"
+    /** Liquid Glass text: 0 follow the theme, 1 on, 2 off. */
+    const val CLOCK_GLASS = "clock_glass"
+    const val DATE_STYLE = "date_style"
     const val SHOW_WALLPAPER = "show_wallpaper"
     const val DOCK = "dock"
     const val FAVORITES = "favorites"

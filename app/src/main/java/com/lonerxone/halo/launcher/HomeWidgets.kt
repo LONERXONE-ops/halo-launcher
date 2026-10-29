@@ -458,7 +458,7 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
             }
             for ((pkg, _) in r.top) {
                 val app = AppRepo.apps.firstOrNull { it.pkg == pkg } ?: continue
-                row.addView(AppIconView(context, app, 24, false).apply {
+                row.addView(AppIconView(context, app, 24, false, liveGlass = false).apply {
                     setOnClickListener { actions.launchPackage(pkg, it) }
                 }, LayoutParams(dp(36), dp(34)))
             }
@@ -475,7 +475,7 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(3), 0, dp(3))
             }
-            line.addView(AppIconView(context, app, 22, false), LayoutParams(dp(34), dp(30)))
+            line.addView(AppIconView(context, app, 22, false, liveGlass = false), LayoutParams(dp(34), dp(30)))
             val mid = LinearLayout(context).apply { orientation = VERTICAL }
             mid.addView(small(Palette.INK, 12.5f, 1).apply { text = app.label })
             mid.addView(BarView(context).apply {

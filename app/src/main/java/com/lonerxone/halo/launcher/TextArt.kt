@@ -1,0 +1,546 @@
+package com.lonerxone.halo.launcher
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RuntimeShader
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.os.Build
+import android.text.format.DateFormat
+import android.view.View
+import java.util.Date
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Clock faces: real typefaces (SIL Open Font License, from Google Fonts),
+ * each shown with the current time in Settings → Clock.
+ */
+object ClockFaces {
+    class Face(val id: String, val name: String, val font: String, val varsity: Boolean = false, val tracking: Float = 0f)
+
+    val ALL = listOf(
+        Face("varsity", "Varsity", "graduate", varsity = true),
+        Face("poster", "Poster", "clock_poster"),
+        Face("bold", "Condensed", "anton"),
+        Face("bebas", "Bebas", "clock_bebas"),
+        Face("slim", "Slim", "clock_slim"),
+        Face("rounded", "Rounded", "clock_rounded"),
+        Face("wide", "Wide", "clock_wide"),
+        Face("syne", "Syne", "clock_syne"),
+        Face("chunky", "Chunky", "clock_chunky", tracking = -0.04f),
+        Face("block", "Block", "clock_block"),
+        Face("soft", "Soft serif", "clock_soft"),
+        Face("serif", "Serif", "clock_serif"),
+        Face("editorial", "Editorial", "clock_editorial"),
+        Face("script", "Script", "clock_script"),
+        Face("hairline", "Hairline", "clock_hairline"),
+        Face("thin", "Thin", "inter_light"),
+        Face("majormono", "Mono display", "clock_majormono"),
+        Face("mono", "Mono", "clock_mono"),
+        Face("tech", "Tech", "clock_tech"),
+        Face("retro", "Retro", "clock_retro"),
+        Face("neon", "Neon", "clock_neon"),
+        Face("dots", "Dot matrix", "doto_black"),
+        Face("pixel", "Pixel", "clock_pixel"),
+    )
+
+    /** The chosen face (older versions stored 0..3). */
+    fun current(c: Context): Face {
+        val p = Prefs.get(c)
+        val id = p.getString(Prefs.CLOCK_FACE, null) ?: when (p.getInt(Prefs.CLOCK_STYLE, 0)) {
+            1 -> "dots"
+            2 -> "bold"
+            3 -> "thin"
+            else -> "varsity"
+        }
+        return ALL.firstOrNull { it.id == id } ?: ALL[0]
+    }
+
+    private val cache = HashMap<String, Typeface>()
+
+    fun typeface(c: Context, f: Face): Typeface = cache.getOrPut(f.font) {
+        try {
+            Typeface.createFromAsset(c.applicationContext.assets, "fonts/${f.font}.ttf")
+        } catch (_: Exception) {
+            Typeface.DEFAULT_BOLD
+        }
+    }
+
+    /** Text colour from Settings → Clock. */
+    fun colour(c: Context): Int = when (Prefs.get(c).getInt(Prefs.CLOCK_COLOR, 0)) {
+        1 -> Glass.accent(c)
+        2 -> Color.rgb(200, 200, 206)
+        3 -> Color.rgb(18, 18, 20)
+        else -> Palette.INK
+    }
+
+    /** Liquid Glass digits: follow the theme, or always / never. */
+    fun glass(c: Context): Boolean = when (Prefs.get(c).getInt(Prefs.CLOCK_GLASS, 0)) {
+        1 -> true
+        2 -> false
+        else -> Glass.enabled(c)
+    }
+}
+
+/**
+ * Big text on the wallpaper (the clock, the date, the weather) that can be
+ * drawn as Liquid Glass: the letters become glass that bends the picture
+ * behind them, frosted a little, catching the light on their top-left edges,
+ * like the iOS 26 lock screen clock. Without a picture to bend (or on
+ * Android 12) they're frosted glass: milky, with a bright rim.
+ *
+ * Subclasses lay out "runs" (text or an icon at a place and size); this
+ * class fits, draws and glazes them.
+ */
+abstract class TextArt(context: Context) : View(context) {
+    class Run(val text: String?, val paint: Paint, var x: Float, var y: Float, val icon: Drawable? = null, val iconRect: Rect? = null, val varsity: Boolean = false)
+
+    protected var runs: List<Run> = emptyList()
+    private var hard: Bitmap? = null
+    private var soft: Bitmap? = null
+    private var shader: Any? = null
+    private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val loc = IntArray(2)
+    private var glassNow = false
+    private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
+        if (glassNow) {
+            val x = loc[0]
+            val y = loc[1]
+            getLocationInWindow(loc)
+            if (x != loc[0] || y != loc[1]) invalidate()
+        }
+        true
+    }
+
+    /** Lay out the runs for this size. */
+    protected abstract fun layout(w: Int, h: Int): List<Run>
+
+    /** Redo the layout (text changed, or a setting did). */
+    fun refresh() {
+        if (width <= 0 || height <= 0) return
+        runs = layout(width, height)
+        glassNow = ClockFaces.glass(context)
+        buildMasks()
+        invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        refresh()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(follow)
+    }
+
+    override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnPreDrawListener(follow)
+        super.onDetachedFromWindow()
+    }
+
+    private fun drawRuns(c: Canvas, plain: Boolean) {
+        for (r in runs) {
+            if (r.icon != null && r.iconRect != null) {
+                r.icon.bounds = r.iconRect
+                r.icon.setTint(if (plain) Color.WHITE else r.paint.color)
+                r.icon.draw(c)
+                continue
+            }
+            val t = r.text ?: continue
+            if (r.varsity && !plain) {
+                // College-jersey digits: grey, a black outline, a white one around that.
+                val s = r.paint.textSize
+                val o = Paint(r.paint).apply {
+                    style = Paint.Style.STROKE
+                    strokeJoin = Paint.Join.ROUND
+                }
+                o.color = Color.WHITE
+                o.strokeWidth = s * 0.11f
+                c.drawText(t, r.x, r.y, o)
+                o.color = Color.BLACK
+                o.strokeWidth = s * 0.06f
+                c.drawText(t, r.x, r.y, o)
+                c.drawText(t, r.x, r.y, Paint(r.paint).apply { color = Color.rgb(205, 205, 210) })
+                continue
+            }
+            if (plain) {
+                c.drawText(t, r.x, r.y, Paint(r.paint).apply { color = Color.WHITE })
+            } else {
+                c.drawText(t, r.x, r.y, r.paint)
+            }
+        }
+    }
+
+    private fun buildMasks() {
+        hard?.recycle()
+        soft?.recycle()
+        hard = null
+        soft = null
+        shader = null
+        if (!glassNow || width <= 0 || height <= 0) return
+        val h = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        drawRuns(Canvas(h), plain = true)
+        hard = h
+        // A soft copy gives the letters "thickness": its slope is how the glass bends.
+        val scale = 3
+        val sw = max(1, width / scale)
+        val sh = max(1, height / scale)
+        val small = Bitmap.createScaledBitmap(h, sw, sh, true)
+        val r = (runs.maxOfOrNull { it.paint.textSize } ?: 40f) / scale * 0.07f
+        soft = blurAlpha(small, r.toInt().coerceIn(1, 14))
+        small.recycle()
+    }
+
+    /** Box blur of the alpha, three passes (close to Gaussian). */
+    private fun blurAlpha(b: Bitmap, r: Int): Bitmap {
+        val w = b.width
+        val h = b.height
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        var a = IntArray(w * h) { px[it] ushr 24 }
+        var t = IntArray(w * h)
+        val div = 2 * r + 1
+        repeat(3) {
+            for (y in 0 until h) {
+                var sum = 0
+                for (i in -r..r) sum += a[y * w + i.coerceIn(0, w - 1)]
+                for (x in 0 until w) {
+                    t[y * w + x] = sum / div
+                    sum += a[y * w + (x + r + 1).coerceIn(0, w - 1)] - a[y * w + (x - r).coerceIn(0, w - 1)]
+                }
+            }
+            for (x in 0 until w) {
+                var sum = 0
+                for (i in -r..r) sum += t[i.coerceIn(0, h - 1) * w + x]
+                for (y in 0 until h) {
+                    a[y * w + x] = sum / div
+                    sum += t[(y + r + 1).coerceIn(0, h - 1) * w + x] - t[(y - r).coerceIn(0, h - 1) * w + x]
+                }
+            }
+        }
+        val out = IntArray(w * h) { (a[it].coerceIn(0, 255) shl 24) or 0xFFFFFF }
+        return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        if (!glassNow) {
+            drawRuns(canvas, plain = false)
+            return
+        }
+        val hb = hard ?: return
+        val sb = soft ?: return
+        val back = Glass.sharp()
+        getLocationInWindow(loc)
+        val rs = if (back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
+            (shader as? RuntimeShader) ?: try {
+                RuntimeShader(GLASS_TEXT).also { shader = it }
+            } catch (_: Throwable) {
+                // A GPU that won't take the shader: frosted text instead, never a crash.
+                broken = true
+                null
+            }
+        } else {
+            null
+        }
+        if (rs != null && back != null) {
+            rs.setInputShader("image", back)
+            rs.setInputShader("hard", BitmapShader(hb, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP))
+            rs.setInputShader("soft", BitmapShader(sb, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                setLocalMatrix(Matrix().apply { setScale(width / sb.width.toFloat(), height / sb.height.toFloat()) })
+            })
+            rs.setFloatUniform("origin", loc[0].toFloat(), loc[1].toFloat())
+            val big = runs.maxOfOrNull { it.paint.textSize } ?: 60f
+            rs.setFloatUniform("bend", big * 0.5f)
+            rs.setFloatUniform("stepPx", max(1.5f, big * 0.02f))
+            shaderPaint.shader = rs
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shaderPaint)
+        } else {
+            // Frosted: milky letters with a bright rim and a soft shadow under them.
+            val p = Paint(Paint.FILTER_BITMAP_FLAG)
+            p.alpha = 70
+            p.colorFilter = android.graphics.PorterDuffColorFilter(Color.BLACK, android.graphics.PorterDuff.Mode.SRC_IN)
+            canvas.drawBitmap(hb, 0f, dpf(1.5f), p)
+            p.colorFilter = null
+            p.alpha = 150
+            canvas.drawBitmap(hb, 0f, 0f, p)
+            for (r in runs) {
+                val t = r.text ?: continue
+                canvas.drawText(t, r.x, r.y, Paint(r.paint).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = max(1.2f, textSize * 0.018f)
+                    color = Color.argb(220, 255, 255, 255)
+                })
+            }
+        }
+    }
+
+    companion object {
+        private var broken = false
+
+        /**
+         * Glass letters. "hard" is where the letters are; "soft" is a blurred
+         * copy whose slope says which way each point of the glass faces. The
+         * picture behind is sampled through that slope (refraction), split a
+         * touch by colour at the rims, frosted slightly, lit from the top-left.
+         */
+        const val GLASS_TEXT = """
+            uniform shader image;
+            uniform shader hard;
+            uniform shader soft;
+            uniform float2 origin;
+            uniform float bend;
+            uniform float stepPx;
+
+            half4 main(float2 p) {
+                float cov = float(hard.eval(p).a);
+                if (cov < 0.004) return half4(0.0);
+                float h = float(soft.eval(p).a);
+                float hx = float(soft.eval(p + float2(stepPx, 0.0)).a) - float(soft.eval(p - float2(stepPx, 0.0)).a);
+                float hy = float(soft.eval(p + float2(0.0, stepPx)).a) - float(soft.eval(p - float2(0.0, stepPx)).a);
+                float2 g = float2(hx, hy);
+                float gl = length(g) + 0.0001;
+                float rim = 1.0 - clamp(h * 1.6, 0.0, 1.0);
+                float2 off = -g * bend;
+                float2 q = origin + p + off;
+                float3 col;
+                col.r = float(image.eval(q + off * 0.08).r);
+                col.g = float(image.eval(q).g);
+                col.b = float(image.eval(q - off * 0.08).b);
+                col = mix(col, float3(1.0), 0.14 + 0.16 * rim);
+                float2 L = normalize(float2(-0.55, -0.85));
+                float facing = clamp(gl * 6.0, 0.0, 1.0);
+                float spec = pow(max(dot(-g / gl, L), 0.0), 2.5) * facing;
+                float dark = pow(max(dot(g / gl, L), 0.0), 2.0) * facing;
+                col += float3(spec * 0.55);
+                col *= 1.0 - dark * 0.22;
+                return half4(half3(col * cov), half(cov));
+            }
+        """
+
+        /** Fits lines into a box: the largest text size where every line fits across and all fit down. */
+        fun fit(paint: Paint, lines: List<String>, w: Float, h: Float, gap: Float): Float {
+            val probe = Paint(paint).apply { textSize = 100f }
+            val r = Rect()
+            var widest = 1f
+            var tall = 0f
+            for (l in lines) {
+                probe.getTextBounds(l, 0, l.length, r)
+                widest = max(widest, probe.measureText(l))
+                tall += r.height()
+            }
+            tall += gap * 100f * (lines.size - 1)
+            return min(w / widest, h / max(1f, tall)) * 100f
+        }
+    }
+}
+
+/** The time, in your face, layout, colour and alignment (Settings → Clock). */
+class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null) : TextArt(context) {
+    private var lastText = ""
+
+    /** Called each minute. */
+    fun tick() {
+        if (now() != lastText) refresh()
+    }
+
+    private fun now(): String {
+        val d = Date()
+        val h = DateFormat.format(if (DateFormat.is24HourFormat(context)) "HH" else "hh", d).toString()
+        val m = DateFormat.format("mm", d).toString()
+        return "$h:$m"
+    }
+
+    override fun layout(w: Int, h: Int): List<Run> {
+        val face = forceFace ?: ClockFaces.current(context)
+        val p = Prefs.get(context)
+        val t = now()
+        lastText = t
+        val (hh, mm) = t.split(':')
+        val pad = w * 0.02f
+        val bw = w - pad * 2
+        val bh = h - pad * 2
+        // Stacked when the box is tall enough for two lines, unless you chose one line.
+        val stacked = when (p.getInt(Prefs.CLOCK_LAYOUT, 0)) {
+            1 -> false
+            else -> h > w * 0.45f
+        }
+        val lines = if (stacked) listOf(hh, mm) else listOf("$hh:$mm")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            typeface = ClockFaces.typeface(context, face)
+            color = ClockFaces.colour(context)
+            letterSpacing = face.tracking
+        }
+        val gap = 0.08f
+        paint.textSize = TextArt.fit(paint, lines, bw, bh, gap) * if (face.varsity) 0.9f else 1f
+        val align = p.getInt(Prefs.CLOCK_ALIGN, 0)
+        val r = Rect()
+        // Measure the real ink height of each line for tight stacking.
+        val heights = lines.map { l -> paint.getTextBounds(l, 0, l.length, r); r.height().toFloat() to r.top.toFloat() }
+        val total = heights.sumOf { it.first.toDouble() }.toFloat() + paint.textSize * gap * (lines.size - 1)
+        var y = pad + (bh - total) / 2f
+        val out = ArrayList<Run>()
+        for ((i, l) in lines.withIndex()) {
+            val lw = paint.measureText(l)
+            val x = when (align) {
+                1 -> (w - lw) / 2f
+                2 -> w - pad - lw
+                else -> pad
+            }
+            out += Run(l, paint, x, y - heights[i].second, varsity = face.varsity)
+            y += heights[i].first + paint.textSize * gap
+        }
+        return out
+    }
+}
+
+/** The date, in one of four styles (Settings → Clock). */
+class DateFace(context: Context, private val forceStyle: Int = -1) : TextArt(context) {
+    override fun layout(w: Int, h: Int): List<Run> {
+        val style = if (forceStyle >= 0) forceStyle else Prefs.get(context).getInt(Prefs.DATE_STYLE, 0)
+        val d = Date()
+        val colour = ClockFaces.colour(context)
+        val align = Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
+        fun paint(tf: Typeface, track: Float = 0f) = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            typeface = tf
+            color = colour
+            letterSpacing = track
+        }
+        val pad = w * 0.03f
+        fun place(lines: List<Pair<String, Paint>>, gap: Float): List<Run> {
+            val r = Rect()
+            val hs = lines.map { (t, p) -> p.getTextBounds(t, 0, t.length, r); r.height().toFloat() to r.top.toFloat() }
+            val total = hs.sumOf { it.first.toDouble() }.toFloat() + gap * (lines.size - 1)
+            var y = (h - total) / 2f
+            return lines.mapIndexed { i, (t, p) ->
+                val lw = p.measureText(t)
+                val x = when (align) {
+                    1 -> (w - lw) / 2f
+                    2 -> w - pad - lw
+                    else -> pad
+                }
+                Run(t, p, x, y - hs[i].second).also { y += hs[i].first + gap }
+            }
+        }
+        val semi = Fonts.semibold(context)
+        return when (style) {
+            1 -> {
+                // Thursday, 29 October
+                val t = DateFormat.format("EEEE, d MMMM", d).toString()
+                val p = paint(Fonts.regular(context))
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.5f, 0f)
+                place(listOf(t to p), 0f)
+            }
+            2 -> {
+                // 29, with the day and month beside it
+                val big = paint(ClockFaces.typeface(context, ClockFaces.current(context)))
+                val day = DateFormat.format("d", d).toString()
+                big.textSize = TextArt.fit(big, listOf(day), w * 0.45f, h - pad * 2, 0f)
+                val small = paint(semi, 0.12f)
+                val l1 = DateFormat.format("EEEE", d).toString().uppercase()
+                val l2 = DateFormat.format("MMMM", d).toString().uppercase()
+                val bw = big.measureText(day)
+                small.textSize = TextArt.fit(small, listOf(l1, l2), w - bw - pad * 4, h * 0.42f, 0.35f).coerceAtMost(big.textSize * 0.32f)
+                val r = Rect()
+                big.getTextBounds(day, 0, day.length, r)
+                val by = (h - r.height()) / 2f - r.top
+                val sx = pad + bw + pad * 2
+                small.getTextBounds(l1, 0, l1.length, r)
+                val sh = r.height()
+                val mid = h / 2f
+                listOf(
+                    Run(day, big, pad, by),
+                    Run(l1, small, sx, mid - sh * 0.35f),
+                    Run(l2, small, sx, mid + sh * 1.35f),
+                )
+            }
+            3 -> {
+                // 29.10 in the clock's face
+                val p = paint(ClockFaces.typeface(context, ClockFaces.current(context)))
+                val t = DateFormat.format("dd.MM", d).toString()
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h - pad * 2, 0f)
+                place(listOf(t to p), 0f)
+            }
+            else -> {
+                // THU 29 OCT
+                val t = DateFormat.format("EEE d MMM", d).toString().uppercase()
+                val p = paint(semi, 0.14f)
+                p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.36f, 0f)
+                place(listOf(t to p), 0f)
+            }
+        }
+    }
+
+    companion object {
+        val NAMES = listOf("THU 29 OCT", "Thursday, 29 October", "Big day", "29.10")
+    }
+}
+
+/** The weather as text on the wallpaper: icon, temperature, sky and place. */
+class WeatherFace(context: Context) : TextArt(context) {
+    override fun layout(w: Int, h: Int): List<Run> {
+        val now = Weather.now
+        val colour = ClockFaces.colour(context)
+        val align = Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
+        val pad = w * 0.03f
+        if (now == null) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = Fonts.semibold(context)
+                color = colour
+                letterSpacing = 0.1f
+            }
+            val t = if (Weather.hasPlace(context)) "WEATHER…" else "SET YOUR CITY"
+            p.textSize = TextArt.fit(p, listOf(t), w - pad * 2, h * 0.28f, 0f)
+            val r = Rect()
+            p.getTextBounds(t, 0, t.length, r)
+            return listOf(Run(t, p, if (align == 2) w - pad - p.measureText(t) else pad, (h - r.height()) / 2f - r.top))
+        }
+        val temp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = ClockFaces.typeface(context, ClockFaces.current(context))
+            color = colour
+        }
+        val tt = "${now.temp}°"
+        val sub = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Fonts.semibold(context)
+            color = colour
+            letterSpacing = 0.12f
+        }
+        val st = listOf(Weather.describe(now.code), now.city).filter { it.isNotBlank() }.joinToString(" · ").uppercase()
+        temp.textSize = TextArt.fit(temp, listOf(tt), w * 0.5f, h * 0.56f, 0f)
+        sub.textSize = TextArt.fit(sub, listOf(st), w - pad * 2, h * 0.17f, 0f).coerceAtMost(temp.textSize * 0.3f)
+        val r = Rect()
+        temp.getTextBounds(tt, 0, tt.length, r)
+        val iconSize = (r.height() * 0.8f).toInt()
+        val tw = temp.measureText(tt)
+        val rowW = iconSize + iconSize * 0.3f + tw
+        val x0 = when (align) {
+            1 -> (w - rowW) / 2f
+            2 -> w - pad - rowW
+            else -> pad
+        }
+        val top = h * 0.12f
+        val icon = context.getDrawable(Weather.icon(now.code, now.isDay))?.mutate()
+        val iy = (top + (r.height() - iconSize) / 2f).toInt()
+        val ix = x0.toInt()
+        val out = ArrayList<Run>()
+        if (icon != null) out += Run(null, temp, 0f, 0f, icon, Rect(ix, iy, ix + iconSize, iy + iconSize))
+        out += Run(tt, temp, x0 + iconSize * 1.3f, top - r.top)
+        val sr = Rect()
+        sub.getTextBounds(st, 0, st.length, sr)
+        val sw = sub.measureText(st)
+        val sx = when (align) {
+            1 -> (w - sw) / 2f
+            2 -> w - pad - sw
+            else -> pad
+        }
+        out += Run(st, sub, sx, top + r.height() + h * 0.12f - sr.top)
+        return out
+    }
+}
