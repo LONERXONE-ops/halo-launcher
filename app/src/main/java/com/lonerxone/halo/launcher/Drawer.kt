@@ -158,6 +158,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             overScrollMode = View.OVER_SCROLL_NEVER
             setPadding(0, dp(14), dp(18), dp(120))
             clipToPadding = false
+            // A fling slows down sooner and stops where you expect.
+            setFriction(ViewConfiguration.getScrollFriction() * 1.6f)
             adapter = this@Drawer.adapter
         }
         extras = LinearLayout(context).apply {
@@ -401,9 +403,10 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private fun iconFor(a: App): AppIconView = AppIconView(context, a, 54, true, liveGlass = false).apply {
         pressable()
         badge = HaloLink.badges[a.pkg] ?: 0
-        setOnClickListener { host.launch(a, it) }
+        // The view's current app (it's reused for other apps as the list scrolls).
+        setOnClickListener { host.launch((it as AppIconView).app, it) }
         setOnLongClickListener {
-            host.appMenu(a, it)
+            host.appMenu((it as AppIconView).app, it)
             true
         }
     }
@@ -419,8 +422,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         override fun getItemId(position: Int) = position.toLong()
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val a = shown[position]
+            // Reuse the view that scrolled off (rebuilding a new one for every row made scrolling stutter).
             val old = convertView as? AppIconView
-            val v = if (old != null && old.app.key == a.key && old.isCurrent()) old else iconFor(a)
+            val v = old?.also { it.rebind(a) } ?: iconFor(a)
             v.badge = HaloLink.badges[a.pkg] ?: 0
             return v
         }
@@ -431,6 +435,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     /** Follows the finger (stops any animation first). */
     fun drag(p: Float) {
         anim?.cancel()
+        // Drawn as one layer while following the finger (fading the whole list
+        // every frame without one is what made dragging it up stutter).
+        if (layerType != View.LAYER_TYPE_HARDWARE) setLayerType(View.LAYER_TYPE_HARDWARE, null)
         setProgress(p)
     }
 
@@ -487,6 +494,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val start = prog
         val dist = abs(target - start)
         if (dist < 0.001f) {
+            setLayerType(View.LAYER_TYPE_NONE, null)
             setProgress(target)
             isOpen = target > 0.5f
             return
@@ -494,7 +502,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val a = android.animation.ValueAnimator.ofFloat(start, target)
         val fast = (abs(velocity) / 4000f).coerceIn(0f, 0.5f)
         a.duration = ((if (target > start) 420 else 220) * (0.45f + 0.55f * dist) * (1f - fast)).toLong().coerceAtLeast(120)
-        a.interpolator = if (target > start) Spring(0.3f) else android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
+        // Glides in and eases to a stop (no bounce past the top); closing is a touch quicker.
+        a.interpolator = if (target > start) android.view.animation.PathInterpolator(0.2f, 0.85f, 0.25f, 1f) else android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
         a.addUpdateListener { setProgress(it.animatedValue as Float) }
         setLayerType(View.LAYER_TYPE_HARDWARE, null)
         a.addListener(object : android.animation.AnimatorListenerAdapter() {
@@ -540,6 +549,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
                     downY = e.rawY
                     hideKeyboard()
                     anim?.cancel()
+                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
                     return true
                 }
             }

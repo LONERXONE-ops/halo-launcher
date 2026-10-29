@@ -163,9 +163,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         } else {
             // Let the return animation run first; update the live bits a beat later.
             root.postDelayed({
-                refreshWidgets(null)
+                refreshWidgetsGently()
                 loadBackdrop()
-            }, 280L)
+            }, 380L)
         }
         root.postDelayed({ onMinute() }, 300L)
         root.postDelayed({ updateMusicPresence() }, 450L)
@@ -209,7 +209,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     override fun onResume() {
         super.onResume()
         // Never stay zoomed away (an app that didn't open, a quick return).
-        if (pager.alpha < 1f && pager.animate() != null) root.postDelayed({ if (pager.alpha < 0.99f) animateIn() }, 450L)
+        if (pager.alpha < 0.99f) root.post { if (pager.alpha < 0.99f) animateIn() }
         startMusicTick()
         // The welcome tour: once for everyone, including people who set up before it existed.
         if (!tourAsked && OnboardingActivity.due(this)) {
@@ -435,11 +435,12 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         for (v in listOf<View>(pager, dock)) {
             v.animate().cancel()
             v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            v.scaleX = 1.08f
-            v.scaleY = 1.08f
-            v.alpha = 0f
-            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(360)
-                .setInterpolator(Spring(0.25f))
+            // Visible from the first frame (no blank moment), settling into place.
+            v.scaleX = 1.06f
+            v.scaleY = 1.06f
+            v.alpha = 0.35f
+            v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300)
+                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.25f, 1f))
                 .withEndAction {
                     v.setLayerType(View.LAYER_TYPE_NONE, null)
                     v.invalidateGlass()
@@ -720,6 +721,18 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         rebuildHome()
         snapToItem(id)
         for (g in grids) for (i in 0 until g.childCount) (g.getChildAt(i) as? Cell)?.takeIf { it.itemId == id }?.enter(0, dpf(18f))
+    }
+
+    /** Coming home: widgets update one per frame, so the return animation never stutters. */
+    private fun refreshWidgetsGently() {
+        val list = widgets.toList()
+        for ((i, w) in list.withIndex()) {
+            root.postDelayed({
+                if (w.id == "screen" && System.currentTimeMillis() - lastScreenTime < 60_000L) return@postDelayed
+                if (w.id == "screen") lastScreenTime = System.currentTimeMillis()
+                w.refresh()
+            }, i * 24L)
+        }
     }
 
     private fun refreshWidgets(onlyId: String?) {

@@ -954,7 +954,7 @@ class MusicWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Music") {
     }
 
     override fun refresh() {
-        card.restyle()
+        // Only what changed: the cover, blur and colours are redone when the song does.
         card.bind(HaloLink.music)
     }
 

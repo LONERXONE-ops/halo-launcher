@@ -61,14 +61,14 @@ class OnboardingActivity : Activity() {
         apps = AppRepo.apps.filter { it.pkg != packageName }.sortedByDescending { AppRepo.launches(this, it) }.take(16)
 
         val steps = listOf(
-            Step("Welcome to\nHalo Launcher", "A home screen made of glass, built around your wallpaper, and made to work with Halo. Here's how it works.", null, null, ::sceneWelcome),
-            Step("Hold to edit", "Long-press the wallpaper and everything wiggles. Drag anything anywhere; hold it at the edge to carry it to the next page.", "Tip: tap the clock while editing to restyle it", null, ::sceneEdit),
-            Step("Stacks and folders", "Drop a widget on one of the same size to stack them, then swipe through. Drop an app on an app to make a folder.", "Settings › Widgets", "widgets", ::sceneStack),
-            Step("Glass that follows\nyour colours", "Tiles, dock and menus are real glass that bends your wallpaper. Adaptive colour tints them with your wallpaper's shade.", "Settings › Theme", "theme", ::sceneGlass),
-            Step("Clocks and icons", "23 clock faces with glass digits. Icons in Normal, Liquid Glass, White line or any icon pack. Halo uses the same icons.", "Settings › Clock & date · Icons", "clock", ::sceneClock),
-            Step("Swipe around", "Swipe up for all your apps, with search and a calculator. Swipe down for notifications. Double-tap to lock.", "Settings › Gestures", "gestures", ::sceneGestures),
-            Step("What each setting does", "Every settings page also starts with a short note explaining it.", null, null, ::sceneSettings),
-            Step("Make it home", "So the home button always brings you here. You can switch back any time in your phone's settings.", null, null, ::sceneHome),
+            Step("Welcome to\nHalo Launcher", "A glass home screen built around your wallpaper, made to work with Halo.", null, null, ::sceneWelcome),
+            Step("Hold to edit", "Hold the wallpaper and everything wiggles. Drag anything anywhere, even to the next page.", "Tip: tap the clock while editing to restyle it", null, ::sceneEdit),
+            Step("Stacks and folders", "Drop a widget on one the same size to stack them. Drop an app on an app for a folder.", "Settings › Widgets", "widgets", ::sceneStack),
+            Step("Glass that follows\nyour colours", "Real glass that bends your wallpaper, tinted with its colour if you like.", "Settings › Theme", "theme", ::sceneGlass),
+            Step("Clocks and icons", "23 clock faces, icon packs and Liquid Glass icons. Halo uses the same icons.", "Settings › Clock & date · Icons", "clock", ::sceneClock),
+            Step("Swipe around", "Up for your apps, down for notifications, double-tap to lock.", "Settings › Gestures", "gestures", ::sceneGestures),
+            Step("What each setting does", "Every settings page starts with a short note too.", null, null, ::sceneSettings),
+            Step("Make it home", "So the home button brings you here. You can switch back any time.", null, null, ::sceneHome),
         )
 
         val root = FrameLayout(this)
@@ -233,14 +233,14 @@ class OnboardingActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(22), 0, 0)
         }
-        words.addView(text(28f, Color.WHITE, bold = true, lines = 2).apply {
+        words.addView(text(24f, Color.WHITE, bold = true, lines = 2).apply {
             text = s.title
             setLineSpacing(0f, 1.05f)
         })
-        words.addView(text(15f, Color.argb(205, 255, 255, 255), lines = 5).apply {
+        words.addView(text(14f, Color.argb(205, 255, 255, 255), lines = 4).apply {
             text = s.body
-            setLineSpacing(0f, 1.22f)
-            setPadding(0, dp(10), 0, 0)
+            setLineSpacing(0f, 1.2f)
+            setPadding(0, dp(8), 0, 0)
         })
         if (s.where != null) {
             words.addView(text(12.5f, Color.WHITE, bold = true).apply {
@@ -473,11 +473,14 @@ class OnboardingActivity : Activity() {
 
     private fun riseIn(views: List<View>, delay: Long = 0L) {
         for ((i, v) in views.withIndex()) {
+            // Views in the little phone are placed with an offset: rise *to that place*, not to the top.
+            val base = (v.getTag(R.id.tour_base) as? Float) ?: v.translationY.also { b -> v.setTag(R.id.tour_base, b) }
+            v.animate().cancel()
             v.alpha = 0f
-            v.translationY = dpf(20f)
+            v.translationY = base + dpf(20f)
             v.scaleX = 0.85f
             v.scaleY = 0.85f
-            v.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setStartDelay(delay + i * 35L).setDuration(560).setInterpolator(Spring(0.4f)).start()
+            v.animate().alpha(1f).translationY(base).scaleX(1f).scaleY(1f).setStartDelay(delay + i * 35L).setDuration(560).setInterpolator(Spring(0.4f)).start()
         }
     }
 
@@ -498,6 +501,8 @@ class OnboardingActivity : Activity() {
         val (icons, dock) = miniHome(f, rows = 2)
         val all = ArrayList<View>()
         for (i in 0 until f.childCount) all += f.getChildAt(i)
+        val dockY = dock.translationY
+        dock.setTag(R.id.tour_base, dockY)
         sc.enter = { riseIn(all, 120L) }
         // Icons breathe very gently, one after another.
         loop(sc, 3600) { t ->
@@ -506,7 +511,7 @@ class OnboardingActivity : Activity() {
                 v.scaleX = s
                 v.scaleY = s
             }
-            dock.translationY = dpf(1.5f) * sin((t * 2f * Math.PI).toFloat())
+            dock.translationY = dockY + dpf(1.5f) * sin((t * 2f * Math.PI).toFloat())
         }
     }
 
@@ -662,6 +667,9 @@ class OnboardingActivity : Activity() {
         place(f, lens, (w - lw) / 2f, h * 0.48f, lw, lh)
         lens.background = glassTile(lens, lh * 0.4f, dark = 0.06f)
         lens.elevation = dpf(8f)
+        val lensX = lens.translationX
+        val lensY = lens.translationY
+        lens.setTag(R.id.tour_base, lensY)
         val colours = intArrayOf(Glass.wallColor(this) ?: Palette.ACCENT, 0xFF4F8CFF.toInt(), 0xFFFF6B9A.toInt(), 0xFF3CCB86.toInt(), 0xFFFFB347.toInt())
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -681,8 +689,8 @@ class OnboardingActivity : Activity() {
         var shown = -1
         loop(sc, 7000) { t ->
             val a = (t * 2f * Math.PI).toFloat()
-            lens.translationX = w * 0.16f * sin(a)
-            lens.translationY = h * 0.05f * sin(2f * a)
+            lens.translationX = lensX + w * 0.16f * sin(a)
+            lens.translationY = lensY + h * 0.05f * sin(2f * a)
             val k = (t * colours.size).toInt().coerceAtMost(colours.size - 1)
             if (k != shown) {
                 shown = k
@@ -887,6 +895,8 @@ class OnboardingActivity : Activity() {
         }
         place(f, explain, 0f, h * 0.64f, w.toInt(), (h * 0.34f).toInt())
         explain.background = glassTile(explain, dpf(14f), dark = 0.45f)
+        val explainY = explain.translationY
+        explain.setTag(R.id.tour_base, explainY)
         var on = -1
         loop(sc, rows.size * 1700L) { t ->
             val k = (t * rows.size).toInt().coerceAtMost(rows.size - 1)
@@ -894,9 +904,9 @@ class OnboardingActivity : Activity() {
                 on = k
                 hl.animate().y((k * rh).toFloat()).setDuration(460).setInterpolator(Spring(0.35f)).start()
                 for ((i, v) in views.withIndex()) v.animate().alpha(if (i == k) 1f else 0.5f).setDuration(200).start()
-                explain.animate().alpha(0f).translationY(dpf(6f)).setDuration(110).withEndAction {
+                explain.animate().alpha(0f).translationY(explainY + dpf(6f)).setDuration(110).withEndAction {
                     explain.text = rows[k].second + "\n" + rows[k].third
-                    explain.animate().alpha(1f).translationY(0f).setDuration(360).setInterpolator(Spring(0.35f)).start()
+                    explain.animate().alpha(1f).translationY(explainY).setDuration(360).setInterpolator(Spring(0.35f)).start()
                 }.start()
             }
         }

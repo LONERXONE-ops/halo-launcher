@@ -28,7 +28,7 @@ import kotlin.math.min
 @SuppressLint("ViewConstructor")
 class AppIconView(
     context: Context,
-    val app: App,
+    app: App,
     private val sizeDp: Int,
     private val showLabel: Boolean,
     private val labelColor: Int = Palette.INK,
@@ -36,6 +36,8 @@ class AppIconView(
     /** Liquid Glass tiles bend the background live (home and dock); elsewhere a frosted tile. */
     private val liveGlass: Boolean = true,
 ) : View(context) {
+    var app: App = app
+        private set
     private var tile: android.graphics.drawable.Drawable? = null
     private val tileRect = android.graphics.Rect()
     private var result: Icons.Result? = null
@@ -83,13 +85,27 @@ class AppIconView(
         return style == styleUsed
     }
 
+    /** Show another app in this same view (the app list reuses views as you scroll). */
+    fun rebind(a: App) {
+        if (a.key == app.key && isCurrent()) return
+        app = a
+        contentDescription = a.label
+        result = null
+        badge = 0
+        reload()
+    }
+
     fun reload() {
         val style = if (forceStyle >= 0) forceStyle else Icons.style(context)
         styleUsed = style
+        val forApp = app
 
-        Icons.cachedOrDisk(context, app, style, px)?.let { result = it; invalidate(); return }
+        Icons.cachedOrDisk(context, forApp, style, px)?.let { result = it; fade = 1f; invalidate(); return }
         fade = 0f
-        Icons.load(context, app, style, px) { r ->
+        invalidate()
+        Icons.load(context, forApp, style, px) { r ->
+            // Scrolled on to another app meanwhile: this icon isn't ours any more.
+            if (app.key != forApp.key) return@load
             result = r
             // Icons fade in as they finish loading instead of popping.
             ValueAnimator.ofFloat(0f, 1f).apply {

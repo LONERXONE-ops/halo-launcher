@@ -534,17 +534,9 @@ class GlassDrawable(
         val ox = loc[0] + b.left.toFloat()
         val oy = loc[1] + b.top.toFloat()
         val frost = Glass.frost()
-        val rs0 = if (frost != null && Build.VERSION.SDK_INT >= 33 && !shaderBroken) {
-            (runtime as? RuntimeShader) ?: try {
-                RuntimeShader(Glass.AGSL).also { runtime = it }
-            } catch (_: Throwable) {
-                // A GPU that won't take the shader: frosted glass instead, never a crash.
-                shaderBroken = true
-                null
-            }
-        } else {
-            null
-        }
+        // A flat pane (no lens, like the app list's backdrop) doesn't need the
+        // lens shader at all: the cheaper frosted path looks the same.
+        val rs0 = if (frost != null && bendPx > 0f && Build.VERSION.SDK_INT >= 33 && !shaderBroken) sharedShader() else null
         if (frost != null && rs0 != null) {
             val rs = rs0
             rs.setInputShader("image", frost)
@@ -644,6 +636,24 @@ class GlassDrawable(
     companion object {
         @Volatile
         private var shaderBroken = false
+        private var shared: Any? = null
+
+        /**
+         * One lens shader for every pane, compiled once. (Each pane used to
+         * compile its own, dozens at once whenever the home screen was
+         * built, which made coming home slow.) Uniforms are set right before
+         * each pane draws; Android snapshots them into that draw.
+         */
+        private fun sharedShader(): RuntimeShader? {
+            (shared as? RuntimeShader)?.let { return it }
+            return try {
+                RuntimeShader(Glass.AGSL).also { shared = it }
+            } catch (_: Throwable) {
+                // A GPU that won't take the shader: frosted glass instead, never a crash.
+                shaderBroken = true
+                null
+            }
+        }
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {}

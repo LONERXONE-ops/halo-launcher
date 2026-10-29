@@ -264,8 +264,8 @@ abstract class TextArt(context: Context) : View(context) {
         val back = Glass.sharp()
         getLocationInWindow(loc)
         val rs = if (back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
-            (shader as? RuntimeShader) ?: try {
-                RuntimeShader(GLASS_TEXT).also { shader = it }
+            (sharedText as? RuntimeShader) ?: try {
+                RuntimeShader(GLASS_TEXT).also { sharedText = it }
             } catch (_: Throwable) {
                 // A GPU that won't take the shader: frosted text instead, never a crash.
                 broken = true
@@ -310,6 +310,8 @@ abstract class TextArt(context: Context) : View(context) {
 
     companion object {
         private var broken = false
+        /** Compiled once for every clock, date and weather (not per view). */
+        private var sharedText: Any? = null
 
         /**
          * Glass letters. "hard" is where the letters are; "soft" is a blurred
