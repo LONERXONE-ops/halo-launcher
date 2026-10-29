@@ -311,12 +311,36 @@ class BackgroundView(context: Context) : View(context) {
         )
     }
 
+    private val drawnAt = IntArray(2)
+    private val now = IntArray(2)
+
+    /**
+     * It shows the part of the picture that's behind it on screen, so when it
+     * moves (a page sliding in, scrolling, an animation ending) it must redraw.
+     * Without this it kept the spot it had mid-animation: a grey strip down one side.
+     */
+    private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
+        getLocationInWindow(now)
+        if (now[0] != drawnAt[0] || now[1] != drawnAt[1]) invalidate()
+        true
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnPreDrawListener(follow)
+    }
+
+    override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnPreDrawListener(follow)
+        super.onDetachedFromWindow()
+    }
+
     override fun onDraw(canvas: Canvas) {
         val bmp = Glass.backdrop
-        if (bmp != null) {
-            getLocationInWindow(loc)
-            canvas.drawBitmap(bmp, -loc[0].toFloat(), -loc[1].toFloat(), p)
-        }
+        getLocationInWindow(loc)
+        drawnAt[0] = loc[0]
+        drawnAt[1] = loc[1]
+        if (bmp != null) canvas.drawBitmap(bmp, -loc[0].toFloat(), -loc[1].toFloat(), p)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shade)
     }
 }

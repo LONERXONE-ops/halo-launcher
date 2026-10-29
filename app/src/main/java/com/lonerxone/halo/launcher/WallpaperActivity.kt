@@ -16,6 +16,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.LruCache
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -89,6 +90,21 @@ class WallpaperActivity : Activity() {
     private var loading = false
     private var savedTab = false
     private var gen = 0
+    /** Random mixes stay the same while you scroll, and change when you refresh. */
+    private var seed = newSeed()
+
+    private fun newSeed(): String {
+        val a = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return (1..6).map { a.random() }.joinToString("")
+    }
+
+    /** New wallpapers: a new mix for topics, the latest for Top/Fresh/searches, saved re-read. */
+    private fun refreshAll() {
+        seed = newSeed()
+        if (savedTab) showSaved() else load(reset = true)
+        grid.alpha = 0.4f
+        grid.animate().alpha(1f).setDuration(400).start()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -137,6 +153,12 @@ class WallpaperActivity : Activity() {
         titles.addView(text(26f, Palette.INK, bold = true).apply { text = "Wallpapers" })
         titles.addView(text(11.5f, Palette.GREY).apply { text = "From wallhaven.cc, by their artists" })
         head.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val refreshBtn = roundBtn(R.drawable.ic_refresh, "Refresh") {}
+        refreshBtn.setOnClickListener {
+            it.animate().rotationBy(360f).setDuration(600).setInterpolator(Spring(0.3f)).start()
+            refreshAll()
+        }
+        head.addView(refreshBtn, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(8) })
         head.addView(roundBtn(R.drawable.ic_image, "Use one of your photos") { pickPhoto() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         col.addView(head)
 
@@ -247,7 +269,8 @@ class WallpaperActivity : Activity() {
                 }
             })
         }
-        val body = FrameLayout(this)
+        val body = PullFrame(this) { refreshAll() }
+        body.list = grid
         body.addView(grid)
         body.addView(status, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
         col.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -317,6 +340,7 @@ class WallpaperActivity : Activity() {
         for ((i, t) in topics.withIndex()) add(t.name, query.isEmpty() && i == topic) {
             topic = i
             query = ""
+            seed = newSeed()
             if (finder.isOpen) finder.close(clearText = true)
             savedTab = false
             load(reset = true)
@@ -342,12 +366,18 @@ class WallpaperActivity : Activity() {
         val t = topics[topic]
         val q = if (query.isNotEmpty()) query else t.q
         val cats = if (query.isNotEmpty()) "111" else t.cats
-        val sort = if (query.isNotEmpty()) "relevance" else t.sort
+        // Topics come as a fresh random mix each time (a new seed on every refresh);
+        // Top stays the year's best and Fresh the newest.
+        val sort = when {
+            query.isNotEmpty() -> "relevance"
+            t.name == "Top" || t.name == "Fresh" -> t.sort
+            else -> "random"
+        }
         val p = page
         io.execute {
             val result = try {
                 val url = "https://wallhaven.cc/api/v1/search?purity=100&ratios=portrait&atleast=1080x1920" +
-                    "&categories=$cats&sorting=$sort" + (if (sort == "toplist") "&topRange=1y" else "") +
+                    "&categories=$cats&sorting=$sort" + (if (sort == "toplist") "&topRange=1y" else "") + (if (sort == "random") "&seed=$seed" else "") +
                     "&page=$p" + (if (q.isNotEmpty()) "&q=" + URLEncoder.encode(q, "UTF-8") else "")
                 val j = JSONObject(get(url))
                 val data = j.getJSONArray("data")
@@ -880,5 +910,81 @@ class PanZoomView(c: Context) : ImageView(c) {
         cv.scale(k, k)
         cv.drawBitmap(b, m, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
         return out
+    }
+}
+
+
+/**
+ * Pull down at the top of the list to refresh: a round arrow follows your
+ * finger, spins once you've pulled far enough, and lets go into a refresh.
+ */
+@android.annotation.SuppressLint("ViewConstructor")
+class PullFrame(c: Context, private val onRefresh: () -> Unit) : FrameLayout(c) {
+    var list: AbsListView? = null
+    private val arrow = ImageView(c).apply {
+        setImageResource(R.drawable.ic_refresh)
+        imageTintList = ColorStateList.valueOf(Color.BLACK)
+        setPadding(dp(9), dp(9), dp(9), dp(9))
+        background = c.round(Palette.INK, dpf(19f))
+        elevation = dpf(8f)
+        alpha = 0f
+    }
+    private var downY = 0f
+    private var downX = 0f
+    private var pulling = false
+    private val far get() = dpf(90f)
+
+    init {
+        clipChildren = false
+        post { addView(arrow, LayoutParams(dp(38), dp(38), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = -dp(44) }) }
+    }
+
+    private fun atTop(): Boolean = list?.canScrollVertically(-1) == false
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downY = e.rawY
+                downX = e.rawX
+                pulling = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dy = e.rawY - downY
+                if (!pulling && dy > dp(10) && dy > kotlin.math.abs(e.rawX - downX) * 1.5f && atTop()) {
+                    pulling = true
+                    downY = e.rawY
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (!pulling) return super.onTouchEvent(e)
+        val pull = ((e.rawY - downY) * 0.5f).coerceAtLeast(0f)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                arrow.translationY = pull.coerceAtMost(far * 1.2f)
+                arrow.alpha = (pull / far).coerceIn(0f, 1f)
+                arrow.rotation = pull * 2.5f
+                list?.translationY = pull * 0.5f
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                pulling = false
+                list?.animate()?.translationY(0f)?.setDuration(360)?.setInterpolator(Spring(0.4f))?.start()
+                if (pull >= far && e.actionMasked == MotionEvent.ACTION_UP) {
+                    performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                    arrow.animate().rotationBy(540f).setDuration(700).withEndAction {
+                        arrow.animate().translationY(0f).alpha(0f).setDuration(220).start()
+                    }.start()
+                    onRefresh()
+                } else {
+                    arrow.animate().translationY(0f).alpha(0f).setDuration(220).start()
+                }
+            }
+        }
+        return true
     }
 }
