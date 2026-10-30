@@ -154,13 +154,82 @@ abstract class BaseWidget(context: Context, protected val actions: WidgetActions
         ).apply { cornerRadius = dpf(26f) }
     }
 
+    /**
+     * A soft glow rising from the bottom of the card (charging green, low
+     * battery red), gently breathing while [pulse]. 0 = none. The breathing
+     * only runs while the widget is on screen.
+     */
+    private var glowColor = 0
+    private var glowDrawable: android.graphics.drawable.GradientDrawable? = null
+    private val breathe = android.animation.ValueAnimator.ofFloat(0.55f, 1f).apply {
+        duration = 1600L
+        repeatCount = android.animation.ValueAnimator.INFINITE
+        repeatMode = android.animation.ValueAnimator.REVERSE
+        interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        addUpdateListener { glowDrawable?.alpha = (255 * (it.animatedValue as Float)).toInt() }
+    }
+
+    protected fun glow(color: Int, pulse: Boolean = true) {
+        if (color == glowColor) return
+        glowColor = color
+        breathe.cancel()
+        if (color == 0) {
+            foreground = null
+            glowDrawable = null
+            return
+        }
+        val g = android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP,
+            intArrayOf(
+                android.graphics.Color.argb(120, android.graphics.Color.red(color), android.graphics.Color.green(color), android.graphics.Color.blue(color)),
+                android.graphics.Color.argb(36, android.graphics.Color.red(color), android.graphics.Color.green(color), android.graphics.Color.blue(color)),
+                android.graphics.Color.TRANSPARENT,
+            ),
+        ).apply {
+            cornerRadius = dpf(26f)
+            setStroke(dp(1), android.graphics.Color.argb(110, android.graphics.Color.red(color), android.graphics.Color.green(color), android.graphics.Color.blue(color)))
+        }
+        glowDrawable = g
+        foreground = g
+        if (pulse && isAttachedToWindow) breathe.start()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (glowDrawable != null) breathe.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        breathe.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    /** A small icon before the title. */
+    private val headIcon = ImageView(context).apply {
+        imageTintList = ColorStateList.valueOf(Palette.SILVER)
+        visibility = GONE
+    }
+
+    protected fun headerIcon(res: Int, tint: Int = Palette.SILVER) {
+        headIcon.setImageResource(res)
+        headIcon.imageTintList = ColorStateList.valueOf(tint)
+        headIcon.visibility = VISIBLE
+    }
+
     init {
         orientation = VERTICAL
         background = surface(dpf(26f))
         setPadding(dp(16), dp(14), dp(16), dp(14))
+        header.addView(headIcon, LayoutParams(dp(13), dp(13)).apply { marginEnd = dp(6) })
         header.addView(titleView, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         addView(header)
         pressable()
+    }
+
+    /** Big numbers shrink to fit their line instead of being cut off ("12h 2…"). */
+    protected fun fit(tv: TextView) {
+        tv.maxLines = 1
+        tv.setAutoSizeTextTypeUniformWithConfiguration(14, bigSize().toInt(), 1, android.util.TypedValue.COMPLEX_UNIT_SP)
     }
 
     abstract fun refresh()
@@ -302,17 +371,22 @@ class WeatherWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Weather") 
     }
 }
 
+/**
+ * Battery: the level big, a battery-shaped bar filling to it, and how it's
+ * doing. Charging: green, with a bolt, a green glow breathing up from the
+ * bottom and time until full. Low (20% or less): red, with a red glow.
+ */
 @SuppressLint("ViewConstructor")
 class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") {
     override val id = "battery"
     private val pct = big()
-    private val dots = DotsView(c)
+    private val cell = Capsule(c)
     private val state = small()
 
     init {
         spacer()
         addView(pct)
-        addView(dots, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)).apply { topMargin = dp(10) })
+        addView(cell, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16)).apply { topMargin = dp(10) })
         addView(state.apply { setPadding(0, dp(8), 0, 0) })
         setOnClickListener {
             try {
@@ -327,22 +401,107 @@ class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") 
         val bm = context.getSystemService(BatteryManager::class.java) ?: return
         val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val charging = bm.isCharging
-        pct.textSize = bigSize()
+        val low = level <= 20 && !charging
+        val color = when {
+            charging -> Palette.GREEN
+            low -> Palette.RED
+            else -> Palette.INK
+        }
         pct.text = "$level%"
-        pct.setTextColor(if (charging) Palette.GREEN else if (level <= 20) Palette.RED else Palette.INK)
-        wash(if (charging) Palette.GREEN else 0, 60)
-        titleView.text = if (charging) "Charging" else "Battery"
-        dots.count = if (size == HomeWidgets.SMALL) 10 else 20
-        dots.fraction = level / 100f
-        dots.accent = if (level <= 20 && !charging) Palette.RED else if (charging) Palette.GREEN else null
-        dots.pulse = charging
+        pct.setTextColor(if (charging || low) color else Palette.INK)
+        fit(pct)
+        cell.fraction = level / 100f
+        cell.color = color
+        cell.charging = charging
+        titleView.text = if (charging) "Charging" else if (low) "Battery low" else "Battery"
+        headerIcon(if (charging) R.drawable.ic_bolt else R.drawable.ic_battery, if (charging || low) color else Palette.SILVER)
+        glow(if (charging) Palette.GREEN else if (low) Palette.RED else 0)
         val left = if (charging) bm.computeChargeTimeRemaining() else -1L
         state.text = when {
             level >= 100 -> "Fully charged"
-            charging && left > 0 -> "Charging · full in " + ScreenTime.format(left)
+            charging && left > 0 -> "Full in " + ScreenTime.format(left)
             charging -> "Charging"
-            level <= 20 -> "Low, plug in soon"
+            low -> "Plug in soon"
             else -> "On battery"
+        }
+    }
+}
+
+/**
+ * A battery-shaped bar: a rounded outline with a little cap, filled to
+ * [fraction] in [color]. While [charging], a soft light runs along the fill.
+ */
+class Capsule(context: Context) : View(context) {
+    var fraction = 0f
+        set(v) {
+            field = v.coerceIn(0f, 1f)
+            invalidate()
+        }
+    var color = Palette.INK
+        set(v) {
+            field = v
+            invalidate()
+        }
+    var charging = false
+        set(v) {
+            field = v
+            if (v && isAttachedToWindow) run.start() else run.cancel()
+            invalidate()
+        }
+    /** Plain progress bar without the battery cap (steps, storage). */
+    var cap = true
+    private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val r = android.graphics.RectF()
+    private var t = 0f
+    private val run = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1500L
+        repeatCount = android.animation.ValueAnimator.INFINITE
+        addUpdateListener {
+            t = it.animatedValue as Float
+            invalidate()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (charging) run.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        run.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val h = height.toFloat()
+        val capW = if (cap) h * 0.22f else 0f
+        val w = width - capW - (if (cap) h * 0.1f else 0f)
+        val rad = h * 0.36f
+        // Outline and cap.
+        p.style = android.graphics.Paint.Style.FILL
+        p.shader = null
+        p.color = android.graphics.Color.argb(38, 255, 255, 255)
+        r.set(0f, 0f, w, h)
+        c.drawRoundRect(r, rad, rad, p)
+        if (cap) {
+            p.color = android.graphics.Color.argb(70, 255, 255, 255)
+            r.set(w + h * 0.1f, h * 0.3f, w + h * 0.1f + capW, h * 0.7f)
+            c.drawRoundRect(r, capW / 2f, capW / 2f, p)
+        }
+        // Fill.
+        val inset = h * 0.16f
+        val fw = (w - inset * 2) * fraction
+        if (fw > 0f) {
+            p.color = color
+            r.set(inset, inset, inset + fw.coerceAtLeast(h * 0.3f), h - inset)
+            c.drawRoundRect(r, rad - inset, rad - inset, p)
+            if (charging) {
+                val x = inset + fw * (t * 1.4f - 0.2f)
+                p.shader = android.graphics.LinearGradient(x - fw * 0.2f, 0f, x + fw * 0.2f, 0f,
+                    intArrayOf(android.graphics.Color.TRANSPARENT, android.graphics.Color.argb(150, 255, 255, 255), android.graphics.Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
+                c.drawRoundRect(r, rad - inset, rad - inset, p)
+                p.shader = null
+            }
         }
     }
 }
@@ -351,7 +510,10 @@ class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") 
 class StepsWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Steps") {
     override val id = "steps"
     private val stepsText = big()
-    private val dots = DotsView(c).apply { accent = if (Palette.ACCENT == Palette.INK) Palette.RED else Palette.ACCENT }
+    private val dots = Capsule(c).apply {
+        cap = false
+        color = if (Palette.ACCENT == Palette.INK) 0xFFFF6B3D.toInt() else Palette.ACCENT
+    }
     private val sub = small()
 
     init {
@@ -367,8 +529,10 @@ class StepsWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Steps") {
 
     override fun refresh() {
         val goal = Prefs.get(context).getInt(Prefs.STEP_GOAL, 6000)
-        stepsText.textSize = bigSize()
-        dots.count = if (size == HomeWidgets.SMALL) 12 else 24
+        fit(stepsText)
+        // The goal reached: a green glow for the rest of the day.
+        val reached = Steps.allowed(context) && Steps.today >= goal
+        glow(if (reached) Palette.GREEN else 0, pulse = false)
         when {
             !Steps.available(context) -> {
                 stepsText.text = "…"
@@ -504,7 +668,8 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
         val sig = "$size|${ScreenTime.allowed(context)}|" + (r?.let { x -> "${x.totalMs / 60_000}|" + x.top.joinToString { "${it.first}${it.second / 60_000}" } } ?: "none")
         if (!changed(sig)) return
         apps.removeAllViews()
-        total.textSize = bigSize()
+        fit(total)
+        headerIcon(R.drawable.ic_clock)
         if (r == null) {
             total.text = "…"
             sub.text = if (ScreenTime.allowed(context)) "Adding it up…" else "Tap to allow usage access"
@@ -729,7 +894,7 @@ class TimerWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Timer") {
     }
 
     override fun refresh() {
-        time.textSize = bigSize()
+        fit(time)
         val p = Prefs.get(context)
         val end = p.getLong(END, 0L)
         val left = end - System.currentTimeMillis()
@@ -928,7 +1093,7 @@ class CountdownWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Countdow
     override fun refresh() {
         val p = Prefs.get(context)
         val at = p.getLong("cd_date", 0L)
-        days.textSize = bigSize()
+        fit(days)
         if (at == 0L) {
             titleView.text = "Countdown"
             days.text = "…"
@@ -958,7 +1123,7 @@ class CountdownWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Countdow
 class StorageWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Storage") {
     override val id = "storage"
     private val pct = big()
-    private val dots = DotsView(c)
+    private val dots = Capsule(c).apply { cap = false }
     private val sub = small()
 
     init {
@@ -980,11 +1145,12 @@ class StorageWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Storage") 
         val total = st.totalBytes.toDouble()
         val free = st.availableBytes.toDouble()
         val used = ((total - free) / total).coerceIn(0.0, 1.0)
-        pct.textSize = bigSize()
         pct.text = "${(used * 100).toInt()}%"
-        dots.count = if (size == HomeWidgets.SMALL) 10 else 20
+        fit(pct)
         dots.fraction = used.toFloat()
-        dots.accent = if (used > 0.9) Palette.RED else null
+        dots.color = if (used > 0.9) Palette.RED else Palette.INK
+        // Nearly full: a red glow.
+        glow(if (used > 0.9) Palette.RED else 0, pulse = false)
         sub.text = String.format(java.util.Locale.getDefault(), "%.0f GB free of %.0f GB", free / 1e9, total / 1e9)
     }
 }
