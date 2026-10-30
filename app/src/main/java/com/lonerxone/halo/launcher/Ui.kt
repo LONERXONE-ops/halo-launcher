@@ -210,6 +210,12 @@ object Prefs {
     const val MUSIC_OFF = "music_off"
     /** 0 glass, 1 solid, 2 clear (no background), 3 tinted with your wallpaper's colour. */
     const val DOCK_STYLE = "dock_style"
+    /** App list: 0 = scroll up and down (A to Z strip), 1 = swipe sideways through pages. */
+    const val DRAWER_LAYOUT = "drawer_layout"
+    /** App list columns: 0 = 4, 1 = 5. */
+    const val DRAWER_COLS = "drawer_cols"
+    /** Names under apps in the app list. */
+    const val DRAWER_NAMES = "drawer_names"
     /** Colour for Tinted icons (0 = from the wallpaper). */
     const val ICON_TINT = "icon_tint"
 

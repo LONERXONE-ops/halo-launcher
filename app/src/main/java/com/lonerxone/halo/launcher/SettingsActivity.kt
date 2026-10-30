@@ -38,7 +38,7 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
         MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), MOTION("Animations"), ICONS("Icons"), DOCK("Dock"),
-        WIDGETS("Widgets"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
+        WIDGETS("Widgets"), DRAWER("App list"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
     }
 
     private var page = Page.MENU
@@ -126,6 +126,7 @@ class SettingsActivity : Activity() {
             Page.ICONS -> iconsPage(col)
             Page.DOCK -> dockPage(col)
             Page.WIDGETS -> widgetsPage(col)
+            Page.DRAWER -> drawerPage(col)
             Page.GESTURES -> gesturesPage(col)
             Page.WEATHER -> weatherPage(col)
             Page.HALO -> haloPage(col)
@@ -224,6 +225,7 @@ class SettingsActivity : Activity() {
         Page.ICONS -> "How your apps look"
         Page.DOCK -> "The bar at the bottom"
         Page.WIDGETS -> "Live info on your home pages"
+        Page.DRAWER -> "How you browse all your apps"
         Page.GESTURES -> "What your fingers do"
         Page.WEATHER -> "Where the weather comes from"
         Page.HALO -> "Your dynamic island"
@@ -264,6 +266,7 @@ class SettingsActivity : Activity() {
         Page.ICONS -> R.drawable.ic_apps to "Icons"
         Page.DOCK -> R.drawable.ic_dock to "Dock"
         Page.WIDGETS -> R.drawable.ic_widgets to "Widgets"
+        Page.DRAWER -> R.drawable.ic_apps to "App list"
         Page.GESTURES -> R.drawable.ic_gesture to "Gestures"
         Page.WEATHER -> R.drawable.w_sun to "Weather"
         Page.HALO -> R.drawable.ic_halo to "Halo"
@@ -294,6 +297,7 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_image, "Background", if (Prefs.get(this).getLong(Prefs.HERO_PIC, 0L) != 0L) "Your picture" else "Your wallpaper") { go(Page.LOOK) },
             nav(R.drawable.ic_clock, "Clock & date", ClockFaces.current(this).name) { go(Page.CLOCK) },
             nav(R.drawable.ic_apps, "Icons", (Icons.NAMES[Icons.style(this)] ?: "Normal") + IconPacks.current(this).let { p -> if (p.isEmpty()) "" else " · " + (IconPacks.installed(this).firstOrNull { it.pkg == p }?.label ?: "icon pack") }) { go(Page.ICONS) },
+            nav(R.drawable.ic_apps, "App list", (if (Prefs.get(this).getInt(Prefs.DRAWER_LAYOUT, 0) == 1) "Horizontal" else "Vertical") + " · " + (if (Prefs.get(this).getInt(Prefs.DRAWER_COLS, 0) == 1) "5" else "4") + " across") { go(Page.DRAWER) },
             nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(Prefs.get(this).getInt(Prefs.DOCK_STYLE, 0)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
         ))
@@ -1124,6 +1128,146 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
     }
 
+    /**
+     * App list settings. The two layouts as cards side by side, each with a
+     * little moving preview of your own apps: Vertical scrolls up and down,
+     * Horizontal swipes between pages with its dots following. Then columns
+     * and names.
+     */
+    private fun drawerPage(col: LinearLayout) {
+        val p = Prefs.get(this)
+        val cur = p.getInt(Prefs.DRAWER_LAYOUT, 0)
+        section(col, "Layout")
+        val apps = (AppRepo.apps.filter { it.key !in Prefs.list(this, Prefs.HIDDEN) }.ifEmpty { sampleApps() }).take(32)
+        val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (mode in 0..1) {
+            val on = mode == cur
+            val card = FrameLayout(this).apply {
+                background = round(if (on) Palette.TILE2 else Palette.TILE, dpf(24f)).apply { setStroke(dp(2), if (on) Palette.INK else Color.argb(16, 255, 255, 255)) }
+                pressable()
+                setOnClickListener {
+                    it.bounce()
+                    p.edit().putInt(Prefs.DRAWER_LAYOUT, mode).apply()
+                    render()
+                }
+            }
+            val inner = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(8), dp(8), dp(14))
+            }
+            inner.addView(drawerPreview(mode == 1, apps), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230)))
+            inner.addView(text(15f, Palette.INK, bold = true).apply {
+                text = if (mode == 0) "Vertical" else "Horizontal"
+                setPadding(dp(6), dp(12), 0, 0)
+            })
+            inner.addView(text(12f, Palette.GREY, lines = 2).apply {
+                text = if (mode == 0) "Scroll up and down, jump with A to Z" else "Swipe sideways through pages"
+                setPadding(dp(6), dp(2), dp(4), 0)
+            })
+            card.addView(inner)
+            if (on) card.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_check)
+                imageTintList = ColorStateList.valueOf(Color.BLACK)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Palette.INK)
+                }
+            }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(16)
+                rightMargin = dp(16)
+            })
+            line.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (mode > 0) marginStart = dp(10) })
+        }
+        col.addView(line)
+        chips(col, "Apps across", Prefs.DRAWER_COLS, listOf("4", "5"), def = 0)
+        col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        note(col, "Searching always shows the results as a list.")
+    }
+
+    /**
+     * A small phone screen of your apps that moves like the real thing.
+     * Runs only while it's on screen.
+     */
+    private fun drawerPreview(sideways: Boolean, apps: List<App>): View {
+        val st = stage(dpf(18f))
+        val dim = View(this).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)) }
+        st.addView(dim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        fun grid(list: List<App>, rows: Int): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(10), dp(4), 0)
+            for (r in 0 until rows) {
+                val row = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.HORIZONTAL }
+                for (c in 0 until 4) {
+                    val a = list.getOrNull(r * 4 + c) ?: list.getOrNull((r * 4 + c) % list.size.coerceAtLeast(1))
+                    if (a != null) row.addView(AppIconView(this@SettingsActivity, a, 22, false, liveGlass = false), LinearLayout.LayoutParams(0, dp(38), 1f))
+                }
+                addView(row)
+            }
+        }
+        val anim: android.animation.ObjectAnimator
+        if (!sideways) {
+            val g = grid(apps, 10)
+            st.addView(g, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            // A tiny A to Z strip down the side.
+            st.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                for (ch in "ABCDEFGHIJ") addView(text(6f, Palette.SILVER).apply { text = ch.toString() })
+            }, FrameLayout.LayoutParams(dp(10), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply { rightMargin = dp(2) })
+            val travel = -dpf(38f * 10 + 10 - 230 + 20)
+            anim = android.animation.ObjectAnimator.ofPropertyValuesHolder(g, android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_Y,
+                android.animation.Keyframe.ofFloat(0f, 0f),
+                android.animation.Keyframe.ofFloat(0.2f, 0f),
+                android.animation.Keyframe.ofFloat(0.5f, travel).apply { interpolator = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f) },
+                android.animation.Keyframe.ofFloat(0.7f, travel),
+                android.animation.Keyframe.ofFloat(1f, 0f).apply { interpolator = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f) },
+            ))
+        } else {
+            val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val a = grid(apps.take(20), 5)
+            val b = grid(apps.drop(20).ifEmpty { apps.reversed() }, 5)
+            strip.addView(a)
+            strip.addView(b)
+            st.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            val dots = PageDots(this).apply {
+                count = 2
+                accent = Glass.wallColor(this@SettingsActivity)?.let { Glass.accent(this@SettingsActivity) } ?: Palette.INK
+            }
+            st.addView(dots, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14), Gravity.BOTTOM).apply { bottomMargin = dp(10) })
+            anim = android.animation.ObjectAnimator.ofFloat(strip, View.TRANSLATION_X, 0f)
+            // Pages are as wide as the preview, once it knows its width.
+            st.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                val w = v.width
+                if (w > 0 && a.layoutParams.width != w) v.post {
+                    b.layoutParams = LinearLayout.LayoutParams(w, ViewGroup.LayoutParams.MATCH_PARENT)
+                    a.layoutParams = LinearLayout.LayoutParams(w, ViewGroup.LayoutParams.MATCH_PARENT)
+                    val running = anim.isStarted
+                    anim.cancel()
+                    anim.setValues(android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_X,
+                        android.animation.Keyframe.ofFloat(0f, 0f),
+                        android.animation.Keyframe.ofFloat(0.3f, 0f),
+                        android.animation.Keyframe.ofFloat(0.45f, -w.toFloat()).apply { interpolator = android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f) },
+                        android.animation.Keyframe.ofFloat(0.8f, -w.toFloat()),
+                        android.animation.Keyframe.ofFloat(0.95f, 0f).apply { interpolator = android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f) },
+                        android.animation.Keyframe.ofFloat(1f, 0f),
+                    ))
+                    if (running) anim.start()
+                }
+            }
+            anim.addUpdateListener { dots.position = (-strip.translationX / st.width.coerceAtLeast(1)).coerceIn(0f, 1f) }
+        }
+        anim.duration = if (sideways) 4200L else 4800L
+        anim.repeatCount = android.animation.ValueAnimator.INFINITE
+        st.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                if (Prefs.animations(this@SettingsActivity)) anim.start()
+            }
+            override fun onViewDetachedFromWindow(v: View) = anim.cancel()
+        })
+        return st
+    }
+
     private fun widgetsPage(col: LinearLayout) {
         note(col, "Long-press the home screen to drag a widget anywhere. Drop one on another of the same size to stack them.")
         val actions = object : WidgetActions {
@@ -1389,6 +1533,7 @@ class SettingsActivity : Activity() {
         "Icons" to 0xFF34C759.toInt(),
         "Dock" to 0xFF5856D6.toInt(),
         "Widgets" to 0xFFFFB020.toInt(),
+        "App list" to 0xFF30C8E0.toInt(),
         "Gestures" to 0xFF8E8E93.toInt(),
         "Weather" to 0xFF32ADE6.toInt(),
         "Backup & restore" to 0xFF30B0C7.toInt(),

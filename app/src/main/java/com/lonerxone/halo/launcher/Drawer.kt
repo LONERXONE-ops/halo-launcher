@@ -58,6 +58,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private val extras: LinearLayout
 
     private val bubble: TextView
+    private val pages: HomePager
+    private val dots: PageDots
+    private var pagesKey = ""
     private val adapter = AppsAdapter()
     private var shown: List<App> = emptyList()
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -70,29 +73,28 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     var isOpen = false
         private set
 
-    /** A soft wash of your wallpaper's colour across the top, behind the apps. */
-    private val wash = View(context)
-    private val heading = context.text(30f, Palette.INK, bold = true).apply { text = "Apps" }
-    private val count = context.text(13f, Palette.GREY)
+    /** The app list's layout, columns and names (Settings → App list). */
+    private val horizontal get() = Prefs.get(context).getInt(Prefs.DRAWER_LAYOUT, 0) == 1
+    private val cols get() = if (Prefs.get(context).getInt(Prefs.DRAWER_COLS, 0) == 1) 5 else 4
+    private val names get() = Prefs.get(context).getBoolean(Prefs.DRAWER_NAMES, true)
+    private val iconDp get() = if (cols == 5) 48 else 54
 
     /**
-     * Liquid Glass over your picture, or black; either way with a wash of
-     * your wallpaper's colour across the top, and the letter you're on, the
-     * jump bubble and the handle in that colour too.
+     * Liquid Glass over your picture; with Solid, near-black with an even
+     * hint of your wallpaper's colour (no glow). The letter you're on, the
+     * jump bubble and the page dots take your wallpaper's colour.
      */
     fun restyle() {
-        background = if (Glass.enabled(context)) GlassDrawable(this, dpf(2f), darkness = 0.66f, bendPx = 0f, rimLight = false) else android.graphics.drawable.ColorDrawable(Color.BLACK)
         val wc = Glass.wallColor(context)
-        wash.background = if (wc == null) null else android.graphics.drawable.GradientDrawable(
-            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.argb(150, (Color.red(wc) * 0.55f).toInt(), (Color.green(wc) * 0.55f).toInt(), (Color.blue(wc) * 0.55f).toInt()),
-                Color.argb(40, (Color.red(wc) * 0.4f).toInt(), (Color.green(wc) * 0.4f).toInt(), (Color.blue(wc) * 0.4f).toInt()),
-                Color.TRANSPARENT,
-            ),
-        )
+        background = if (Glass.enabled(context)) {
+            GlassDrawable(this, dpf(2f), darkness = 0.66f, bendPx = 0f, rimLight = false)
+        } else {
+            val c = wc ?: Color.BLACK
+            android.graphics.drawable.ColorDrawable(Color.rgb((Color.red(c) * 0.09f).toInt(), (Color.green(c) * 0.09f).toInt(), (Color.blue(c) * 0.09f).toInt()))
+        }
         val accent = if (wc == null) Palette.INK else Glass.accent(context)
         letters.accent = accent
+        dots.accent = accent
         bubble.background = context.round(accent, dpf(30f))
         bubble.setTextColor(if (Color.red(accent) * 0.3 + Color.green(accent) * 0.59 + Color.blue(accent) * 0.11 > 150) Color.BLACK else Color.WHITE)
         pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(27f), darkness = 0.3f, bendPx = dpf(10f)) else context.round(Color.rgb(32, 32, 35), dpf(27f)).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
@@ -154,17 +156,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         pill.addView(searchClose, LinearLayout.LayoutParams(dp(32), dp(32)))
 
-        // No "Most used" row any more: a clean heading, how many apps, then all of them A to Z.
         usedTitle = context.text(10.5f, Palette.GREY, caps = true)
         usedRow = LinearLayout(context)
-        val head = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.BOTTOM
-            setPadding(dp(6), dp(6), dp(18), dp(4))
-        }
-        head.addView(heading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        head.addView(count.apply { setPadding(0, 0, 0, dp(6)) })
-        content.addView(head)
 
         grid = GridView(context).apply {
             numColumns = 4
@@ -175,6 +168,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             overScrollMode = View.OVER_SCROLL_NEVER
             setPadding(0, dp(14), dp(18), dp(120))
             clipToPadding = false
+            // Apps fade out as they scroll up under the top, instead of being cut off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(42))
             // A fling slows down sooner and stops where you expect.
             setFriction(ViewConfiguration.getScrollFriction() * 1.6f)
             adapter = this@Drawer.adapter
@@ -185,7 +181,12 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         content.addView(extras, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         content.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        addView(wash, LayoutParams(LayoutParams.MATCH_PARENT, dp(320)))
+        // Sideways pages (Settings → App list → Horizontal), with dots under them.
+        pages = HomePager(context).apply { visibility = View.GONE }
+        pages.onScrolled = { f -> dots.position = f }
+        content.addView(pages, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        dots = PageDots(context).apply { visibility = View.GONE }
+        content.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(20)).apply { bottomMargin = dp(96) })
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         // A–Z strip down the right edge: slide along it to jump.
@@ -310,10 +311,43 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     fun refresh() {
+        grid.numColumns = cols
         filter()
-        val hidden = Prefs.list(context, Prefs.HIDDEN).toSet()
-        val n = AppRepo.apps.count { it.key !in hidden }
-        count.text = if (n == 1) "1 app" else "$n apps"
+    }
+
+    /**
+     * Horizontal: the apps in pages of whole rows that fit the screen, A to
+     * Z. Built once and only rebuilt when the apps, columns, names or the
+     * space change (swiping never builds anything).
+     */
+    private fun buildPages() {
+        val h = pages.height
+        if (h <= 0) {
+            pages.post { if (pages.height > 0) buildPages() }
+            return
+        }
+        val cell = dp(iconDp + 7 + (if (names) 22 else 4) + 16)
+        val rows = (h / cell).coerceAtLeast(2)
+        val per = rows * cols
+        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$h"
+        if (key == pagesKey) return
+        pagesKey = key
+        pages.removeAllViews()
+        for (chunk in shown.chunked(per)) {
+            val page = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(10), 0, 0)
+            }
+            for (rowApps in chunk.chunked(cols)) {
+                val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                for (a in rowApps) row.addView(iconFor(a), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                for (k in rowApps.size until cols) row.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+                page.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cell))
+            }
+            pages.addView(page)
+        }
+        dots.count = pages.childCount
+        pages.snapTo(pages.current.coerceAtMost(pages.childCount - 1), animate = false)
     }
 
     private fun filter() {
@@ -322,9 +356,16 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
         shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
             .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
-        heading.text = if (q.isEmpty()) "Apps" else "Results"
-        count.text = if (q.isEmpty()) count.text else "${shown.size}"
-        letters.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
+        // Searching always shows results as a list; otherwise your chosen layout.
+        val paged = horizontal && q.isEmpty()
+        grid.visibility = if (paged) View.GONE else View.VISIBLE
+        pages.visibility = if (paged) View.VISIBLE else View.GONE
+        dots.visibility = if (paged && pages.childCount > 1) View.VISIBLE else View.GONE
+        if (paged) {
+            buildPages()
+            dots.visibility = if (pages.childCount > 1) View.VISIBLE else View.GONE
+        }
+        letters.visibility = if (q.isEmpty() && !horizontal) View.VISIBLE else View.GONE
         letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
         showExtras(search.text?.toString()?.trim().orEmpty())
@@ -408,7 +449,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
     }
 
-    private fun iconFor(a: App): AppIconView = AppIconView(context, a, 54, true, liveGlass = false).apply {
+    private fun iconFor(a: App): AppIconView = AppIconView(context, a, iconDp, names, liveGlass = false).apply {
         pressable()
         badge = HaloLink.badges[a.pkg] ?: 0
         // The view's current app (it's reused for other apps as the list scrolls).
@@ -726,6 +767,43 @@ object Calc {
             val st = i
             while (i < s.length && (s[i].isDigit() || s[i] == '.')) i++
             return s.substring(st, i).toDouble()
+        }
+    }
+}
+
+
+/** Page dots for the sideways app list: the current one is a longer pill in your colour. */
+class PageDots(context: Context) : View(context) {
+    var count = 0
+        set(v) {
+            field = v
+            invalidate()
+        }
+    var position = 0f
+        set(v) {
+            field = v
+            invalidate()
+        }
+    var accent = Palette.INK
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = android.graphics.RectF()
+
+    override fun onDraw(c: Canvas) {
+        if (count < 2) return
+        val d = dpf(6f)
+        val gap = dpf(7f)
+        val long = dpf(18f)
+        val total = (count - 1) * (d + gap) + long
+        var x = (width - total) / 2f
+        val cy = height / 2f
+        for (i in 0 until count) {
+            // How "current" this dot is (0..1), so the pill slides between dots as you swipe.
+            val k = (1f - abs(position - i)).coerceIn(0f, 1f)
+            val w = d + (long - d) * k
+            r.set(x, cy - d / 2f, x + w, cy + d / 2f)
+            p.color = if (k > 0.5f) accent else Color.argb(90, 255, 255, 255)
+            c.drawRoundRect(r, d / 2f, d / 2f, p)
+            x += w + gap
         }
     }
 }
