@@ -790,7 +790,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             val cell = if (editor.draggingId == a.key) {
                 Cell(this, editor, "dock", a.key, null).apply { background = null }
             } else {
-                Cell(this, editor, "dock", a.key, iconView(a, size, false), longPressEdits = false, minusFromCentre = dp(size) / 2).apply {
+                Cell(this, editor, "dock", a.key, iconView(a, size, false).apply { if (!dockBadges()) badge = 0 }, longPressEdits = false, minusFromCentre = dp(size) / 2).apply {
                     onRemove = {
                         val before = editor.positions("dock")
                         Prefs.setList(this@LauncherActivity, Prefs.DOCK, dockApps().map { it.key }.filter { it != a.key })
@@ -858,8 +858,11 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", DOCK_MAX))
     }
 
+    private fun dockBadges() = Prefs.get(this).getBoolean(Prefs.DOCK_BADGES, true)
+
     private fun updateBadges() {
-        for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
+        val on = dockBadges()
+        for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { it.badge = if (on) HaloLink.badges[it.app.pkg] ?: 0 else 0 }
         drawer.updateBadges()
     }
 
@@ -1358,6 +1361,15 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     private var sheet: FolderSheet? = null
 
+    /** A folder of the app list ("In folders"): its apps, to open. */
+    override fun openGroup(name: String, apps: List<App>, from: View) {
+        sheet?.let { overlayLayer.removeView(it) }
+        val s = FolderSheet(this, "", this, groupName = name, groupApps = apps)
+        sheet = s
+        overlayLayer.addView(s, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        s.show(from)
+    }
+
     private fun openFolder(id: String, from: View) {
         sheet?.let { overlayLayer.removeView(it) }
         val s = FolderSheet(this, id, this)
@@ -1501,9 +1513,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
                 onClick(it)
             }
         }
-        bar.addView(pill("+") { addMenu(it) })
-        bar.addView(pill("Wallpaper") { startActivity(Intent(this, WallpaperActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
-        bar.addView(pill("Settings") { openSettings() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        // Editing the home screen: Wallpaper and Widgets. Settings has its own app now.
+        bar.addView(pill("Wallpaper") { startActivity(Intent(this, WallpaperActivity::class.java)) })
+        bar.addView(pill("Widgets") { addMenu(it) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         bar.addView(pill("Done", primary = true) { editor.exit() })
         return bar
@@ -1604,7 +1616,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         }
 
         override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
-            if (drawer.isOpen || editor.editing) return false
+            // An open folder owns every touch (it used to let swipes reach the home screen behind).
+            if (drawer.isOpen || editor.editing || sheet != null) return false
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.x

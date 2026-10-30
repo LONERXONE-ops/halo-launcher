@@ -104,7 +104,8 @@ object AppRepo {
             }
             for (a in acts) {
                 try {
-                    if (a.componentName.packageName == ctx.packageName) continue
+                    // Our own entries stay out, except Launcher settings, which is meant to be there.
+                    if (a.componentName.packageName == ctx.packageName && !a.componentName.className.endsWith("SettingsShortcut")) continue
                     out += App(a.label.toString().trim(), a.componentName, user, a.applicationInfo.category, a)
                 } catch (_: Exception) {
                 }

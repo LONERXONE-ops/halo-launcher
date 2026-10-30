@@ -218,6 +218,10 @@ object Prefs {
     const val DRAWER_NAMES = "drawer_names"
     /** App list icon size: 0 Normal, 1 Large, 2 Extra large. */
     const val DRAWER_SIZE = "drawer_size"
+    /** App list arrangement: 0 = A to Z, 1 = grouped into folders by kind (Social, Games…). */
+    const val DRAWER_GROUPS = "drawer_groups"
+    /** Notification counts on the dock's apps. */
+    const val DOCK_BADGES = "dock_badges"
     /** Colour for Tinted icons (0 = from the wallpaper). */
     const val ICON_TINT = "icon_tint"
 

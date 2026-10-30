@@ -501,7 +501,6 @@ class SettingsActivity : Activity() {
                 Prefs.get(this).edit()
                     .putInt(Prefs.THEME, i)
                     .remove(Prefs.ICON_STYLE)
-                    .putInt(Prefs.DOCK_STYLE, DockBar.GLASS)
                     .putInt(Prefs.CLOCK_GLASS, 0)
                     .apply()
                 Icons.forgetAll()
@@ -605,6 +604,7 @@ class SettingsActivity : Activity() {
             p.getInt(Prefs.THEME, 0), p.getInt(Prefs.ADAPTIVE, 0), p.getString(Prefs.CLOCK_FACE, ""), p.getInt(Prefs.CLOCK_COLOR, 0),
             p.getInt(Prefs.CLOCK_GLASS, 0), p.getInt(Prefs.CLOCK_TWOTONE, 0), p.getInt(Prefs.CLOCK_HOURS, 0), p.getBoolean(Prefs.CLOCK_ZERO, true),
             p.getBoolean(Prefs.CLOCK_SHADOW, false), p.getInt(Prefs.DATE_STYLE, 0), Prefs.list(this, Prefs.DOCK).joinToString(), Icons.style(this),
+            p.getInt(Prefs.DOCK_STYLE, DockBar.GLASS),
             IconPacks.current(this), System.identityHashCode(Glass.backdrop), Palette.TILE, Palette.GLASS_TINT,
         ).joinToString("|")
     }
@@ -1260,6 +1260,7 @@ class SettingsActivity : Activity() {
         })
         col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(14) })
         chips(col, "Style", Prefs.DOCK_STYLE, DockBar.NAMES, def = DockBar.GLASS)
+        col.addView(group(switchRow("Notification counts", "The red number on dock apps with notifications", Prefs.DOCK_BADGES, true)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
         col.addView(View(this), LinearLayout.LayoutParams(1, dp(16)))
         col.addView(button("Choose dock apps") {
             if (keys.isEmpty()) Prefs.setList(this, Prefs.DOCK, apps.map { it.key })
@@ -1300,7 +1301,7 @@ class SettingsActivity : Activity() {
                 setPadding(dp(6), dp(12), 0, 0)
             })
             inner.addView(text(12f, Palette.GREY, lines = 2).apply {
-                text = if (mode == 0) "Scroll up and down, jump with A to Z" else "Swipe sideways through pages"
+                text = if (mode == 0) "Scroll, jump with A to Z" else "Swipe through pages"
                 setPadding(dp(6), dp(2), dp(4), 0)
             })
             card.addView(inner)
@@ -1316,13 +1317,48 @@ class SettingsActivity : Activity() {
                 topMargin = dp(16)
                 rightMargin = dp(16)
             })
-            line.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (mode > 0) marginStart = dp(10) })
+            // Both cards the same height, whatever their text.
+            line.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { if (mode > 0) marginStart = dp(10) })
         }
         col.addView(line)
+        chips(col, "Arrange", Prefs.DRAWER_GROUPS, listOf("A to Z", "In folders"), def = 0)
         chips(col, "Apps across", Prefs.DRAWER_COLS, listOf("4", "5"), def = 0)
         chips(col, "Icon size", Prefs.DRAWER_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
         col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         note(col, "Searching always shows the results as a list.")
+        section(col, "Home screen folders")
+        col.addView(group(row("Group my home screen apps", "Apps of the same kind (Social, Games, Money…) go into folders", chevron()) { autoFolders() }))
+    }
+
+    /**
+     * Puts the apps on your home screen into folders by kind: two or more of
+     * the same kind (Social, Games, Money…) become one folder where the first
+     * of them was. Apps that are the only one of their kind stay as they are.
+     */
+    private fun autoFolders() {
+        val items = HomeLayout.all(this).filter { it.id.startsWith("app:") }
+        val byKind = items.mapNotNull { it -> AppRepo.byKey(it.id.removePrefix("app:"))?.let { a -> AppRepo.group(a) to it } }
+            .groupBy({ it.first }, { it.second })
+            .filter { it.value.size >= 2 && it.key != "Other" }
+        if (byKind.isEmpty()) {
+            Toast.makeText(this, "Nothing to group: no two apps of the same kind on your home screen", Toast.LENGTH_LONG).show()
+            return
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Group into ${byKind.size} folder" + if (byKind.size == 1) "?" else "s?")
+            .setMessage(byKind.entries.joinToString("\n") { "${it.key}: ${it.value.size} apps" })
+            .setPositiveButton("Group") { _, _ ->
+                for ((kind, list) in byKind) {
+                    val f = Groups.newFolderId() + kind.filter { it.isLetter() }.take(4)
+                    Groups.setFolderApps(this, f, list.map { it.id.removePrefix("app:") })
+                    Groups.setFolderName(this, f, kind)
+                    HomeLayout.swapId(this, list.first().id, f)
+                    for (it in list.drop(1)) HomeLayout.remove(this, it.id)
+                }
+                Toast.makeText(this, "Done. Tap a folder to open or rename it", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
@@ -1365,7 +1401,9 @@ class SettingsActivity : Activity() {
         if (!sideways) {
             val rows = 12
             val g = grid(apps, rows, 18)
-            st.addView(g, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            // Its full height: as WRAP_CONTENT it was squeezed to the preview's
+            // height, so the rows that scroll into view were never drawn.
+            st.addView(g, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22 + rows * rowH)))
             // The A to Z strip, with its own lane so apps never touch it.
             st.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL

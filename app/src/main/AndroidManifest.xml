@@ -119,6 +119,20 @@
             android:label="Halo Launcher settings"
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
+        <!-- "Launcher settings" as its own app in the app list (and on the home screen if you like). -->
+        <activity-alias
+            android:name=".SettingsShortcut"
+            android:exported="true"
+            android:icon="@mipmap/ic_settings_app"
+            android:roundIcon="@mipmap/ic_settings_app"
+            android:label="Launcher settings"
+            android:targetActivity=".SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <provider
             android:name=".IconProvider"
             android:authorities="com.lonerxone.halo.launcher.icons"

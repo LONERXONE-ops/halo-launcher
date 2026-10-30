@@ -39,7 +39,13 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         fun launch(app: App, from: View)
         fun appMenu(app: App, anchor: View)
         fun onDrawerProgress(progress: Float)
+        /** "In folders": open one of the app list's folders. */
+        fun openGroup(name: String, apps: List<App>, from: View)
     }
+
+    /** "In folders": the app list as folders by kind, or null for A to Z. */
+    private var groups: List<Pair<String, List<App>>>? = null
+    private val grouped get() = Prefs.get(context).getInt(Prefs.DRAWER_GROUPS, 0) == 1
 
     private val content: LinearLayout
     private val search: EditText
@@ -190,7 +196,18 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         content.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         // Sideways pages (Settings → App list → Horizontal), with dots under them.
         pages = HomePager(context).apply { visibility = View.GONE }
-        pages.onScrolled = { f -> dots.position = f }
+        pages.onScrolled = { f ->
+            dots.position = f
+            // Pages ease in and out as you swipe: a touch smaller and softer at the edges.
+            for (i in 0 until pages.childCount) {
+                val v = pages.getChildAt(i)
+                val o = kotlin.math.abs(i - f).coerceAtMost(1f)
+                val sc = 1f - 0.05f * o
+                v.scaleX = sc
+                v.scaleY = sc
+                v.alpha = 1f - 0.45f * o
+            }
+        }
         content.addView(pages, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         dots = ListDots(context).apply { visibility = View.GONE }
         content.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(20)).apply { bottomMargin = dp(96) })
@@ -344,18 +361,22 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val cell = dp(iconDp + 7 + (if (names) 22 else 4) + 16)
         val rows = (h / cell).coerceAtLeast(2)
         val per = rows * cols
-        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$iconDp|$h"
+        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$iconDp|$h|${groups != null}"
         if (key == pagesKey) return
         pagesKey = key
         pages.removeAllViews()
-        for (chunk in shown.chunked(per)) {
+        val g = groups
+        val count = g?.size ?: shown.size
+        for (start in 0 until count step per) {
             val page = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, dp(10), 0, 0)
             }
-            for (rowApps in chunk.chunked(cols)) {
+            val idx = (start until minOf(count, start + per)).toList()
+            for (rowIdx in idx.chunked(cols)) {
                 val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                for (a in rowApps) row.addView(iconFor(a), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                for (i in rowIdx) row.addView(if (g != null) groupTile(g[i].first, g[i].second) else iconFor(shown[i]), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val rowApps = rowIdx
                 for (k in rowApps.size until cols) row.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
                 page.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cell))
             }
@@ -371,6 +392,12 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
         shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
             .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
+        // In folders: one folder per kind (Social, Games, Money…), "Other" last.
+        groups = if (grouped && q.isEmpty()) {
+            shown.groupBy { AppRepo.group(it) }.toList().sortedWith(compareBy({ it.first == "Other" }, { it.first }))
+        } else {
+            null
+        }
         // Searching always shows results as a list; otherwise your chosen layout.
         val paged = horizontal && q.isEmpty()
         grid.visibility = if (paged) View.GONE else View.VISIBLE
@@ -380,7 +407,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             buildPages()
             dots.visibility = if (pages.childCount > 1) View.VISIBLE else View.GONE
         }
-        letters.visibility = if (q.isEmpty() && !horizontal) View.VISIBLE else View.GONE
+        letters.visibility = if (q.isEmpty() && !horizontal && groups == null) View.VISIBLE else View.GONE
         letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
         showExtras(search.text?.toString()?.trim().orEmpty())
@@ -480,11 +507,60 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         for (i in 0 until usedRow.childCount) (usedRow.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
     }
 
+    /**
+     * One folder of the app list: four of its apps in a small glass square
+     * the size of an app icon, its name under it. Tap to open it.
+     */
+    private fun groupTile(name: String, apps: List<App>): View {
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(7), 0, 0)
+            tag = "group|$cellKey"
+        }
+        val side = dp(iconDp)
+        val pane = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(side / 9, side / 9, side / 9, side / 9)
+            background = context.round(Color.argb(46, 255, 255, 255), side * 0.26f).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
+        }
+        val mini = ((iconDp - 8) / 2.3f).toInt().coerceAtLeast(12)
+        for (r in 0 until 2) {
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            for (c in 0 until 2) {
+                val a = apps.getOrNull(r * 2 + c)
+                row.addView(if (a != null) AppIconView(context, a, mini, false, liveGlass = false).apply { isClickable = false } else View(context), LinearLayout.LayoutParams(0, (side - side * 2 / 9) / 2, 1f))
+            }
+            pane.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+        box.addView(pane, LinearLayout.LayoutParams(side, side))
+        if (names) box.addView(context.text(11.5f, Palette.INK).apply {
+            text = name
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(2), dp(6), dp(2), 0)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        box.pressable()
+        box.setOnClickListener {
+            it.bounce()
+            host.openGroup(name, apps, pane)
+        }
+        return box
+    }
+
     private inner class AppsAdapter : BaseAdapter() {
-        override fun getCount() = shown.size
-        override fun getItem(position: Int) = shown[position]
+        override fun getCount() = groups?.size ?: shown.size
+        override fun getItem(position: Int): Any = groups?.get(position) ?: shown[position]
         override fun getItemId(position: Int) = position.toLong()
+        override fun getViewTypeCount() = 2
+        override fun getItemViewType(position: Int) = if (groups != null) 1 else 0
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            groups?.let { g -> return groupTile(g[position].first, g[position].second) }
             val a = shown[position]
             // Reuse the view that scrolled off (rebuilding a new one for every row made scrolling stutter).
             val old = (convertView as? AppIconView)?.takeIf { it.tag == cellKey }

@@ -194,6 +194,9 @@ class FolderSheet(
     context: Context,
     private val folderId: String,
     private val host: Host,
+    /** A folder of the app list (read only): its name and apps. */
+    private val groupName: String? = null,
+    private val groupApps: List<App>? = null,
 ) : FrameLayout(context) {
     interface Host {
         fun launch(app: App, from: View)
@@ -213,18 +216,18 @@ class FolderSheet(
     init {
         setBackgroundColor(Color.argb(140, 0, 0, 0))
         isClickable = true
-        setOnClickListener { close() }
         addView(card, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
             leftMargin = dp(20)
             rightMargin = dp(20)
         })
         card.isClickable = true
         card.background = card.surface(dpf(34f), 0.32f)
-        val apps = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
+        val apps = groupApps ?: Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
+        val readOnly = groupApps != null
 
         // The name: plain big text until you tap it, then you type right there.
         title = android.widget.EditText(context).apply {
-            setText(Groups.folderName(context, folderId))
+            setText(groupName ?: Groups.folderName(context, folderId))
             textSize = 26f
             typeface = Fonts.semibold(context)
             setTextColor(Palette.INK)
@@ -234,7 +237,7 @@ class FolderSheet(
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
             isFocusable = false
             isFocusableInTouchMode = false
-            setOnClickListener {
+            if (!readOnly) setOnClickListener {
                 isFocusableInTouchMode = true
                 isFocusable = true
                 requestFocus()
@@ -250,7 +253,7 @@ class FolderSheet(
         }
         card.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         card.addView(context.text(12.5f, Palette.GREY).apply {
-            text = (if (apps.size == 1) "1 app" else "${apps.size} apps") + "  ·  tap the name to rename"
+            text = (if (apps.size == 1) "1 app" else "${apps.size} apps") + if (readOnly) "" else "  ·  tap the name to rename"
             setPadding(0, dp(4), 0, dp(16))
         })
 
@@ -265,7 +268,7 @@ class FolderSheet(
                 badge = HaloLink.badges[a.pkg] ?: 0
                 pressable()
                 setOnClickListener { host.launch(a, it) }
-                setOnLongClickListener {
+                if (!readOnly) setOnLongClickListener {
                     performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     host.removeFromFolder(this@FolderSheet.folderId, a, it)
                     true
@@ -296,7 +299,7 @@ class FolderSheet(
         card.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // Add apps: one wide button at the bottom.
-        card.addView(context.text(14.5f, Color.BLACK, bold = true).apply {
+        if (!readOnly) card.addView(context.text(14.5f, Color.BLACK, bold = true).apply {
             text = "Add apps"
             gravity = Gravity.CENTER
             background = context.round(Palette.INK, dpf(23f))
@@ -304,6 +307,19 @@ class FolderSheet(
             setOnClickListener { host.addApps(this@FolderSheet.folderId) }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(8) })
     }
+
+    /** A touch anywhere outside the folder closes it straight away (and never reaches the home screen). */
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            val r = android.graphics.Rect()
+            card.getHitRect(r)
+            if (!r.contains(e.x.toInt(), e.y.toInt())) close()
+        }
+        return true
+    }
+
+    private var closing = false
 
     private fun saveName() {
         val t = title.text?.toString()?.trim().orEmpty()
@@ -340,6 +356,8 @@ class FolderSheet(
 
     /** Shrinks back into the folder it came from. */
     fun close() {
+        if (closing) return
+        closing = true
         if (title.hasFocus()) {
             saveName()
             context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(title.windowToken, 0)
@@ -349,7 +367,7 @@ class FolderSheet(
         animate().alpha(0f).setDuration(230).withEndAction {
             (parent as? ViewGroup)?.removeView(this)
             host.closed()
-            if (renamed) host.rename(folderId)
+            if (renamed && groupApps == null) host.rename(folderId)
         }.start()
     }
 }
