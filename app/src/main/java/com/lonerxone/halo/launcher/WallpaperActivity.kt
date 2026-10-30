@@ -198,6 +198,9 @@ class WallpaperActivity : Activity() {
             setPadding(dp(16), dp(12), dp(16), dp(8))
         }
         chipScroll = HorizontalScrollView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength((24 * resources.displayMetrics.density).toInt())
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(chipRow)
@@ -236,6 +239,9 @@ class WallpaperActivity : Activity() {
             setPadding(dp(28), dp(40), dp(28), dp(30))
         }
         grid = GridView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength((32 * resources.displayMetrics.density).toInt())
             numColumns = 3
             horizontalSpacing = dp(8)
             verticalSpacing = dp(8)

@@ -567,6 +567,9 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         // Up next: a few rows in a soft inset panel (scrolls for more).
         list = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
         val sc = android.widget.ScrollView(c).apply {
+            // Fades out at the edges instead of cutting things off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength((32 * resources.displayMetrics.density).toInt())
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             addView(list)

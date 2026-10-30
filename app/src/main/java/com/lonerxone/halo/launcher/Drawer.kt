@@ -77,7 +77,14 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private val horizontal get() = Prefs.get(context).getInt(Prefs.DRAWER_LAYOUT, 0) == 1
     private val cols get() = if (Prefs.get(context).getInt(Prefs.DRAWER_COLS, 0) == 1) 5 else 4
     private val names get() = Prefs.get(context).getBoolean(Prefs.DRAWER_NAMES, true)
-    private val iconDp get() = if (cols == 5) 48 else 54
+    /** Icon size follows Settings → App list → Icon size, sized down a little for 5 across. */
+    private val iconDp: Int get() {
+        val i = Prefs.get(context).getInt(Prefs.DRAWER_SIZE, 1).coerceIn(0, 2)
+        return if (cols == 5) listOf(42, 48, 52)[i] else listOf(48, 54, 62)[i]
+    }
+    /** Changes when the look of a cell changes; recycled views from another look are thrown away. */
+    private val cellKey get() = "$iconDp|$names"
+    private var builtCellKey = ""
 
     /**
      * Liquid Glass over your picture; with Solid, near-black with an even
@@ -312,6 +319,14 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     fun refresh() {
         grid.numColumns = cols
+        if (cellKey != builtCellKey) {
+            // Names or size changed: start the list fresh, or recycled cells keep the old look
+            // (that's why some apps still showed names after turning them off).
+            builtCellKey = cellKey
+            grid.verticalSpacing = dp(if (names) 18 else 12)
+            grid.adapter = adapter
+            pagesKey = ""
+        }
         filter()
     }
 
@@ -329,7 +344,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val cell = dp(iconDp + 7 + (if (names) 22 else 4) + 16)
         val rows = (h / cell).coerceAtLeast(2)
         val per = rows * cols
-        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$h"
+        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$iconDp|$h"
         if (key == pagesKey) return
         pagesKey = key
         pages.removeAllViews()
@@ -472,8 +487,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val a = shown[position]
             // Reuse the view that scrolled off (rebuilding a new one for every row made scrolling stutter).
-            val old = convertView as? AppIconView
-            val v = old?.also { it.rebind(a) } ?: iconFor(a)
+            val old = (convertView as? AppIconView)?.takeIf { it.tag == cellKey }
+            val v = old?.also { it.rebind(a) } ?: iconFor(a).also { it.tag = cellKey }
             v.badge = HaloLink.badges[a.pkg] ?: 0
             return v
         }

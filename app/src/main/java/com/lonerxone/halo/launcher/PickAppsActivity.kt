@@ -81,6 +81,9 @@ class PickAppsActivity : Activity() {
         }
         col.addView(card)
         val sv = ScrollView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength((32 * resources.displayMetrics.density).toInt())
             setBackgroundColor(Color.BLACK)
             addView(col)
             setOnApplyWindowInsetsListener { v: View, insets: WindowInsets ->

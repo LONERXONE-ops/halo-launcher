@@ -134,6 +134,9 @@ class SettingsActivity : Activity() {
             Page.ABOUT -> aboutPage(col)
         }
         val sv = ScrollView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength((32 * resources.displayMetrics.density).toInt())
             // Black, with a breath of your wallpaper's colour at the top (Adaptive colour).
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Palette.TILE2, Color.BLACK, Color.BLACK))
             isVerticalScrollBarEnabled = false
@@ -665,6 +668,9 @@ class SettingsActivity : Activity() {
         }
         if (wide) {
             col.addView(android.widget.HorizontalScrollView(this).apply {
+                // Fades out at the edges instead of cutting things off.
+                isHorizontalFadingEdgeEnabled = true
+                setFadingEdgeLength((24 * resources.displayMetrics.density).toInt())
                 isHorizontalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(track)
@@ -1033,6 +1039,9 @@ class SettingsActivity : Activity() {
             packTile(pk.label, current == pk.pkg, ic) { usePack(pk.pkg) }
         }
         col.addView(android.widget.HorizontalScrollView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isHorizontalFadingEdgeEnabled = true
+            setFadingEdgeLength((24 * resources.displayMetrics.density).toInt())
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
@@ -1181,6 +1190,7 @@ class SettingsActivity : Activity() {
         }
         col.addView(line)
         chips(col, "Apps across", Prefs.DRAWER_COLS, listOf("4", "5"), def = 0)
+        chips(col, "Icon size", Prefs.DRAWER_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
         col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         note(col, "Searching always shows the results as a list.")
     }

@@ -116,6 +116,9 @@ class WidgetPickActivity : Activity() {
             col.addView(text(14f, Palette.WHITE70).apply { text = "No widgets found on this phone." })
         }
         val scroll = ScrollView(this).apply {
+            // Fades out at the edges instead of cutting things off.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength((32 * resources.displayMetrics.density).toInt())
             setBackgroundColor(Color.BLACK)
             addView(col)
             setOnApplyWindowInsetsListener { v, insets ->

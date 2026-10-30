@@ -216,6 +216,8 @@ object Prefs {
     const val DRAWER_COLS = "drawer_cols"
     /** Names under apps in the app list. */
     const val DRAWER_NAMES = "drawer_names"
+    /** App list icon size: 0 Normal, 1 Large, 2 Extra large. */
+    const val DRAWER_SIZE = "drawer_size"
     /** Colour for Tinted icons (0 = from the wallpaper). */
     const val ICON_TINT = "icon_tint"
 
