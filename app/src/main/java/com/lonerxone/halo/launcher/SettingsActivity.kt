@@ -47,6 +47,9 @@ class SettingsActivity : Activity() {
     private var pickingKey: String? = null
     private var latest: Updater.Release? = null
     private var updateStatus = "Not checked yet"
+    /** The update card's status line and button, updated in place while downloading. */
+    private var statusView: TextView? = null
+    private var progressView: TextView? = null
     private var downloading = -1f
     /** Where you were on each page, so going back never jumps to the top. */
     private val scrollMemory = HashMap<Page, Int>()
@@ -149,7 +152,14 @@ class SettingsActivity : Activity() {
         }
         setContentView(sv)
         scroll = sv
-        if (keepY > 0) sv.post { sv.scrollTo(0, keepY) }
+        // Back to where you were before the first frame is drawn (a post showed one frame at the top).
+        if (keepY > 0) sv.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                sv.viewTreeObserver.removeOnPreDrawListener(this)
+                sv.scrollTo(0, keepY)
+                return true
+            }
+        })
         if (!same && Prefs.animations(this)) {
             // Pages slide in; their cards follow one after another.
             val dir = if (page == Page.MENU) -1f else 1f
@@ -338,7 +348,7 @@ class SettingsActivity : Activity() {
         c.addView(text(16f, Palette.INK, bold = true, lines = 2).apply {
             text = updateStatus
             setPadding(0, dp(4), 0, dp(12))
-        })
+        }.also { statusView = it })
         c.addView(button(
             when {
                 downloading >= 0f -> "Downloading ${(downloading * 100).toInt()}%"
@@ -351,7 +361,7 @@ class SettingsActivity : Activity() {
                 newer && rel != null -> install(rel)
                 else -> check()
             }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
+        }.also { progressView = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
         if (rel != null && newer && rel.notes.isNotBlank()) {
             c.addView(text(13f, Palette.SILVER, lines = 8).apply {
                 text = rel.notes.take(500)
@@ -1095,9 +1105,15 @@ class SettingsActivity : Activity() {
         }
         packStatus = "Getting ${src.name}…"
         render()
+        var lastStep = -1
         Updater.installUrl(this, "", -1L, src.pkg, progress = { f ->
             packStatus = if (f >= 1f) "Confirm the install of ${src.name}, then tap Use" else "Downloading ${src.name} ${(f * 100).toInt()}%"
-            if (page == Page.ICONS) render()
+            // Redraw the page every 10%, not every percent (that made it flicker).
+            val step = if (f >= 1f) 100 else (f * 10).toInt()
+            if (step != lastStep && page == Page.ICONS) {
+                lastStep = step
+                render()
+            }
         }, failed = { msg ->
             packStatus = "Couldn't get ${src.name}: ${msg.take(60)}"
             if (page == Page.ICONS) render()
@@ -1191,52 +1207,78 @@ class SettingsActivity : Activity() {
         col.addView(line)
         chips(col, "Apps across", Prefs.DRAWER_COLS, listOf("4", "5"), def = 0)
         chips(col, "Icon size", Prefs.DRAWER_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
-        col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         note(col, "Searching always shows the results as a list.")
     }
 
     /**
-     * A small phone screen of your apps that moves like the real thing.
-     * Runs only while it's on screen.
+     * A small phone screen of your apps that moves like the real thing, drawn
+     * with your settings: the columns, icon size and names you picked. It has
+     * the handle at the top and the search button at the bottom, like the
+     * real list. Vertical scrolls (with room for the A to Z strip); Horizontal
+     * swipes between pages with its dots. Runs only while it's on screen.
      */
     private fun drawerPreview(sideways: Boolean, apps: List<App>): View {
+        val p = Prefs.get(this)
+        val cols = if (p.getInt(Prefs.DRAWER_COLS, 0) == 1) 5 else 4
+        val names = p.getBoolean(Prefs.DRAWER_NAMES, true)
+        val icon = listOf(17, 20, 23)[p.getInt(Prefs.DRAWER_SIZE, 1).coerceIn(0, 2)] - if (cols == 5) 3 else 0
+        val rowH = icon + 10 + if (names) 8 else 0
         val st = stage(dpf(18f))
-        val dim = View(this).apply { setBackgroundColor(Color.argb(150, 0, 0, 0)) }
-        st.addView(dim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        fun grid(list: List<App>, rows: Int): LinearLayout = LinearLayout(this).apply {
+        // The list's own background over your picture.
+        st.addView(View(this).apply { setBackgroundColor(Color.argb(if (Glass.enabled(this@SettingsActivity)) 150 else 225, 6, 6, 8)) },
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // One page of rows; a small grey bar under each icon stands in for its name.
+        fun grid(list: List<App>, rows: Int, endPad: Int): LinearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(10), dp(4), 0)
+            setPadding(dp(6), dp(22), dp(endPad), 0)
             for (r in 0 until rows) {
                 val row = LinearLayout(this@SettingsActivity).apply { orientation = LinearLayout.HORIZONTAL }
-                for (c in 0 until 4) {
-                    val a = list.getOrNull(r * 4 + c) ?: list.getOrNull((r * 4 + c) % list.size.coerceAtLeast(1))
-                    if (a != null) row.addView(AppIconView(this@SettingsActivity, a, 22, false, liveGlass = false), LinearLayout.LayoutParams(0, dp(38), 1f))
+                for (c in 0 until cols) {
+                    val a = list.getOrNull((r * cols + c) % list.size.coerceAtLeast(1)) ?: continue
+                    val cell = LinearLayout(this@SettingsActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER_HORIZONTAL
+                    }
+                    cell.addView(AppIconView(this@SettingsActivity, a, icon, false, liveGlass = false), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(icon + 6)))
+                    if (names) cell.addView(View(this@SettingsActivity).apply { background = round(Color.argb(80, 255, 255, 255), dpf(2f)) }, LinearLayout.LayoutParams(dp(icon - 2), dp(3)).apply { topMargin = dp(1) })
+                    row.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 }
-                addView(row)
+                addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(rowH)))
             }
         }
         val anim: android.animation.ObjectAnimator
         if (!sideways) {
-            val g = grid(apps, 10)
+            val rows = 12
+            val g = grid(apps, rows, 18)
             st.addView(g, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            // A tiny A to Z strip down the side.
+            // The A to Z strip, with its own lane so apps never touch it.
             st.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                for (ch in "ABCDEFGHIJ") addView(text(6f, Palette.SILVER).apply { text = ch.toString() })
-            }, FrameLayout.LayoutParams(dp(10), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply { rightMargin = dp(2) })
-            val travel = -dpf(38f * 10 + 10 - 230 + 20)
+                for (ch in "ABCDEFGHIJKLMN") addView(text(5.5f, Palette.SILVER).apply {
+                    text = ch.toString()
+                    gravity = Gravity.CENTER
+                })
+            }, FrameLayout.LayoutParams(dp(12), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
+                topMargin = dp(26)
+                bottomMargin = dp(34)
+                rightMargin = dp(2)
+            })
+            val travel = -dpf((22 + rows * rowH - 230 + 40).toFloat()).coerceAtLeast(0f)
+            val ease = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
             anim = android.animation.ObjectAnimator.ofPropertyValuesHolder(g, android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_Y,
                 android.animation.Keyframe.ofFloat(0f, 0f),
-                android.animation.Keyframe.ofFloat(0.2f, 0f),
-                android.animation.Keyframe.ofFloat(0.5f, travel).apply { interpolator = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f) },
-                android.animation.Keyframe.ofFloat(0.7f, travel),
-                android.animation.Keyframe.ofFloat(1f, 0f).apply { interpolator = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f) },
+                android.animation.Keyframe.ofFloat(0.22f, 0f),
+                android.animation.Keyframe.ofFloat(0.5f, travel).apply { interpolator = ease },
+                android.animation.Keyframe.ofFloat(0.72f, travel),
+                android.animation.Keyframe.ofFloat(1f, 0f).apply { interpolator = ease },
             ))
         } else {
             val strip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val a = grid(apps.take(20), 5)
-            val b = grid(apps.drop(20).ifEmpty { apps.reversed() }, 5)
+            val per = cols * 5
+            val a = grid(apps.take(per), 5, 6)
+            val b = grid(apps.drop(per).ifEmpty { apps.reversed() }, 5, 6)
             strip.addView(a)
             strip.addView(b)
             st.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -1244,9 +1286,8 @@ class SettingsActivity : Activity() {
                 count = 2
                 accent = Glass.wallColor(this@SettingsActivity)?.let { Glass.accent(this@SettingsActivity) } ?: Palette.INK
             }
-            st.addView(dots, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14), Gravity.BOTTOM).apply { bottomMargin = dp(10) })
+            st.addView(dots, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10), Gravity.BOTTOM).apply { bottomMargin = dp(38) })
             anim = android.animation.ObjectAnimator.ofFloat(strip, View.TRANSLATION_X, 0f)
-            // Pages are as wide as the preview, once it knows its width.
             st.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                 val w = v.width
                 if (w > 0 && a.layoutParams.width != w) v.post {
@@ -1254,12 +1295,13 @@ class SettingsActivity : Activity() {
                     a.layoutParams = LinearLayout.LayoutParams(w, ViewGroup.LayoutParams.MATCH_PARENT)
                     val running = anim.isStarted
                     anim.cancel()
+                    val ease = android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f)
                     anim.setValues(android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_X,
                         android.animation.Keyframe.ofFloat(0f, 0f),
                         android.animation.Keyframe.ofFloat(0.3f, 0f),
-                        android.animation.Keyframe.ofFloat(0.45f, -w.toFloat()).apply { interpolator = android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f) },
+                        android.animation.Keyframe.ofFloat(0.45f, -w.toFloat()).apply { interpolator = ease },
                         android.animation.Keyframe.ofFloat(0.8f, -w.toFloat()),
-                        android.animation.Keyframe.ofFloat(0.95f, 0f).apply { interpolator = android.view.animation.PathInterpolator(0.2f, 0.8f, 0.25f, 1f) },
+                        android.animation.Keyframe.ofFloat(0.95f, 0f).apply { interpolator = ease },
                         android.animation.Keyframe.ofFloat(1f, 0f),
                     ))
                     if (running) anim.start()
@@ -1267,6 +1309,15 @@ class SettingsActivity : Activity() {
             }
             anim.addUpdateListener { dots.position = (-strip.translationX / st.width.coerceAtLeast(1)).coerceIn(0f, 1f) }
         }
+        // The handle at the top and the round search button at the bottom, like the real list.
+        st.addView(View(this).apply { background = round(Color.argb(110, 255, 255, 255), dpf(2f)) },
+            FrameLayout.LayoutParams(dp(22), dp(3), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(8) })
+        st.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_search)
+            imageTintList = ColorStateList.valueOf(Palette.INK)
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+            background = round(Color.rgb(38, 38, 42), dpf(13f))
+        }, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(8) })
         anim.duration = if (sideways) 4200L else 4800L
         anim.repeatCount = android.animation.ValueAnimator.INFINITE
         st.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
@@ -1865,7 +1916,15 @@ class SettingsActivity : Activity() {
         Updater.install(this, rel, progress = { f ->
             downloading = if (f >= 1f) -1f else f
             updateStatus = if (f >= 1f) "Confirm the install" else "Downloading ${rel.tag}"
-            if (page == Page.MENU) render()
+            // Progress only changes two texts; rebuilding the whole menu every
+            // percent made it flicker and jump (in your recording).
+            val pv = progressView
+            if (f < 1f && pv != null && pv.isAttachedToWindow) {
+                pv.text = "Downloading ${(f * 100).toInt()}%"
+                statusView?.text = updateStatus
+            } else if (page == Page.MENU) {
+                render()
+            }
         }, failed = { msg ->
             downloading = -1f
             updateStatus = "Failed: ${msg.take(40)}"
