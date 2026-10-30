@@ -39,13 +39,23 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         fun launch(app: App, from: View)
         fun appMenu(app: App, anchor: View)
         fun onDrawerProgress(progress: Float)
-        /** "In folders": open one of the app list's folders. */
-        fun openGroup(name: String, apps: List<App>, from: View)
+        /** Your folders in the app list: open one, or its menu (size, rename, remove). */
+        fun openDrawerFolder(id: String, from: View)
+        fun drawerFolderMenu(id: String, anchor: View)
     }
 
-    /** "In folders": the app list as folders by kind, or null for A to Z. */
-    private var groups: List<Pair<String, List<App>>>? = null
-    private val grouped get() = Prefs.get(context).getInt(Prefs.DRAWER_GROUPS, 0) == 1
+    /** One spot in the app list: an app, or one of your folders (0 small, 1 medium, 2 large). */
+    private sealed class Entry {
+        class AppE(val app: App) : Entry()
+        class Folder(val id: String, val size: Int) : Entry()
+    }
+
+    /** With folders, the list is packed into a grid where folders take 1x1, 2x2 or 4x2. */
+    private var entries: List<Entry> = emptyList()
+    private var hasFolders = false
+    private lateinit var folderScroll: android.widget.ScrollView
+    private lateinit var span: SpanGrid
+    private var spanKey = ""
 
     private val content: LinearLayout
     private val search: EditText
@@ -194,6 +204,18 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         content.addView(extras, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         content.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        // With your own folders: one tall grid where folders can be small, medium or large.
+        span = SpanGrid(context, 4, dp(100)).apply { setPadding(0, dp(14), dp(18), dp(120)) }
+        folderScroll = android.widget.ScrollView(context).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(42))
+            clipToPadding = false
+            visibility = View.GONE
+            addView(span)
+        }
+        content.addView(folderScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         // Sideways pages (Settings → App list → Horizontal), with dots under them.
         pages = HomePager(context).apply { visibility = View.GONE }
         pages.onScrolled = { f ->
@@ -358,30 +380,17 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             pages.post { if (pages.height > 0) buildPages() }
             return
         }
-        val cell = dp(iconDp + 7 + (if (names) 22 else 4) + 16)
+        val cell = cellH()
         val rows = (h / cell).coerceAtLeast(2)
-        val per = rows * cols
-        val key = "${shown.joinToString(",") { it.key }}|$cols|$names|$iconDp|$h|${groups != null}"
+        val key = entries.joinToString(",") { when (it) { is Entry.AppE -> it.app.key; is Entry.Folder -> it.id + it.size + Groups.folderApps(context, it.id).size } } + "|$cols|$names|$iconDp|$h"
         if (key == pagesKey) return
         pagesKey = key
         pages.removeAllViews()
-        val g = groups
-        val count = g?.size ?: shown.size
-        for (start in 0 until count step per) {
-            val page = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(10), 0, 0)
-            }
-            val idx = (start until minOf(count, start + per)).toList()
-            for (rowIdx in idx.chunked(cols)) {
-                val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                for (i in rowIdx) row.addView(if (g != null) groupTile(g[i].first, g[i].second) else iconFor(shown[i]), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                val rowApps = rowIdx
-                for (k in rowApps.size until cols) row.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
-                page.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, cell))
-            }
-            pages.addView(page)
-        }
+        // Whole folders never split across pages: a page ends where the next thing doesn't fit.
+        val placed = pack(entries, rows)
+        val count = (placed.maxOfOrNull { it.page } ?: -1) + 1
+        val grids = (0 until count).map { SpanGrid(context, cols, cell).also { g -> g.setPadding(0, dp(10), 0, 0); pages.addView(g) } }
+        for (pl in placed) grids[pl.page].add(viewFor(pl.entry), pl.col, pl.row, pl.sx, pl.sy)
         dots.count = pages.childCount
         pages.snapTo(pages.current.coerceAtMost(pages.childCount - 1), animate = false)
     }
@@ -392,22 +401,28 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
         shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
             .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
-        // In folders: one folder per kind (Social, Games, Money…), "Other" last.
-        groups = if (grouped && q.isEmpty()) {
-            shown.groupBy { AppRepo.group(it) }.toList().sortedWith(compareBy({ it.first == "Other" }, { it.first }))
+        // Your folders first, then every app that isn't in one, A to Z.
+        val folderIds = if (q.isEmpty()) DrawerFolders.ids(context) else emptyList()
+        hasFolders = folderIds.isNotEmpty()
+        entries = if (hasFolders) {
+            val inside = DrawerFolders.foldered(context)
+            folderIds.map { Entry.Folder(it, DrawerFolders.size(context, it)) } + shown.filter { it.key !in inside }.map { Entry.AppE(it) }
         } else {
-            null
+            shown.map { Entry.AppE(it) }
         }
         // Searching always shows results as a list; otherwise your chosen layout.
         val paged = horizontal && q.isEmpty()
-        grid.visibility = if (paged) View.GONE else View.VISIBLE
+        val spanned = !paged && hasFolders
+        grid.visibility = if (paged || spanned) View.GONE else View.VISIBLE
+        folderScroll.visibility = if (spanned) View.VISIBLE else View.GONE
+        if (spanned) buildSpan()
         pages.visibility = if (paged) View.VISIBLE else View.GONE
         dots.visibility = if (paged && pages.childCount > 1) View.VISIBLE else View.GONE
         if (paged) {
             buildPages()
             dots.visibility = if (pages.childCount > 1) View.VISIBLE else View.GONE
         }
-        letters.visibility = if (q.isEmpty() && !horizontal && groups == null) View.VISIBLE else View.GONE
+        letters.visibility = if (q.isEmpty() && !horizontal) View.VISIBLE else View.GONE
         letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
         showExtras(search.text?.toString()?.trim().orEmpty())
@@ -477,8 +492,13 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             bubble.animate().alpha(0f).scaleX(0.6f).scaleY(0.6f).setDuration(160).withEndAction { bubble.visibility = View.INVISIBLE }.start()
             return
         }
-        val i = shown.indexOfFirst { firstLetter(it.label) == letter }
-        if (i >= 0) grid.setSelection(i)
+        if (folderScroll.visibility == View.VISIBLE) {
+            val v = (0 until span.childCount).map { span.getChildAt(it) }.firstOrNull { (it.tag as? String)?.removePrefix("app:")?.let { l -> firstLetter(l) == letter } == true }
+            if (v != null) folderScroll.scrollTo(0, v.top)
+        } else {
+            val i = shown.indexOfFirst { firstLetter(it.label) == letter }
+            if (i >= 0) grid.setSelection(i)
+        }
         bubble.text = letter.toString()
         bubble.translationY = (letters.top + letters.lastY - dp(30)).toFloat()
         if (bubble.visibility != View.VISIBLE) {
@@ -507,60 +527,76 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         for (i in 0 until usedRow.childCount) (usedRow.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
     }
 
+    private fun cellH() = dp(iconDp + 7 + (if (names) 22 else 4) + 16)
+
+    private class Placed(val entry: Entry, val page: Int, val col: Int, val row: Int, val sx: Int, val sy: Int)
+
     /**
-     * One folder of the app list: four of its apps in a small glass square
-     * the size of an app icon, its name under it. Tap to open it.
+     * Packs the list into a grid [cols] wide: each thing goes in the first
+     * spot it fits, reading left to right, top to bottom. With [rowsPerPage],
+     * rows are cut into pages and a folder never splits across two.
      */
-    private fun groupTile(name: String, apps: List<App>): View {
-        val box = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(7), 0, 0)
-            tag = "group|$cellKey"
-        }
-        val side = dp(iconDp)
-        val pane = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(side / 9, side / 9, side / 9, side / 9)
-            background = context.round(Color.argb(46, 255, 255, 255), side * 0.26f).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
-        }
-        val mini = ((iconDp - 8) / 2.3f).toInt().coerceAtLeast(12)
-        for (r in 0 until 2) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
+    private fun pack(list: List<Entry>, rowsPerPage: Int = Int.MAX_VALUE): List<Placed> {
+        val out = ArrayList<Placed>()
+        val taken = HashSet<Long>()
+        fun k(r: Int, c: Int) = r.toLong() * 64 + c
+        var startRow = 0
+        for (e in list) {
+            val (sx, sy) = when (e) {
+                is Entry.AppE -> 1 to 1
+                is Entry.Folder -> when (e.size) {
+                    2 -> minOf(4, cols) to 2
+                    1 -> 2 to 2
+                    else -> 1 to 1
+                }
             }
-            for (c in 0 until 2) {
-                val a = apps.getOrNull(r * 2 + c)
-                row.addView(if (a != null) AppIconView(context, a, mini, false, liveGlass = false).apply { isClickable = false } else View(context), LinearLayout.LayoutParams(0, (side - side * 2 / 9) / 2, 1f))
+            var r = startRow
+            search@ while (true) {
+                for (c in 0..cols - sx) {
+                    // Inside one page only.
+                    val page = r / rowsPerPage
+                    if ((r + sy - 1) / rowsPerPage != page) continue
+                    var free = true
+                    for (dr in 0 until sy) for (dc in 0 until sx) if (k(r + dr, c + dc) in taken) free = false
+                    if (free) {
+                        for (dr in 0 until sy) for (dc in 0 until sx) taken += k(r + dr, c + dc)
+                        out += Placed(e, if (rowsPerPage == Int.MAX_VALUE) 0 else page, c, if (rowsPerPage == Int.MAX_VALUE) r else r % rowsPerPage, sx, sy)
+                        break@search
+                    }
+                }
+                r++
             }
-            pane.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            // Keep filling from the first row that still has room.
+            while ((0 until cols).all { k(startRow, it) in taken }) startRow++
         }
-        box.addView(pane, LinearLayout.LayoutParams(side, side))
-        if (names) box.addView(context.text(11.5f, Palette.INK).apply {
-            text = name
-            gravity = Gravity.CENTER
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(dp(2), dp(6), dp(2), 0)
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        box.pressable()
-        box.setOnClickListener {
-            it.bounce()
-            host.openGroup(name, apps, pane)
+        return out
+    }
+
+    private fun viewFor(e: Entry): View = when (e) {
+        is Entry.AppE -> iconFor(e.app).also { it.tag = "app:" + e.app.label }
+        is Entry.Folder -> FolderTile(context, e.id, e.size, open = { host.openDrawerFolder(e.id, it) }, launch = { a, v -> host.launch(a, v) }, iconDp = iconDp, labels = names).apply {
+            setOnLongClickListener {
+                host.drawerFolderMenu(e.id, it)
+                true
+            }
         }
-        return box
+    }
+
+    /** Vertical with folders: everything packed into one tall grid. */
+    private fun buildSpan() {
+        val key = entries.joinToString(",") { when (it) { is Entry.AppE -> it.app.key; is Entry.Folder -> it.id + it.size + Groups.folderApps(context, it.id).joinToString() } } + "|$cols|$names|$iconDp"
+        if (key == spanKey) return
+        spanKey = key
+        span.removeAllViews()
+        span.setup(cols, cellH())
+        for (pl in pack(entries)) span.add(viewFor(pl.entry), pl.col, pl.row, pl.sx, pl.sy)
     }
 
     private inner class AppsAdapter : BaseAdapter() {
-        override fun getCount() = groups?.size ?: shown.size
-        override fun getItem(position: Int): Any = groups?.get(position) ?: shown[position]
+        override fun getCount() = shown.size
+        override fun getItem(position: Int): Any = shown[position]
         override fun getItemId(position: Int) = position.toLong()
-        override fun getViewTypeCount() = 2
-        override fun getItemViewType(position: Int) = if (groups != null) 1 else 0
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-            groups?.let { g -> return groupTile(g[position].first, g[position].second) }
             val a = shown[position]
             // Reuse the view that scrolled off (rebuilding a new one for every row made scrolling stutter).
             val old = (convertView as? AppIconView)?.takeIf { it.tag == cellKey }
@@ -683,7 +719,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
                 tracker?.addMovement(e)
                 val dy = e.rawY - downY
                 val dx = e.rawX - downX
-                val atTop = !grid.canScrollVertically(-1)
+                val atTop = if (folderScroll.visibility == View.VISIBLE) !folderScroll.canScrollVertically(-1) else !grid.canScrollVertically(-1)
                 if (dy > slop && dy > abs(dx) * 1.2f && (downTopZone || atTop)) {
                     dragging = true
                     downY = e.rawY
@@ -897,4 +933,48 @@ class ListDots(context: Context) : View(context) {
             x += w + gap
         }
     }
+}
+
+
+/**
+ * A grid where each child takes [sx] x [sy] cells (an app 1x1, a folder 1x1,
+ * 2x2 or 4x2). [cols] across, each row [cellH] tall.
+ */
+class SpanGrid(context: Context, private var cols: Int, private var cellH: Int) : ViewGroup(context) {
+    private class Spot(val col: Int, val row: Int, val sx: Int, val sy: Int) : ViewGroup.LayoutParams(0, 0)
+
+    fun setup(cols: Int, cellH: Int) {
+        this.cols = cols
+        this.cellH = cellH
+        requestLayout()
+    }
+
+    fun add(v: View, col: Int, row: Int, sx: Int, sy: Int) = addView(v, Spot(col, row, sx, sy))
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val cw = (w - paddingLeft - paddingRight) / cols.coerceAtLeast(1)
+        var rows = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            val s = c.layoutParams as Spot
+            rows = maxOf(rows, s.row + s.sy)
+            c.measure(MeasureSpec.makeMeasureSpec(cw * s.sx, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(cellH * s.sy, MeasureSpec.EXACTLY))
+        }
+        val h = MeasureSpec.getMode(heightMeasureSpec).let { m -> if (m == MeasureSpec.EXACTLY) MeasureSpec.getSize(heightMeasureSpec) else rows * cellH + paddingTop + paddingBottom }
+        setMeasuredDimension(w, h)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val cw = (r - l - paddingLeft - paddingRight) / cols.coerceAtLeast(1)
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            val s = c.layoutParams as Spot
+            val x = paddingLeft + s.col * cw
+            val y = paddingTop + s.row * cellH
+            c.layout(x, y, x + cw * s.sx, y + cellH * s.sy)
+        }
+    }
+
+    override fun checkLayoutParams(p: ViewGroup.LayoutParams?) = p is Spot
 }

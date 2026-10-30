@@ -10,6 +10,7 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import kotlin.math.abs
 
 /**
@@ -60,27 +61,33 @@ object Groups {
 }
 
 /**
- * A folder on the home screen. Small: a 2x2 grid of tiny icons. Large: the
- * folder's name, then three apps you can open directly and a "+N" that
- * opens the rest.
+ * A folder, in three sizes (on the home screen and in the app list):
+ *  - Small (one app's space): a glass square the size of an app icon with
+ *    four tiny icons, its name under it when names are on.
+ *  - Medium (2x2): a glass card with the name in small capitals at the top
+ *    and four big app icons you can open straight away (three and "+N" when
+ *    there are more).
+ *  - Large (4x2): the same card, wide, with two rows of four.
+ * Tap the card (anywhere that isn't an app) to open the whole folder.
  */
 @SuppressLint("ViewConstructor")
 class FolderTile(
     context: Context,
     val folderId: String,
-    private val large: Boolean,
+    /** 0 small, 1 medium, 2 large. */
+    private val size: Int,
     private val open: (View) -> Unit,
     private val launch: (App, View) -> Unit,
     /** The home screen's app icon size, so a small folder is exactly as big as an app. */
     private val iconDp: Int = 62,
-    /** Names under apps on the home screen: the folder gets its name under it too. */
+    /** Names under apps: a small folder gets its name under it too. */
     private val labels: Boolean = false,
 ) : FrameLayout(context) {
     private val pane = FrameLayout(context)
     // Only apps that are still installed (an uninstalled app used to leave a gap).
     private val apps: List<App> = Groups.folderApps(context, folderId).mapNotNull { AppRepo.byKey(it) }
-    private var builtSide = 0
-    private val name = if (!large && labels) context.text(11.5f, Palette.INK).apply {
+    private var built = ""
+    private val name = if (size == 0 && labels) context.text(11.5f, Palette.INK).apply {
         text = Groups.folderName(context, folderId)
         gravity = Gravity.CENTER
         maxLines = 1
@@ -97,88 +104,157 @@ class FolderTile(
         }
     }
 
-    /**
-     * Built when it actually has a size (not "a moment later", which can be
-     * before the home screen is even laid out when it's rebuilt in the
-     * background, and left the folder empty).
-     */
+    /** Built once it has a real size (and again only if that size changes). */
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
-        // Small: the same size as an app icon on your home screen (it used to
-        // fill its whole cell and look bigger than the apps around it).
-        val side = if (large) minOf(w, h) else minOf(dp(iconDp), minOf(w, h) - dp(6))
-        if (side <= 0 || side == builtSide) return
-        builtSide = side
-        post { setup(side) }
+        if (w <= 0 || h <= 0) return
+        val key = "$w|$h"
+        if (key == built) return
+        built = key
+        post { setup(w, h) }
     }
 
-    private fun setup(side: Int) {
-        run {
+    private fun setup(w: Int, h: Int) {
+        pane.removeAllViews()
+        if (size == 0) {
+            val side = minOf(dp(iconDp), minOf(w, h) - dp(6))
             if (name != null) {
-                // Sits where an app's icon sits, with its name under it, like the apps.
                 pane.layoutParams = LayoutParams(side, side, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(7) }
                 name.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP).apply { topMargin = dp(7) + side + dp(4) }
             } else {
                 pane.layoutParams = LayoutParams(side, side, Gravity.CENTER)
             }
-            // Rounded like an app icon (clipped too, so nothing ever pokes out square).
-            val rad = side * if (large) 0.18f else 0.26f
-            pane.background = pane.surface(rad, 0.12f)
-            pane.outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(v: View, o: android.graphics.Outline) {
-                    o.setRoundRect(0, 0, v.width, v.height, rad)
-                }
-            }
-            pane.clipToOutline = true
-            build(pane, apps, side)
+            shape(side * 0.26f)
+            smallGrid(side)
+            return
         }
+        // Medium / large: a card filling the space, with a little breathing room.
+        val inset = dp(6)
+        pane.layoutParams = LayoutParams(w - inset * 2, h - inset * 2, Gravity.CENTER)
+        shape(dpf(26f))
+        card(w - inset * 2, h - inset * 2)
     }
 
-    private fun build(pane: FrameLayout, apps: List<App>, side: Int) {
-        pane.removeAllViews()
+    private fun shape(rad: Float) {
+        pane.background = pane.surface(rad, 0.16f)
+        pane.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, rad)
+            }
+        }
+        pane.clipToOutline = true
+    }
+
+    private fun smallGrid(side: Int) {
+        val pad = side / 7
+        val cellPx = (side - pad * 2) / 2
+        val iconDp = (cellPx * 0.86f / resources.displayMetrics.density).toInt().coerceAtLeast(12)
         val grid = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        val pad = if (large) side / 10 else side / 7
-        if (large) {
-            grid.addView(context.text(11f, Palette.SILVER, caps = true).apply {
-                text = Groups.folderName(context, folderId)
-                setPadding(dp(4), 0, 0, dp(6))
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
-        val cellPx = (side - pad * 2 - (if (large) dp(22) else 0)) / 2
-        val iconDp = (cellPx * (if (large) 0.78f else 0.86f) / resources.displayMetrics.density).toInt().coerceAtLeast(14)
-        val show = if (large && apps.size > 4) apps.take(3) else apps.take(4)
         for (r in 0 until 2) {
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
+            val row = LinearLayout(context).apply { gravity = Gravity.CENTER }
             for (c in 0 until 2) {
-                val i = r * 2 + c
-                val v: View = when {
-                    i < show.size -> AppIconView(context, show[i], iconDp, false, liveGlass = false).apply {
-                        badge = if (large) HaloLink.badges[show[i].pkg] ?: 0 else 0
-                        if (large) {
-                            setOnClickListener { launch(show[i], it) }
-                        } else {
-                            isClickable = false
-                        }
-                    }
-                    large && i == 3 && apps.size > 4 -> context.text(15f, Palette.INK, bold = true).apply {
-                        text = "+${apps.size - 3}"
-                        gravity = Gravity.CENTER
-                        background = context.round(Color.argb(40, 255, 255, 255), dpf(14f))
-                        setOnClickListener { open(this@FolderTile) }
-                    }
-                    else -> View(context)
-                }
-                row.addView(v, LinearLayout.LayoutParams(cellPx, cellPx))
+                val a = apps.getOrNull(r * 2 + c)
+                row.addView(if (a != null) AppIconView(context, a, iconDp, false, liveGlass = false).apply { isClickable = false } else View(context), LinearLayout.LayoutParams(cellPx, cellPx))
             }
             grid.addView(row)
         }
         pane.addView(grid, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply { setMargins(pad, pad, pad, pad) })
+    }
+
+    /** The card: the name in small capitals, then the apps, big, ready to open. */
+    private fun card(w: Int, h: Int) {
+        val col = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(10))
+        }
+        col.addView(context.text(11f, Palette.SILVER, caps = true).apply {
+            text = Groups.folderName(context, folderId)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            letterSpacing = 0.12f
+        })
+        val across = if (size == 2) 4 else 2
+        val slots = across * 2
+        val show = if (apps.size > slots) apps.take(slots - 1) else apps.take(slots)
+        val innerW = w - dp(32)
+        val innerH = h - dp(14) - dp(10) - dp(22)
+        val cell = minOf(innerW / across, innerH / 2)
+        val iconDp = (cell * 0.74f / resources.displayMetrics.density).toInt().coerceIn(20, 72)
+        val grid = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        for (r in 0 until 2) {
+            val row = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+            for (c in 0 until across) {
+                val i = r * across + c
+                val v: View = when {
+                    i < show.size -> AppIconView(context, show[i], iconDp, false, liveGlass = false).apply {
+                        badge = HaloLink.badges[show[i].pkg] ?: 0
+                        pressable()
+                        setOnClickListener { launch(show[i], it) }
+                    }
+                    i == slots - 1 && apps.size > slots -> context.text(15f, Palette.INK, bold = true).apply {
+                        text = "+${apps.size - (slots - 1)}"
+                        gravity = Gravity.CENTER
+                        background = context.round(Color.argb(46, 255, 255, 255), dpf(16f))
+                        setOnClickListener { open(this@FolderTile) }
+                    }
+                    else -> View(context)
+                }
+                val lp = if (v is TextView) LinearLayout.LayoutParams(dp(iconDp), dp(iconDp)).apply {
+                    marginStart = (cell - dp(iconDp)) / 2
+                    marginEnd = (cell - dp(iconDp)) / 2
+                } else LinearLayout.LayoutParams(0, cell, 1f)
+                row.addView(v, if (v is TextView) lp else LinearLayout.LayoutParams(0, cell, 1f))
+            }
+            grid.addView(row, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, cell))
+        }
+        col.addView(grid, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = dp(4) })
+        pane.addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+}
+
+/** Folders in the app list (made by you): ids "dfolder:…", newest last. */
+object DrawerFolders {
+    private const val KEY = "drawer_folders"
+
+    fun ids(c: Context): List<String> = Prefs.list(c, KEY).filter { Groups.folderApps(c, it).isNotEmpty() }
+
+    fun size(c: Context, id: String): Int = Prefs.get(c).getInt("fsize_$id", 0)
+
+    fun setSize(c: Context, id: String, s: Int) {
+        Prefs.get(c).edit().putInt("fsize_$id", s.coerceIn(0, 2)).apply()
+    }
+
+    /** Every app that sits in one of them (those don't show on their own in the list). */
+    fun foldered(c: Context): Set<String> = ids(c).flatMap { Groups.folderApps(c, it) }.toSet()
+
+    fun create(c: Context, apps: List<String>, name: String): String {
+        val id = "dfolder:" + System.currentTimeMillis().toString(36)
+        Groups.setFolderApps(c, id, apps)
+        Groups.setFolderName(c, id, name)
+        Prefs.setList(c, KEY, Prefs.list(c, KEY) + id)
+        return id
+    }
+
+    fun add(c: Context, id: String, app: String) {
+        // An app lives in one folder at a time.
+        for (other in ids(c)) if (other != id) Groups.setFolderApps(c, other, Groups.folderApps(c, other).filter { it != app })
+        Groups.setFolderApps(c, id, Groups.folderApps(c, id) + app)
+    }
+
+    fun take(c: Context, id: String, app: String) {
+        Groups.setFolderApps(c, id, Groups.folderApps(c, id).filter { it != app })
+        if (Groups.folderApps(c, id).isEmpty()) delete(c, id)
+    }
+
+    fun delete(c: Context, id: String) {
+        Groups.setFolderApps(c, id, emptyList())
+        Prefs.setList(c, KEY, Prefs.list(c, KEY).filter { it != id })
     }
 }
 

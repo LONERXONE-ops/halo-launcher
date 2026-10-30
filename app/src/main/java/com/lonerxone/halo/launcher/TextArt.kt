@@ -139,6 +139,8 @@ abstract class TextArt(context: Context) : View(context) {
     private var glassNow = false
     /** In a Settings preview: frosted glass that doesn't follow the screen (matches the miniature background, light to scroll). */
     var preview = false
+    /** In the Theme page's previews: draw as that theme, whatever the phone is using now. */
+    var themeGlass: Boolean? = null
     private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
         if (glassNow && !preview) {
             val x = loc[0]
@@ -158,7 +160,7 @@ abstract class TextArt(context: Context) : View(context) {
         runs = layout(width, height)
         // Settings → Clock → Shadow reaches the date and weather too.
         for (r in runs) ClockFaces.shadow(context, r.paint)
-        glassNow = ClockFaces.glass(context)
+        glassNow = themeGlass?.let { it && Prefs.get(context).getInt(Prefs.CLOCK_GLASS, 0) == 0 } ?: ClockFaces.glass(context)
         buildMasks()
         invalidate()
     }

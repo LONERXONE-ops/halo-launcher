@@ -508,7 +508,7 @@ class SettingsActivity : Activity() {
                 render()
             }
             card.setPadding(dp(8), dp(8), dp(8), dp(12))
-            card.addView(preview(glass = i == Glass.THEME_GLASS, small = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)))
+            card.addView(preview(glass = i == Glass.THEME_GLASS, small = true, forTheme = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)))
             card.addView(text(14f, Palette.INK, bold = true).apply {
                 text = name
                 gravity = Gravity.CENTER
@@ -631,7 +631,13 @@ class SettingsActivity : Activity() {
      * A small live model of the home screen on your real background: the
      * clock, a music card and the dock, in glass or solid.
      */
-    private fun preview(glass: Boolean, small: Boolean): View {
+    /**
+     * A small copy of the home screen. [forTheme]: the Theme page's previews,
+     * each drawn entirely as its own theme (clock digits, panels, dock and
+     * icons), whatever theme you're using now. Otherwise it's your home
+     * screen as it is, with your own dock style.
+     */
+    private fun preview(glass: Boolean, small: Boolean, forTheme: Boolean = false): View {
         val f = FrameLayout(this).apply {
             background = round(Color.rgb(40, 40, 44), dpf(26f))
             clipToOutline = true
@@ -647,8 +653,8 @@ class SettingsActivity : Activity() {
             setPadding(dp(10), dp(16), dp(10), dp(10))
         }
         val topRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        topRow.addView(ClockFace(this).pv(), LinearLayout.LayoutParams(dp(if (small) 70 else 92), dp(if (small) 62 else 80)))
-        if (!small) topRow.addView(DateFace(this).pv(), LinearLayout.LayoutParams(0, dp(40), 1f).apply {
+        topRow.addView(ClockFace(this).pv().apply { if (forTheme) themeGlass = glass }, LinearLayout.LayoutParams(dp(if (small) 70 else 92), dp(if (small) 62 else 80)))
+        if (!small) topRow.addView(DateFace(this).pv().apply { if (forTheme) themeGlass = glass }, LinearLayout.LayoutParams(0, dp(40), 1f).apply {
             marginStart = dp(10)
             gravity = Gravity.CENTER_VERTICAL
         })
@@ -683,13 +689,14 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        dock.background = when (Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)) {
+        dock.background = when (if (forTheme) (if (glass) DockBar.GLASS else DockBar.SOLID) else Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)) {
             DockBar.SOLID -> round(Palette.TILE, dpf(18f))
             DockBar.CLEAR -> null
             else -> previewGlass(dpf(18f))
         }
         val apps = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(if (small) 4 else 5)
-        for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val iconLook = if (forTheme) (if (glass) Icons.GLASS else Icons.ORIGINAL) else -1
+        for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false, forceStyle = iconLook, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 38 else 46)).apply { topMargin = dp(8) })
         f.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         if (Glass.backdrop == null) {
@@ -1321,11 +1328,10 @@ class SettingsActivity : Activity() {
             line.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { if (mode > 0) marginStart = dp(10) })
         }
         col.addView(line)
-        chips(col, "Arrange", Prefs.DRAWER_GROUPS, listOf("A to Z", "In folders"), def = 0)
         chips(col, "Apps across", Prefs.DRAWER_COLS, listOf("4", "5"), def = 0)
         chips(col, "Icon size", Prefs.DRAWER_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
         col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
-        note(col, "Searching always shows the results as a list.")
+        note(col, "Make your own folders in the list: hold an app and pick Add to folder. Hold a folder to make it small, medium or large. Searching always shows the results as a list.")
         section(col, "Home screen folders")
         col.addView(group(row("Group my home screen apps", "Apps of the same kind (Social, Games, Money…) go into folders", chevron()) { autoFolders() }))
     }

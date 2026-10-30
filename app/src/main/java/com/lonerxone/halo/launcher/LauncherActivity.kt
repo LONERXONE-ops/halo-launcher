@@ -585,15 +585,26 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             id.startsWith("folder:") -> {
                 // A folder whose apps were all uninstalled disappears.
                 if (Groups.folderApps(this, id).none { AppRepo.byKey(it) != null }) return null
-                val large = item.sx >= 2
+                // Small (1x1), Medium (2x2) or Large (4x2), like widgets.
+                val fsz = when {
+                    item.sx >= 4 -> 2
+                    item.sx >= 2 -> 1
+                    else -> 0
+                }
                 val fp = Prefs.get(this)
                 val fLabels = fp.getBoolean(Prefs.SHOW_LABELS, false)
                 val fSize = listOf(54, 62, 70)[fp.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (fLabels) 6 else 0
-                val tile = FolderTile(this, id, large, open = { v -> openFolder(id, v) }, launch = { a, v -> launch(a, v) }, iconDp = fSize, labels = fLabels)
-                Cell(this, editor, "home", id, tile, sizeLabel = if (large) "Large" else "Small", longPressEdits = true).apply {
+                val tile = FolderTile(this, id, fsz, open = { v -> openFolder(id, v) }, launch = { a, v -> launch(a, v) }, iconDp = fSize, labels = fLabels)
+                Cell(this, editor, "home", id, tile, sizeLabel = HomeWidgets.SIZE_NAMES[fsz], longPressEdits = true).apply {
                     onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
                     onSize = {
-                        changed { if (large) HomeLayout.resize(this@LauncherActivity, id, 1, 1) else HomeLayout.resize(this@LauncherActivity, id, 2, 2) }
+                        changed {
+                            when (fsz) {
+                                0 -> HomeLayout.resize(this@LauncherActivity, id, 2, 2)
+                                1 -> HomeLayout.resize(this@LauncherActivity, id, 4, 2)
+                                else -> HomeLayout.resize(this@LauncherActivity, id, 1, 1)
+                            }
+                        }
                         snapToItem(id)
                     }
                     onEditTap = { openFolder(id, this) }
@@ -975,6 +986,19 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             }
             Prefs.setList(this, Prefs.DOCK, cur)
             rebuildApps()
+        }
+        if (drawer.isOpen) menu.add("Add to folder", R.drawable.ic_apps) {
+            val fm = HaloMenu(anchor).header("Add ${app.label} to")
+            for (f in DrawerFolders.ids(this)) fm.add(Groups.folderName(this, f), R.drawable.ic_apps) {
+                DrawerFolders.add(this, f, app.key)
+                drawer.refresh()
+            }
+            fm.add("New folder", R.drawable.ic_plus) {
+                DrawerFolders.create(this, listOf(app.key), AppRepo.group(app).let { if (it == "Other") "Folder" else it })
+                drawer.refresh()
+                Toast.makeText(this, "Folder made. Add more apps from their menu, or open it and tap Add apps", Toast.LENGTH_LONG).show()
+            }
+            fm.show()
         }
         menu.add("Edit home screen", R.drawable.ic_edit) {
             if (drawer.isOpen) drawer.close()
@@ -1361,15 +1385,6 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     private var sheet: FolderSheet? = null
 
-    /** A folder of the app list ("In folders"): its apps, to open. */
-    override fun openGroup(name: String, apps: List<App>, from: View) {
-        sheet?.let { overlayLayer.removeView(it) }
-        val s = FolderSheet(this, "", this, groupName = name, groupApps = apps)
-        sheet = s
-        overlayLayer.addView(s, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        s.show(from)
-    }
-
     private fun openFolder(id: String, from: View) {
         sheet?.let { overlayLayer.removeView(it) }
         val s = FolderSheet(this, id, this)
@@ -1380,7 +1395,27 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     /** The folder's name was changed in the folder itself: just redraw the home screen. */
     override fun rename(id: String) {
-        rebuildHome()
+        if (id.startsWith("dfolder:")) drawer.refresh() else rebuildHome()
+    }
+
+    /** App list folders: open one, or its menu (size, rename, remove). */
+    override fun openDrawerFolder(id: String, from: View) = openFolder(id, from)
+
+    override fun drawerFolderMenu(id: String, anchor: View) {
+        anchor.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        val cur = DrawerFolders.size(this, id)
+        val m = HaloMenu(anchor).header(Groups.folderName(this, id))
+        for ((i, n) in HomeWidgets.SIZE_NAMES.withIndex()) m.add(n, R.drawable.ic_widgets, checked = i == cur) {
+            DrawerFolders.setSize(this, id, i)
+            drawer.refresh()
+        }
+        m.divider()
+        m.add("Open and rename", R.drawable.ic_edit) { openFolder(id, anchor) }
+        m.add("Remove folder", R.drawable.ic_trash, danger = true) {
+            DrawerFolders.delete(this, id)
+            drawer.refresh()
+        }
+        m.show()
     }
 
     private fun renameDialog(id: String) {
@@ -1409,6 +1444,22 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     override fun removeFromFolder(id: String, app: App, anchor: View) {
+        if (id.startsWith("dfolder:")) {
+            HaloMenu(anchor).header(app.label)
+                .add("Take out of folder", R.drawable.ic_arrow_up) {
+                    DrawerFolders.take(this, id, app.key)
+                    sheet?.close()
+                    drawer.refresh()
+                }
+                .add("App info", R.drawable.ic_info) {
+                    try {
+                        getSystemService(LauncherApps::class.java).startAppDetailsActivity(app.component, app.user, null, null)
+                    } catch (_: Exception) {
+                    }
+                }
+                .show()
+            return
+        }
         HaloMenu(anchor).header(app.label)
             .add("Take out of folder", R.drawable.ic_arrow_up) {
                 val left = Groups.folderApps(this, id).filter { it != app.key }
