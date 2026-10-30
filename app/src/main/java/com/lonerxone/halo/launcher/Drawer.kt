@@ -59,7 +59,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     private val bubble: TextView
     private val pages: HomePager
-    private val dots: PageDots
+    private val dots: ListDots
     private var pagesKey = ""
     private val adapter = AppsAdapter()
     private var shown: List<App> = emptyList()
@@ -185,7 +185,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         pages = HomePager(context).apply { visibility = View.GONE }
         pages.onScrolled = { f -> dots.position = f }
         content.addView(pages, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        dots = PageDots(context).apply { visibility = View.GONE }
+        dots = ListDots(context).apply { visibility = View.GONE }
         content.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(20)).apply { bottomMargin = dp(96) })
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -773,7 +773,7 @@ object Calc {
 
 
 /** Page dots for the sideways app list: the current one is a longer pill in your colour. */
-class PageDots(context: Context) : View(context) {
+class ListDots(context: Context) : View(context) {
     var count = 0
         set(v) {
             field = v

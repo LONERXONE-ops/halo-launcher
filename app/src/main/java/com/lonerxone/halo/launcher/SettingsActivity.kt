@@ -1230,7 +1230,7 @@ class SettingsActivity : Activity() {
             strip.addView(a)
             strip.addView(b)
             st.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            val dots = PageDots(this).apply {
+            val dots = ListDots(this).apply {
                 count = 2
                 accent = Glass.wallColor(this@SettingsActivity)?.let { Glass.accent(this@SettingsActivity) } ?: Palette.INK
             }
