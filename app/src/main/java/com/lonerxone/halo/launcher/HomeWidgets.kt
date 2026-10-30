@@ -126,8 +126,33 @@ abstract class BaseWidget(context: Context, protected val actions: WidgetActions
     var size = HomeWidgets.SMALL
         set(v) {
             field = v
+            sig = null
             refresh()
         }
+
+    /**
+     * What the widget last drew. Widgets are asked to refresh often (every
+     * minute, on steps, on battery); redrawing views each time made them
+     * blink and lose taps. Now they rebuild only when what they show changes.
+     */
+    private var sig: String? = null
+
+    protected fun changed(now: String): Boolean {
+        if (now == sig) return false
+        sig = now
+        return true
+    }
+
+    /**
+     * A soft wash of colour from the top-left corner (weather sky, charging
+     * green), over the glass or tile. 0 = none.
+     */
+    protected fun wash(color: Int, strength: Int = 80) {
+        foreground = if (color == 0) null else android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+            intArrayOf(android.graphics.Color.argb(strength, android.graphics.Color.red(color), android.graphics.Color.green(color), android.graphics.Color.blue(color)), android.graphics.Color.TRANSPARENT),
+        ).apply { cornerRadius = dpf(26f) }
+    }
 
     init {
         orientation = VERTICAL
@@ -175,6 +200,10 @@ class WeatherWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Weather") 
 
     override fun refresh() {
         val w = Weather.now
+        val sig = if (w == null) "none|$size|${Weather.hasPlace(context)}" else
+            "$size|${w.temp}|${w.code}|${w.isDay}|${w.city}|" + w.hours.take(5).joinToString { "${it.label}${it.code}${it.temp}" } + "|" + w.days.take(4).joinToString { "${it.dayName}${it.code}${it.max}${it.min}" }
+        if (!changed(sig)) return
+        wash(if (w == null) 0 else sky(w.code, w.isDay), 85)
         body.removeAllViews()
         spacer(body)
         if (w == null) {
@@ -242,6 +271,16 @@ class WeatherWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Weather") 
         }
     }
 
+    /** The colour of the sky for the weather right now. */
+    private fun sky(code: Int, day: Boolean): Int = when {
+        code >= 95 -> 0xFF6A4BC4.toInt()
+        code in 71..77 || code in 85..86 -> 0xFFA9C4E8.toInt()
+        code in 51..67 || code in 80..82 -> 0xFF2F6BD0.toInt()
+        code in 45..48 -> 0xFF8C939E.toInt()
+        code in 2..3 -> if (day) 0xFF7A8CA8.toInt() else 0xFF464E6E.toInt()
+        else -> if (day) 0xFF3A9BFF.toInt() else 0xFF4446B8.toInt()
+    }
+
     private fun hourCol(h: Weather.Hour): View {
         val col = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -290,6 +329,9 @@ class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") 
         val charging = bm.isCharging
         pct.textSize = bigSize()
         pct.text = "$level%"
+        pct.setTextColor(if (charging) Palette.GREEN else if (level <= 20) Palette.RED else Palette.INK)
+        wash(if (charging) Palette.GREEN else 0, 60)
+        titleView.text = if (charging) "Charging" else "Battery"
         dots.count = if (size == HomeWidgets.SMALL) 10 else 20
         dots.fraction = level / 100f
         dots.accent = if (level <= 20 && !charging) Palette.RED else if (charging) Palette.GREEN else null
@@ -372,6 +414,11 @@ class AgendaWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Today") {
 
     override fun refresh() {
         val now = Date()
+        val allowed = Agenda.allowed(context)
+        val evs = if (allowed) Agenda.today(context) else emptyList()
+        val t0 = System.currentTimeMillis()
+        val sig = "$size|" + DateFormat.format("yyyyMMdd", now) + "|$allowed|" + evs.joinToString { "${it.title}${it.begin}${it.end}${it.begin <= t0 && it.end > t0}" }
+        if (!changed(sig)) return
         titleView.text = DateFormat.format("EEEE", now)
         day.text = DateFormat.format("d", now)
         day.textSize = if (size == HomeWidgets.LARGE) 54f else 46f
@@ -394,14 +441,14 @@ class AgendaWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Today") {
             HomeWidgets.MEDIUM -> 3
             else -> 1
         }
-        if (!Agenda.allowed(context)) {
+        if (!allowed) {
             list.addView(small(Palette.INK, 13f, 3).apply {
                 text = "Tap to show your events here"
                 setPadding(0, if (size == HomeWidgets.MEDIUM) dp(18) else 0, 0, 0)
             })
             return
         }
-        val events = Agenda.today(context).take(max)
+        val events = evs.take(max)
         if (events.isEmpty()) {
             list.addView(small(Palette.SILVER, 13f, 3).apply {
                 text = "Nothing else today"
@@ -453,9 +500,11 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
     }
 
     override fun refresh() {
+        val r = ScreenTime.today(context)
+        val sig = "$size|${ScreenTime.allowed(context)}|" + (r?.let { x -> "${x.totalMs / 60_000}|" + x.top.joinToString { "${it.first}${it.second / 60_000}" } } ?: "none")
+        if (!changed(sig)) return
         apps.removeAllViews()
         total.textSize = bigSize()
-        val r = ScreenTime.today(context)
         if (r == null) {
             total.text = "…"
             sub.text = if (ScreenTime.allowed(context)) "Adding it up…" else "Tap to allow usage access"
@@ -684,14 +733,16 @@ class TimerWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Timer") {
         val p = Prefs.get(context)
         val end = p.getLong(END, 0L)
         val left = end - System.currentTimeMillis()
-        chips.removeAllViews()
         if (left > 0) {
+            if (changed("run")) chips.removeAllViews()
             val s = (left + 999) / 1000
             time.text = if (s >= 3600) String.format(java.util.Locale.US, "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60) else String.format(java.util.Locale.US, "%02d:%02d", s / 60, s % 60)
             sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
             return
         }
         val last = p.getInt(LAST, 5)
+        if (!changed("idle|$size|$last") && chips.childCount > 0) return
+        chips.removeAllViews()
         time.text = String.format(java.util.Locale.US, "%02d:00", last)
         sub.text = "Tap to start"
         val choices = when (size) {
