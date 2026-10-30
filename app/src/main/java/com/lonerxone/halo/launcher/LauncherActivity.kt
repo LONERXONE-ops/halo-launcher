@@ -583,9 +583,13 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             }
             id.startsWith("aw:") -> androidWidgetCell(item)
             id.startsWith("folder:") -> {
-                if (Groups.folderApps(this, id).isEmpty()) return null
+                // A folder whose apps were all uninstalled disappears.
+                if (Groups.folderApps(this, id).none { AppRepo.byKey(it) != null }) return null
                 val large = item.sx >= 2
-                val tile = FolderTile(this, id, large, open = { v -> openFolder(id, v) }, launch = { a, v -> launch(a, v) })
+                val fp = Prefs.get(this)
+                val fLabels = fp.getBoolean(Prefs.SHOW_LABELS, false)
+                val fSize = listOf(54, 62, 70)[fp.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (fLabels) 6 else 0
+                val tile = FolderTile(this, id, large, open = { v -> openFolder(id, v) }, launch = { a, v -> launch(a, v) }, iconDp = fSize, labels = fLabels)
                 Cell(this, editor, "home", id, tile, sizeLabel = if (large) "Large" else "Small", longPressEdits = true).apply {
                     onRemove = { changed { HomeLayout.remove(this@LauncherActivity, id) } }
                     onSize = {
@@ -1362,7 +1366,12 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         s.show(from)
     }
 
+    /** The folder's name was changed in the folder itself: just redraw the home screen. */
     override fun rename(id: String) {
+        rebuildHome()
+    }
+
+    private fun renameDialog(id: String) {
         val input = EditText(ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault)).apply {
             setText(Groups.folderName(this@LauncherActivity, id))
             setSelection(text.length)
