@@ -65,14 +65,10 @@ class IconProvider : ContentProvider() {
         val box = RectF(0f, 0f, size.toFloat(), size.toFloat())
         val rad = size * 0.3f
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), Color.argb(255, 64, 64, 70), Color.argb(255, 28, 28, 32), android.graphics.Shader.TileMode.CLAMP)
+        // A glass tile with the same light as the home screen's, on the island's black.
+        p.shader = android.graphics.LinearGradient(0f, 0f, 0f, size.toFloat(), Color.argb(255, 78, 78, 86), Color.argb(255, 34, 34, 40), android.graphics.Shader.TileMode.CLAMP)
         cv.drawRoundRect(box, rad, rad, p)
-        p.shader = null
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = size * 0.02f
-        p.color = Color.argb(70, 255, 255, 255)
-        box.inset(p.strokeWidth / 2, p.strokeWidth / 2)
-        cv.drawRoundRect(box, rad, rad, p)
+        LiquidSheen(rad).apply { bounds = android.graphics.Rect(0, 0, size, size) }.draw(cv)
         cv.drawBitmap(r.bitmap, 0f, 0f, null)
         return out
     }

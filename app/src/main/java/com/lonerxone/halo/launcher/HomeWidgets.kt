@@ -329,7 +329,7 @@ class StepsWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Steps") {
         dots.count = if (size == HomeWidgets.SMALL) 12 else 24
         when {
             !Steps.available(context) -> {
-                stepsText.text = "—"
+                stepsText.text = "…"
                 dots.fraction = 0f
                 sub.text = "This phone has no step sensor"
             }
@@ -457,7 +457,7 @@ class ScreenTimeWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Screen 
         total.textSize = bigSize()
         val r = ScreenTime.today(context)
         if (r == null) {
-            total.text = "—"
+            total.text = "…"
             sub.text = if (ScreenTime.allowed(context)) "Adding it up…" else "Tap to allow usage access"
             return
         }
@@ -880,7 +880,7 @@ class CountdownWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Countdow
         days.textSize = bigSize()
         if (at == 0L) {
             titleView.text = "Countdown"
-            days.text = "—"
+            days.text = "…"
             sub.text = "Tap to pick a date"
             return
         }

@@ -191,23 +191,68 @@ class SettingsActivity : Activity() {
             setOnClickListener { go(Page.MENU) }
         }
         col.addView(back, LinearLayout.LayoutParams(dp(42), dp(42)).apply { topMargin = dp(10) })
-        // The page's own colour tile (the same as in the menu) beside a big title.
+        // Like Halo: the page's colour tile, a big title and one short line under it.
         val (icon, key) = pageIcon()
-        val tc = tileColours[key] ?: Palette.GRAPHITE
+        val tc = tileColour(key)
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(22), 0, dp(14))
+            setPadding(dp(4), dp(28), dp(4), dp(20))
         }
         head.addView(ImageView(this).apply {
             setImageResource(icon)
             imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Color.WHITE)
             setPadding(dp(11), dp(11), dp(11), dp(11))
-            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(lighten(tc), tc)).apply { cornerRadius = dpf(15f) }
-            elevation = dpf(6f)
-        }, LinearLayout.LayoutParams(dp(50), dp(50)).apply { marginEnd = dp(14) })
-        head.addView(text(28f, Palette.INK, bold = true).apply { text = page.title }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(lighten(tc), tc)).apply { cornerRadius = dpf(16f) }
+        }, LinearLayout.LayoutParams(dp(52), dp(52)).apply { marginEnd = dp(16) })
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(text(28f, Palette.INK, bold = true).apply { text = page.title })
+        subtitle()?.let { st -> texts.addView(text(14f, Palette.GREY, lines = 2).apply {
+            text = st
+            setPadding(0, dp(2), 0, 0)
+        }) }
+        head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(head)
+    }
+
+    /** One short line under each page's title. */
+    private fun subtitle(): String? = when (page) {
+        Page.THEME -> "How everything looks"
+        Page.LOOK -> "The picture behind everything"
+        Page.CLOCK -> "The big clock on page 1"
+        Page.MOTION -> "How things move"
+        Page.ICONS -> "How your apps look"
+        Page.DOCK -> "The bar at the bottom"
+        Page.WIDGETS -> "Live info on your home pages"
+        Page.GESTURES -> "What your fingers do"
+        Page.WEATHER -> "Where the weather comes from"
+        Page.HALO -> "Your dynamic island"
+        Page.BACKUP -> "Keep your whole setup in a file"
+        else -> null
+    }
+
+    /**
+     * Each section's tile colour, shaded by your wallpaper: with Adaptive
+     * colour on Rich or Vivid the tiles become a family of your wallpaper's
+     * colour; otherwise each keeps its own colour with a touch of it.
+     */
+    private fun tileColour(key: String): Int {
+        val base = tileColours[key] ?: return Palette.GRAPHITE
+        val wc = Glass.wallColor(this) ?: return base
+        val mode = Prefs.get(this).getInt(Prefs.ADAPTIVE, Palette.ADAPT_OFF)
+        val wh = FloatArray(3)
+        Color.colorToHSV(wc, wh)
+        if (mode >= Palette.ADAPT_RICH && wh[1] > 0.12f) {
+            val i = tileColours.keys.indexOf(key).coerceAtLeast(0)
+            val hsv = floatArrayOf((wh[0] + ((i % 5) - 2) * 14f + 360f) % 360f, 0.55f + (i % 3) * 0.08f, 0.82f - (i % 4) * 0.06f)
+            return Color.HSVToColor(hsv)
+        }
+        val f = if (mode == Palette.ADAPT_OFF) 0.18f else 0.3f
+        return Color.rgb(
+            (Color.red(base) + (Color.red(wc) - Color.red(base)) * f).toInt(),
+            (Color.green(base) + (Color.green(wc) - Color.green(base)) * f).toInt(),
+            (Color.blue(base) + (Color.blue(wc) - Color.blue(base)) * f).toInt(),
+        )
     }
 
     /** The menu icon and colour of the page being shown. */
@@ -224,49 +269,6 @@ class SettingsActivity : Activity() {
         Page.HALO -> R.drawable.ic_halo to "Halo"
         Page.BACKUP -> R.drawable.ic_arrow_down to "Backup & restore"
         else -> R.drawable.ic_info to "About"
-    }
-
-    /**
-     * Explanations fold to two lines with "More"; tap to read the rest.
-     * Pages used to open with walls of grey text.
-     */
-    private fun foldable(t: String, color: Int, bg: Int): View {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = round(bg, dpf(18f))
-            layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
-        }
-        box.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_info)
-            imageTintList = ColorStateList.valueOf(Palette.GREY)
-        }, LinearLayout.LayoutParams(dp(16), dp(16)).apply {
-            marginEnd = dp(10)
-            topMargin = dp(2)
-        })
-        val tv = text(13f, color, lines = 2).apply {
-            text = t
-            setLineSpacing(0f, 1.18f)
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        box.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val more = text(12f, Palette.INK, bold = true).apply {
-            text = "More"
-            setPadding(dp(8), 0, 0, 0)
-        }
-        box.addView(more)
-        // Short enough to fit? No "More".
-        tv.post {
-            val l = tv.layout ?: return@post
-            if (l.lineCount <= 2 && l.getEllipsisCount(l.lineCount - 1) == 0) more.visibility = View.GONE
-        }
-        box.setOnClickListener {
-            val open = tv.maxLines > 2
-            tv.maxLines = if (open) 2 else 40
-            more.text = if (open) "More" else "Less"
-        }
-        return box
     }
 
     // =====================================================================
@@ -314,24 +316,8 @@ class SettingsActivity : Activity() {
         ))
     }
 
-    /** A plain-words line at the top of each page: what the things here change. */
-    private fun explain(col: LinearLayout) {
-        val t = when (page) {
-            Page.THEME -> "How everything looks. Liquid Glass makes tiles, the dock and menus real glass that bends your wallpaper; Solid uses flat dark tiles. Adaptive colour tints them with your wallpaper's main colour."
-            Page.LOOK -> "The picture behind your home screen and app list. Leave it on your wallpaper, or pick one of your own photos just for Halo Launcher."
-            Page.CLOCK -> "The big clock on page 1. Pick a face, its colour, glass digits, alignment, and the style of the date under it. Tip: while editing the home screen, tap the clock to change it there."
-            Page.MOTION -> "How things move. App opening: the animation when you open and close an app. Turning pages: the effect when you swipe between home pages. Turn animations off for the snappiest feel."
-            Page.ICONS -> "How app icons look: Normal, Liquid Glass (frosted tiles) or an icon pack you installed or downloaded. Labels and icon size for the home screen are here too."
-            Page.DOCK -> "The floating bar at the bottom. Choose which apps sit in it (up to 5) and whether it's glass or solid."
-            Page.WIDGETS -> "Turn widgets on or off. On widgets appear on your home pages, where you can move and resize them. Drop one widget onto another of the same size to make a stack."
-            Page.GESTURES -> "What your fingers do on the home screen: swipe up for apps, swipe down for notifications (or Halo's center), double-tap to lock."
-            Page.WEATHER -> "Where the weather comes from: your location, or a city you type. Used by the weather item and widget."
-            Page.HALO -> "Halo is the dynamic island app. When both are installed they talk: music, timers and notifications show in the island, and swiping down can open Halo's notification center."
-            Page.BACKUP -> "Save your whole setup (layout, widgets, theme, dock, icons) to a file, and load it back on a new phone or after a reset."
-            else -> null
-        } ?: return
-        col.addView(foldable(t, Palette.SILVER, Color.argb(22, 255, 255, 255)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
-    }
+    /** Pages open with their title and one line now (see header); no wall of text. */
+    private fun explain(@Suppress("UNUSED_PARAMETER") col: LinearLayout) {}
 
     private fun updateCard(): View {
         val rel = latest
@@ -373,7 +359,7 @@ class SettingsActivity : Activity() {
     // =====================================================================
 
     private fun themePage(col: LinearLayout) {
-        note(col, "One switch for the whole launcher. Liquid Glass: tiles, folders, widgets, the dock, menus, the app list, icons and the clock digits are glass that bends the picture behind it. Solid: all of them become plain tiles. (Picking a theme also sets icons, dock and clock back to follow it.)")
+        note(col, "Liquid Glass turns tiles, folders, widgets and menus into glass that bends your background. Solid makes them plain tiles.")
         if (Build.VERSION.SDK_INT < 33) note(col, "Your Android version gets frosted glass; the full lens needs Android 13 or newer.")
         val cur = Prefs.get(this).getInt(Prefs.THEME, Glass.THEME_GLASS)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -402,7 +388,7 @@ class SettingsActivity : Activity() {
         }
         col.addView(row)
         section(col, "Adaptive colour")
-        note(col, "Tiles, glass, the dock, widgets, the app list and these settings take on the hue of your wallpaper. Change the wallpaper and everything follows.")
+        note(col, "Everything takes on your wallpaper's colour, and follows when you change it.")
         val ad = Prefs.get(this).getInt(Prefs.ADAPTIVE, Palette.ADAPT_OFF)
         val arow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for ((i, name) in Palette.ADAPT_NAMES.withIndex()) {
@@ -435,7 +421,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun lookPage(col: LinearLayout) {
-        note(col, "The picture behind your whole home screen; the glass bends it. With none chosen, Halo Launcher uses your phone's wallpaper.")
+        note(col, "With no picture chosen, your phone's wallpaper is used.")
         col.addView(preview(glass = Glass.enabled(this), small = false), LinearLayout.LayoutParams(dp(190), dp(380)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(6)
@@ -566,7 +552,11 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        dock.background = if (glass) previewGlass(dpf(18f)) else round(Palette.TILE, dpf(18f))
+        dock.background = when (Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)) {
+            DockBar.SOLID -> round(Palette.TILE, dpf(18f))
+            DockBar.CLEAR -> null
+            else -> previewGlass(dpf(18f))
+        }
         val apps = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }.ifEmpty { sampleApps() }.take(if (small) 4 else 5)
         for (a in apps) dock.addView(AppIconView(this, a, if (small) 22 else 28, false, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(if (small) 38 else 46)).apply { topMargin = dp(8) })
@@ -633,43 +623,61 @@ class SettingsActivity : Activity() {
     private fun chips(col: LinearLayout, title: String, key: String, names: List<String>, def: Int = 0, inPlace: Boolean = false) {
         section(col, title)
         val cur = Prefs.get(this).getInt(key, def)
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        // One rounded track with the chosen option as a white pill (One UI style).
+        val wide = names.size > 4
+        val track = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = round(Palette.TILE, dpf(22f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+        }
         val views = ArrayList<TextView>()
         fun style(v: TextView, on: Boolean) {
-            v.setTextColor(if (on) Color.BLACK else Palette.INK)
-            v.background = round(if (on) Palette.INK else Palette.GRAPHITE, dpf(14f))
+            v.setTextColor(if (on) Color.BLACK else Palette.SILVER)
+            v.background = if (on) round(Palette.INK, dpf(18f)) else null
         }
         for ((i, name) in names.withIndex()) {
-            row.addView(chip(name, i == cur).apply {
+            val v = text(13f, Palette.SILVER, bold = true).apply {
+                text = name
                 gravity = Gravity.CENTER
-                setPadding(dp(4), dp(9), dp(4), dp(9))
+                setPadding(dp(if (wide) 14 else 4), dp(10), dp(if (wide) 14 else 4), dp(10))
                 pressable()
                 setOnClickListener {
                     Prefs.get(this@SettingsActivity).edit().putInt(key, i).apply()
                     if (inPlace) {
-                        for ((k, v) in views.withIndex()) style(v, k == i)
+                        for ((k, o) in views.withIndex()) style(o, k == i)
                         it.scaleX = 0.92f
                         it.scaleY = 0.92f
-                        it.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                        it.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(android.view.animation.OvershootInterpolator(2.4f)).start()
                         refreshLive()
                         stale = false
                     } else {
                         render()
                     }
                 }
-            }.also { views += it }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
+            }
+            style(v, i == cur)
+            views += v
+            track.addView(v, if (wide) LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        col.addView(row)
+        if (wide) {
+            col.addView(android.widget.HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(track)
+            })
+        } else {
+            col.addView(track)
+        }
     }
 
     private fun motionPage(col: LinearLayout) {
-        note(col, "How apps open, how pages turn. Android keeps the real \"app flies out of its icon\" morph for the phone's own launcher (and Samsung doesn't share its closing animation), so Halo Launcher animates everything it's allowed to: the app's entrance, the home screen around it, the icon it lands back in, page turns and unlocking.")
+        note(col, "Turn Motion off for the snappiest feel.")
         col.addView(group(switchRow("Motion", "All animations. Off for a calmer, instant feel", Prefs.ANIMATIONS, true)))
         chips(col, "Opening an app", Prefs.OPEN_ANIM, Motion.OPEN_NAMES)
         note(col, when (Motion.open(this)) {
             Motion.OPEN_REVEAL -> "Reveal: the app is uncovered from the icon outwards, like a window opening."
             Motion.OPEN_FADE -> "Fade: a soft cross-fade, no movement."
-            else -> "Zoom: the app grows out of its icon while the home screen rushes past you, like iOS. Coming back, the home zooms in and the icon catches the app with a bounce."
+            else -> "Zoom: the app grows out of its icon, like iOS, and lands back in it with a bounce."
         })
         chips(col, "Turning pages", Prefs.PAGE_EFFECT, Motion.PAGE_NAMES, def = Motion.PAGE_DEPTH)
         // A live demo of the page effect: two mini pages you can scrub.
@@ -704,7 +712,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun clockPage(col: LinearLayout) {
-        note(col, "The clock, the date and the weather are separate pieces now: on the home screen, long-press and drag each one anywhere, or tap its size pill. Tap one while editing to come here.")
+        note(col, "Long-press the home screen to move the clock, date and weather anywhere.")
         // Live preview of all three on your background.
         val pv = stage(dpf(24f))
         val box = LinearLayout(this).apply {
@@ -832,87 +840,146 @@ class SettingsActivity : Activity() {
     private var packStatus = ""
 
     /**
-     * The icon center. On top, a live preview: your background with apps in
-     * the look, size and names you've picked. Under it the three looks side
-     * by side (tap one, the preview changes), then size and names, then icon
-     * packs as a row of tiles, then free packs to get.
+     * A One UI style segmented control: one rounded track, the chosen option
+     * a white pill inside it. Saves to [key] and redraws the page.
+     */
+    private fun segmented(col: LinearLayout, key: String, names: List<String>, def: Int) {
+        val cur = Prefs.get(this).getInt(key, def)
+        val track = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = round(Palette.TILE, dpf(22f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+        }
+        for ((i, name) in names.withIndex()) {
+            val on = i == cur
+            track.addView(text(13.5f, if (on) Color.BLACK else Palette.SILVER, bold = true).apply {
+                text = name
+                gravity = Gravity.CENTER
+                setPadding(0, dp(10), 0, dp(10))
+                background = if (on) round(Palette.INK, dpf(18f)) else null
+                pressable()
+                setOnClickListener {
+                    if (!on) {
+                        Prefs.get(this@SettingsActivity).edit().putInt(key, i).apply()
+                        render()
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        col.addView(track)
+    }
+
+    /**
+     * The icon center. On top, your home screen in small: eight apps and a
+     * dock, drawn in the look, size and names you've picked. Then the four
+     * looks as cards (two by two), size as one segmented control, names,
+     * your icon packs as tiles, and free packs to get.
      */
     private fun iconsPage(col: LinearLayout) {
         val samples = sampleApps()
         val style = Icons.style(this)
         val followTheme = !Prefs.get(this).contains(Prefs.ICON_STYLE)
         val p = Prefs.get(this)
-        // The same sizes the home screen uses, so the preview is true to life.
-        val size = listOf(54, 62, 70)[p.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (p.getBoolean(Prefs.SHOW_LABELS, false)) 6 else 0
         val names = p.getBoolean(Prefs.SHOW_LABELS, false)
+        // The same sizes the home screen uses, a little smaller so 4 fit across the preview.
+        val size = listOf(48, 54, 60)[p.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (names) 4 else 0
 
-        // Live preview
-        val st = stage(dpf(26f))
-        val grid = LinearLayout(this).apply {
+        // Your home screen in small
+        val st = stage(dpf(28f))
+        val home = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(10), dp(18), dp(10), dp(18))
+            setPadding(dp(8), dp(20), dp(8), dp(12))
         }
-        for (rowApps in samples.chunked(4).take(2)) {
+        for (rowApps in samples.take(8).chunked(4)) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
             }
             for (a in rowApps) row.addView(AppIconView(this, a, size, names, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             for (k in rowApps.size until 4) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-            grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            home.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
         }
-        st.addView(grid, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        val dockApps = Prefs.list(this, Prefs.DOCK).mapNotNull { AppRepo.byKey(it) }.ifEmpty { samples.drop(4) }.take(4)
+        val dock = DockBar(this).apply {
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            if (background is GlassDrawable) background = previewGlass(dpf(30f))
+        }
+        for (a in dockApps) dock.addView(AppIconView(this, a, size - 2, false, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        home.addView(dock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(10)
+            leftMargin = dp(4)
+            rightMargin = dp(4)
+        })
+        st.addView(home, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         col.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // The three looks, side by side
+        // The four looks, two by two
         section(col, "Look")
         val about = mapOf(
-            Icons.ORIGINAL to "The icons as the app (or your icon pack) draws them.",
-            Icons.GLASS to "iOS 26 style: each app's symbol on a pane of Liquid Glass that bends your background.",
-            Icons.MONO to "Just the white symbol, like Android's themed icons.",
+            Icons.ORIGINAL to "As each app draws it",
+            Icons.GLASS to "Colour symbol on glass",
+            Icons.CLEAR to "Frosted white on glass",
+            Icons.MONO to "Just the white symbol",
         )
-        val looks = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((n, i) in listOf(Icons.ORIGINAL, Icons.GLASS, Icons.MONO).withIndex()) {
-            val on = style == i
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(8), dp(12), dp(8), dp(10))
-                background = round(if (on) Palette.TILE2 else Palette.TILE, dpf(20f)).apply { setStroke(dp(2), if (on) Palette.INK else Color.argb(16, 255, 255, 255)) }
-                pressable()
-                setOnClickListener {
-                    it.bounce()
-                    p.edit().putInt(Prefs.ICON_STYLE, i).apply()
-                    Icons.forgetAll()
-                    render()
+        val order = listOf(Icons.ORIGINAL, Icons.GLASS, Icons.CLEAR, Icons.MONO)
+        for (pair in order.chunked(2)) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for ((n, i) in pair.withIndex()) {
+                val on = style == i
+                val card = FrameLayout(this).apply {
+                    background = round(if (on) Palette.TILE2 else Palette.TILE, dpf(22f)).apply { setStroke(dp(2), if (on) Palette.INK else Color.argb(16, 255, 255, 255)) }
+                    pressable()
+                    setOnClickListener {
+                        it.bounce()
+                        p.edit().putInt(Prefs.ICON_STYLE, i).apply()
+                        Icons.forgetAll()
+                        render()
+                    }
                 }
+                val inner = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(8), dp(8), dp(8), dp(12))
+                }
+                val mini = stage(dpf(16f))
+                val trio = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(2), dp(10), dp(2), dp(10))
+                }
+                for (a in samples.take(3)) trio.addView(AppIconView(this, a, 36, false, forceStyle = i, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                mini.addView(trio)
+                inner.addView(mini, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                inner.addView(text(14.5f, Palette.INK, bold = true).apply {
+                    text = Icons.NAMES[i]
+                    setPadding(dp(6), dp(10), 0, 0)
+                })
+                inner.addView(text(12f, Palette.GREY).apply {
+                    text = about[i].orEmpty() + if (followTheme && on) ", from your theme" else ""
+                    setPadding(dp(6), dp(2), 0, 0)
+                })
+                card.addView(inner)
+                // The chosen one gets a check in its corner.
+                if (on) card.addView(ImageView(this).apply {
+                    setImageResource(R.drawable.ic_check)
+                    imageTintList = ColorStateList.valueOf(Color.BLACK)
+                    setPadding(dp(4), dp(4), dp(4), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(Palette.INK)
+                    }
+                }, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(14)
+                    rightMargin = dp(14)
+                })
+                line.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (n > 0) marginStart = dp(10) })
             }
-            val mini = stage(dpf(14f))
-            val pair = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(8), dp(4), dp(8))
-            }
-            for (a in samples.take(2)) pair.addView(AppIconView(this, a, 34, false, forceStyle = i, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            mini.addView(pair)
-            card.addView(mini, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            card.addView(text(12.5f, if (on) Palette.INK else Palette.SILVER, bold = true).apply {
-                text = Icons.NAMES[i]
-                gravity = Gravity.CENTER
-                setPadding(0, dp(8), 0, 0)
-            })
-            looks.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (n > 0) marginStart = dp(8) })
+            col.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
-        col.addView(looks)
-        col.addView(text(12.5f, Palette.GREY, lines = 3).apply {
-            text = about[style].orEmpty() + if (followTheme) "  Follows your theme until you pick one." else ""
-            setPadding(dp(6), dp(8), dp(6), 0)
-        })
 
-        // Home screen apps
-        chips(col, "Size", Prefs.HOME_ICON_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
-        col.addView(group(switchRow("Show names", "Names under apps you put on the home screen", Prefs.SHOW_LABELS, false) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        // Size and names
+        section(col, "Size")
+        segmented(col, Prefs.HOME_ICON_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
+        col.addView(group(switchRow("Show names", "Names under apps on the home screen", Prefs.SHOW_LABELS, false) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
 
         // Installed packs, as a row of tiles
         section(col, "Icon pack")
@@ -1025,7 +1092,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun dockPage(col: LinearLayout) {
-        note(col, "The dock floats just above the bottom edge. 4 to 6 apps; the icons resize so any number fits. On the home screen, long-press to edit: drag dock apps to reorder them, tap the minus to remove one, or + to add.")
+        note(col, "4 to 6 apps. Long-press the home screen to reorder, remove or add them.")
         val frame = FrameLayout(this).apply {
             clipToOutline = true
             outlineProvider = object : android.view.ViewOutlineProvider() {
@@ -1049,21 +1116,8 @@ class SettingsActivity : Activity() {
             bottomMargin = dp(12)
         })
         col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(14) })
-        section(col, "Style")
-        val cur = Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)
-        val styles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((i, name) in DockBar.NAMES.withIndex()) {
-            styles.addView(chip(name, i == cur).apply {
-                gravity = Gravity.CENTER
-                setPadding(0, dp(9), 0, dp(9))
-                pressable()
-                setOnClickListener {
-                    Prefs.get(this@SettingsActivity).edit().putInt(Prefs.DOCK_STYLE, i).apply()
-                    render()
-                }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i > 0) marginStart = dp(8) })
-        }
-        col.addView(styles, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) })
+        chips(col, "Style", Prefs.DOCK_STYLE, DockBar.NAMES, def = DockBar.GLASS)
+        col.addView(View(this), LinearLayout.LayoutParams(1, dp(16)))
         col.addView(button("Choose dock apps") {
             if (keys.isEmpty()) Prefs.setList(this, Prefs.DOCK, apps.map { it.key })
             startActivity(Intent(this, PickAppsActivity::class.java).putExtra("key", Prefs.DOCK).putExtra("max", LauncherActivity.DOCK_MAX))
@@ -1071,7 +1125,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun widgetsPage(col: LinearLayout) {
-        note(col, "Your widgets, live. Pick a size (Small, Medium or Large; bigger sizes show more) or switch one off. To put one exactly where you want, long-press the home screen and drag it anywhere, on any page.")
+        note(col, "Long-press the home screen to drag a widget anywhere. Drop one on another of the same size to stack them.")
         val actions = object : WidgetActions {
             override fun askPermission(permission: String) = requestPermissions(arrayOf(permission), 6)
             override fun openSettingsPage(page: String) = go(Page.WEATHER)
@@ -1250,7 +1304,7 @@ class SettingsActivity : Activity() {
     private var backupStatus = ""
 
     private fun backupPage(col: LinearLayout) {
-        note(col, "Saves your home screen (layout, folders, stacks, dock), widgets' settings, theme, clock, icons, weather city, notes and your background picture into one file. Keep it in Google Drive or Downloads, and restore it on this phone or a new one.")
+        note(col, "Your layout, widgets, theme, clock, icons and background in one file. Restore it on this phone or a new one.")
         if (backupStatus.isNotEmpty()) note(col, backupStatus)
         col.addView(button("Back up now") {
             val name = "halo-launcher-backup-" + android.text.format.DateFormat.format("yyyy-MM-dd", java.util.Date()) + ".json"
@@ -1286,8 +1340,13 @@ class SettingsActivity : Activity() {
     // Building blocks
     // =====================================================================
 
+    /** A small grey line of help, like Halo's footnotes. */
     private fun note(col: LinearLayout, t: String) {
-        col.addView(foldable(t, Palette.GREY, Color.argb(12, 255, 255, 255)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        col.addView(text(12.5f, Palette.GREY, lines = 6).apply {
+            text = t
+            setLineSpacing(0f, 1.2f)
+            setPadding(dp(18), dp(4), dp(18), dp(12))
+        })
     }
 
     private fun section(col: LinearLayout, t: String) {
@@ -1340,7 +1399,7 @@ class SettingsActivity : Activity() {
 
     private fun nav(icon: Int, title: String, summary: String, onClick: () -> Unit): View {
         val r = row(title, summary, chevron(), onClick)
-        val tc = tileColours[title]
+        val tc = if (tileColours.containsKey(title)) tileColour(title) else null
         r.addView(ImageView(this).apply {
             setImageResource(icon)
             imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Color.WHITE)
@@ -1480,9 +1539,13 @@ class SettingsActivity : Activity() {
 
 
     private fun sampleApps(): List<App> {
-        val wanted = listOf("com.whatsapp", "com.google.android.youtube", "com.spotify.music", "com.android.vending", "com.instagram.android", "com.twitter.android")
+        val wanted = listOf(
+            "com.whatsapp", "com.google.android.youtube", "com.spotify.music", "com.instagram.android",
+            "com.android.chrome", "com.google.android.gm", "com.twitter.android", "com.android.vending",
+            "com.zhiliaoapp.musically", "com.google.android.apps.photos", "com.discord", "com.netflix.mediaclient",
+        )
         val list = wanted.mapNotNull { p -> AppRepo.apps.firstOrNull { it.pkg == p } }
-        return (list + AppRepo.apps).distinctBy { it.key }.take(5)
+        return (list + AppRepo.apps).distinctBy { it.key }.take(8)
     }
 
     private fun loadPic(key: String) = try {

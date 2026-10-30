@@ -36,7 +36,7 @@ object Weather {
         61, 63, 65, 66, 67, 80, 81, 82 -> "Rain"
         71, 73, 75, 77, 85, 86 -> "Snow"
         95, 96, 99 -> "Thunderstorm"
-        else -> "—"
+        else -> "…"
     }
 
     fun icon(code: Int, day: Boolean): Int = when (code) {

@@ -39,6 +39,7 @@ class AppIconView(
     var app: App = app
         private set
     private var tile: android.graphics.drawable.Drawable? = null
+    private var sheenTile: LiquidSheen? = null
     private val tileRect = android.graphics.Rect()
     private var result: Icons.Result? = null
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -128,18 +129,23 @@ class AppIconView(
             iconPaint.alpha = (255 * fade).toInt()
             dst.set(cx - px / 2f, top, cx + px / 2f, top + px)
             if (it.glass) {
-                // The tile follows the theme: real glass with Liquid Glass, a solid tile with Solid.
+                // Real glass in every theme: on the home screen it bends your
+                // background live; in menus it's frosted. Then the light: a
+                // bright top edge, a soft sheen across the top, a faint dark
+                // bottom edge, and a drop shadow so it floats.
                 val t = tile ?: (
-                    when {
-                        !Glass.enabled(context) -> context.round(Palette.GRAPHITE, px * 0.2237f).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
-                        liveGlass -> GlassDrawable(this, px * 0.2237f, darkness = 0.04f, bendPx = dpf(7f), owned = true)
-                        else -> context.round(Color.argb(40, 255, 255, 255), px * 0.2237f).apply { setStroke(dp(1), Color.argb(60, 255, 255, 255)) }
-                    }
+                    if (liveGlass) GlassDrawable(this, px * 0.2237f, darkness = 0.02f, bendPx = dpf(8f), owned = true)
+                    else LiquidTile(px * 0.2237f)
                     ).also { d -> tile = d }
                 dst.round(tileRect)
+                val sheen = sheenTile ?: LiquidSheen(px * 0.2237f).also { d -> sheenTile = d }
+                sheen.bounds = tileRect
+                sheen.alpha = (255 * fade).toInt()
+                sheen.drawShadow(canvas)
                 t.bounds = tileRect
                 t.alpha = (255 * fade).toInt()
                 t.draw(canvas)
+                sheen.draw(canvas)
             }
             canvas.drawBitmap(it.bitmap, null, dst, iconPaint)
         }
@@ -516,4 +522,89 @@ class PageDots(context: Context) : View(context) {
             x += widths[i] + gap
         }
     }
+}
+
+
+/** Frosted glass tile for menus and previews (where the background isn't bent live). */
+class LiquidTile(private val radius: Float) : android.graphics.drawable.Drawable() {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+    private var a = 255
+    private var shaderFor = 0
+    override fun draw(c: Canvas) {
+        r.set(bounds)
+        if (shaderFor != bounds.height()) {
+            shaderFor = bounds.height()
+            p.shader = android.graphics.LinearGradient(0f, r.top, 0f, r.bottom, Color.argb(92, 255, 255, 255), Color.argb(46, 255, 255, 255), android.graphics.Shader.TileMode.CLAMP)
+        }
+        p.alpha = a
+        c.drawRoundRect(r, radius, radius, p)
+    }
+    override fun setAlpha(alpha: Int) { a = alpha }
+    override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/**
+ * The light on a Liquid Glass icon: a crisp highlight along the top and
+ * left edges fading round to nothing, a fainter one bottom right (light
+ * passing through), a soft sheen over the top third, and a shadow under
+ * the tile. Shaders are made once per size.
+ */
+class LiquidSheen(private val radius: Float) : android.graphics.drawable.Drawable() {
+    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val gloss = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shadow = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+    private var builtFor = -1
+    private var a = 255
+
+    private fun build() {
+        if (builtFor == bounds.width() * 7 + bounds.height()) return
+        builtFor = bounds.width() * 7 + bounds.height()
+        val w = bounds.width().toFloat()
+        val h = bounds.height().toFloat()
+        val l = bounds.left.toFloat()
+        val t = bounds.top.toFloat()
+        rim.strokeWidth = (w * 0.022f).coerceAtLeast(1.5f)
+        rim.shader = android.graphics.LinearGradient(
+            l, t, l + w, t + h,
+            intArrayOf(Color.argb(230, 255, 255, 255), Color.argb(40, 255, 255, 255), Color.argb(0, 255, 255, 255), Color.argb(120, 255, 255, 255)),
+            floatArrayOf(0f, 0.35f, 0.6f, 1f),
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+        gloss.shader = android.graphics.LinearGradient(
+            l, t, l, t + h * 0.55f,
+            Color.argb(70, 255, 255, 255), Color.argb(0, 255, 255, 255),
+            android.graphics.Shader.TileMode.CLAMP,
+        )
+        shadow.color = Color.argb(70, 0, 0, 0)
+        shadow.maskFilter = android.graphics.BlurMaskFilter(w * 0.08f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+
+    fun drawShadow(c: Canvas) {
+        build()
+        r.set(bounds)
+        r.offset(0f, bounds.height() * 0.05f)
+        r.inset(bounds.width() * 0.04f, bounds.height() * 0.04f)
+        shadow.alpha = (70 * a / 255)
+        c.drawRoundRect(r, radius, radius, shadow)
+    }
+
+    override fun draw(c: Canvas) {
+        build()
+        r.set(bounds)
+        gloss.alpha = a
+        c.drawRoundRect(r, radius, radius, gloss)
+        val i = rim.strokeWidth / 2f
+        r.inset(i, i)
+        rim.alpha = a
+        c.drawRoundRect(r, radius - i, radius - i, rim)
+    }
+
+    override fun setAlpha(alpha: Int) { a = alpha }
+    override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }

@@ -173,7 +173,9 @@ object Icons {
     const val ORIGINAL = 2
     /** Liquid Glass: the app's symbol floating on a pane of glass that bends your background (drawn live). */
     const val GLASS = 5
-    val NAMES = mapOf(ORIGINAL to "Normal", GLASS to "Liquid Glass", MONO to "White line")
+    /** Liquid Glass, Clear: the symbol itself is frosted white glass, like iOS 26's Clear icons. */
+    const val CLEAR = 6
+    val NAMES = mapOf(ORIGINAL to "Normal", GLASS to "Liquid Glass", CLEAR to "Clear glass", MONO to "White line")
 
     /** [glass] = draw a glass tile behind the (transparent) symbol. */
     class Result(val bitmap: Bitmap, val glass: Boolean = false)
@@ -196,7 +198,7 @@ object Icons {
         val p = Prefs.get(ctx)
         if (!p.contains(Prefs.ICON_STYLE)) return if (Glass.enabled(ctx)) GLASS else ORIGINAL
         return when (val v = p.getInt(Prefs.ICON_STYLE, ORIGINAL)) {
-            MONO, GLASS, ORIGINAL -> v
+            MONO, GLASS, CLEAR, ORIGINAL -> v
             else -> ORIGINAL
         }
     }
@@ -257,7 +259,7 @@ object Icons {
         }
     }
 
-    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v4"
+    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v5"
 
     fun load(ctx: Context, app: App, style: Int, size: Int, done: (Result) -> Unit) {
         val k = keyOf(app, style, size)
@@ -316,7 +318,11 @@ object Icons {
             }
             GLASS -> {
                 val glyph = if (packed == null) monoGlyph(ctx, app, own) else null
-                return Result(symbol(icon, glyph, size, keepColour = true), glass = true)
+                return Result(glassy(symbol(icon, glyph, size, keepColour = true), clear = false), glass = true)
+            }
+            CLEAR -> {
+                val glyph = if (packed == null) monoGlyph(ctx, app, own) else null
+                return Result(glassy(symbol(icon, glyph, size, keepColour = false), clear = true), glass = true)
             }
             else -> {
                 val badged = if (packed == null) ctx.packageManager.getUserBadgedIcon(icon, app.user) else icon
@@ -452,6 +458,42 @@ object Icons {
             return centred(w, size, fill)
         }
         return centred(sym, size, fill)
+    }
+
+    /**
+     * Makes a symbol look like it's made of glass, the way iOS 26 draws its
+     * icon layers: a soft shadow under it for depth, light catching its top
+     * edge (a bright sheen fading down), and a slightly darker bottom. For
+     * Clear, the symbol is frosted white glass (a touch see-through).
+     */
+    private fun glassy(sym: Bitmap, clear: Boolean): Bitmap {
+        val n = sym.width
+        val out = Bitmap.createBitmap(n, sym.height, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        // Depth: a soft shadow just under the symbol.
+        val alpha = sym.extractAlpha()
+        val sh = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(if (clear) 70 else 90, 0, 0, 0)
+            maskFilter = android.graphics.BlurMaskFilter(n * 0.035f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        }
+        c.drawBitmap(alpha, 0f, n * 0.022f, sh)
+        alpha.recycle()
+        // The symbol itself in its own layer, so the light only lands on it.
+        val layer = c.saveLayer(null, null)
+        c.drawBitmap(sym, 0f, 0f, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply { if (clear) this.alpha = 235 })
+        val light = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(
+                0f, n * 0.2f, 0f, n * 0.8f,
+                intArrayOf(android.graphics.Color.argb(if (clear) 120 else 95, 255, 255, 255), android.graphics.Color.argb(0, 255, 255, 255), android.graphics.Color.argb(if (clear) 40 else 55, 0, 0, 0)),
+                floatArrayOf(0f, 0.55f, 1f),
+                android.graphics.Shader.TileMode.CLAMP,
+            )
+            xfermode = android.graphics.PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+        }
+        c.drawRect(0f, 0f, n.toFloat(), sym.height.toFloat(), light)
+        c.restoreToCount(layer)
+        sym.recycle()
+        return out
     }
 
     /** Centres a symbol and scales it so its longest side is [fill] of the icon. */
