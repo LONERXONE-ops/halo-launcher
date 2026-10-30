@@ -336,39 +336,153 @@ class SettingsActivity : Activity() {
     /** Pages open with their title and one line now (see header); no wall of text. */
     private fun explain(@Suppress("UNUSED_PARAMETER") col: LinearLayout) {}
 
+    private var notesOpen = false
+    private var barView: UpdateBar? = null
+    private var pctView: TextView? = null
+
+    /**
+     * The update card: your version big, a chip saying where you stand,
+     * "What's new" folding open into a list of what changed, a bar filling to
+     * 100% while it downloads, and one button for the next step.
+     */
     private fun updateCard(): View {
         val rel = latest
         val newer = rel != null && rel.build > Updater.buildOf(version())
         val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = round(Palette.TILE, dpf(24f))
+            background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
             setPadding(dp(18), dp(16), dp(18), dp(16))
+            layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
         }
-        c.addView(text(10.5f, Palette.GREY, caps = true).apply { text = "Version ${version()}" })
-        c.addView(text(16f, Palette.INK, bold = true, lines = 2).apply {
-            text = updateStatus
-            setPadding(0, dp(4), 0, dp(12))
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        left.addView(text(11f, Palette.GREY, caps = true).apply { text = "Halo Launcher" })
+        left.addView(text(24f, Palette.INK, bold = true).apply {
+            text = "v" + version()
+            setPadding(0, dp(2), 0, 0)
+        })
+        top.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val (chipText, chipColor) = when {
+            downloading >= 0f -> "Downloading" to 0xFF5AAAFF.toInt()
+            newer -> "${rel?.tag} is out" to Palette.GREEN
+            updateStatus == "You're up to date" -> "Up to date" to Palette.GREEN
+            else -> updateStatus.take(26) to Palette.GREY
+        }
+        top.addView(text(12f, chipColor, bold = true).apply {
+            text = chipText
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = round(Color.argb(30, Color.red(chipColor), Color.green(chipColor), Color.blue(chipColor)), dpf(14f))
         }.also { statusView = it })
-        c.addView(button(
-            when {
-                downloading >= 0f -> "Downloading ${(downloading * 100).toInt()}%"
-                newer && rel != null -> "Download & install ${rel.tag}"
-                else -> "Check for updates"
-            },
-        ) {
-            when {
-                downloading >= 0f -> {}
-                newer && rel != null -> install(rel)
-                else -> check()
+        c.addView(top)
+
+        if (downloading >= 0f) {
+            val bar = UpdateBar(this).apply { set(downloading, animate = false) }
+            barView = bar
+            c.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10)).apply { topMargin = dp(16) })
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(8), 0, 0)
             }
-        }.also { progressView = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
-        if (rel != null && newer && rel.notes.isNotBlank()) {
-            c.addView(text(13f, Palette.SILVER, lines = 8).apply {
-                text = rel.notes.take(500)
-                setPadding(0, dp(12), 0, 0)
-            })
+            info.addView(text(12.5f, Palette.GREY).apply { text = "Downloading ${rel?.tag ?: ""}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            info.addView(text(12.5f, Palette.INK, bold = true).apply { text = pctText(downloading, rel) }.also { pctView = it })
+            c.addView(info)
+        } else {
+            barView = null
+            pctView = null
+        }
+
+        if (newer && rel != null) {
+            val points = whatsNew(rel.notes)
+            if (points.isNotEmpty()) {
+                c.addView(View(this).apply { setBackgroundColor(Palette.GRAPHITE) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(14) })
+                val head = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(12), 0, dp(12))
+                    isClickable = true
+                }
+                head.addView(text(15f, Palette.INK, bold = true).apply { text = "What's new in ${rel.tag}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val chev = ImageView(this).apply {
+                    setImageResource(R.drawable.ic_chevron)
+                    imageTintList = ColorStateList.valueOf(Palette.GREY)
+                    rotation = if (notesOpen) 270f else 90f
+                }
+                head.addView(chev, LinearLayout.LayoutParams(dp(20), dp(20)))
+                val list = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, 0, 0, dp(6))
+                    visibility = if (notesOpen) View.VISIBLE else View.GONE
+                }
+                for (pt in points) {
+                    val r = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, dp(5), 0, dp(5))
+                    }
+                    r.addView(View(this).apply { background = round(Palette.GREEN, dpf(3f)) }, LinearLayout.LayoutParams(dp(6), dp(6)).apply {
+                        topMargin = dp(7)
+                        marginEnd = dp(12)
+                    })
+                    r.addView(text(13.5f, Palette.SILVER, lines = 6).apply {
+                        text = pt
+                        setLineSpacing(0f, 1.2f)
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    list.addView(r)
+                }
+                head.setOnClickListener {
+                    notesOpen = !notesOpen
+                    chev.animate().rotation(if (notesOpen) 270f else 90f).setDuration(260L).setInterpolator(DecelerateInterpolator(2f)).start()
+                    if (notesOpen) {
+                        list.visibility = View.VISIBLE
+                        list.alpha = 0f
+                        list.translationY = -dpf(8f)
+                        list.animate().alpha(1f).translationY(0f).setDuration(260L).start()
+                    } else {
+                        list.visibility = View.GONE
+                    }
+                }
+                c.addView(head)
+                c.addView(list)
+            }
+        }
+
+        val btnText = when {
+            downloading >= 0f -> null
+            newer && rel != null -> "Download & install ${rel.tag}" + if (rel.size > 0) "  ·  ${"%.1f".format(rel.size / 1_048_576.0)} MB" else ""
+            updateStatus == "Checking…" -> "Checking…"
+            else -> "Check for updates"
+        }
+        if (btnText != null) {
+            c.addView(button(btnText) {
+                when {
+                    newer && rel != null -> install(rel)
+                    updateStatus != "Checking…" -> check()
+                }
+            }.also { progressView = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(14) })
+        } else {
+            progressView = null
         }
         return c
+    }
+
+    private fun pctText(f: Float, rel: Updater.Release?): String {
+        val pct = (f * 100).toInt().coerceIn(0, 100)
+        val size = rel?.size ?: 0L
+        return if (size > 0) "$pct%  ·  ${"%.1f".format(size * f / 1_048_576.0)} of ${"%.1f".format(size / 1_048_576.0)} MB" else "$pct%"
+    }
+
+    /** A release's notes as short points, without the commit sign-off lines. */
+    private fun whatsNew(notes: String): List<String> {
+        val body = notes.lines().filterNot { l ->
+            val t = l.trim()
+            t.startsWith("Co-Authored-By", true) || t.startsWith("Claude-Session", true) || t.startsWith("http") || t.isBlank()
+        }.joinToString(" ")
+        return body.split(Regex("[;\\n]|(?<=[a-z])\\. ")).map { it.trim().trimEnd('.') }
+            .filter { it.length > 3 }
+            .map { it.replaceFirstChar { ch -> ch.uppercase() } }
+            .take(10)
     }
 
     // =====================================================================
@@ -1918,10 +2032,10 @@ class SettingsActivity : Activity() {
             updateStatus = if (f >= 1f) "Confirm the install" else "Downloading ${rel.tag}"
             // Progress only changes two texts; rebuilding the whole menu every
             // percent made it flicker and jump (in your recording).
-            val pv = progressView
-            if (f < 1f && pv != null && pv.isAttachedToWindow) {
-                pv.text = "Downloading ${(f * 100).toInt()}%"
-                statusView?.text = updateStatus
+            val bar = barView
+            if (f < 1f && bar != null && bar.isAttachedToWindow) {
+                bar.set(f, animate = true)
+                pctView?.text = pctText(f, rel)
             } else if (page == Page.MENU) {
                 render()
             }
@@ -1930,5 +2044,72 @@ class SettingsActivity : Activity() {
             updateStatus = "Failed: ${msg.take(40)}"
             render()
         })
+    }
+}
+
+
+/** The download bar: fills smoothly (each step glides), with a soft light sweeping along it. */
+class UpdateBar(context: android.content.Context) : View(context) {
+    private val track = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(40, 255, 255, 255) }
+    private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val shine = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val r = android.graphics.RectF()
+    private var shown = 0f
+    private var glide: android.animation.ValueAnimator? = null
+    private var sweep = 0f
+    private val sweeper = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1400L
+        repeatCount = android.animation.ValueAnimator.INFINITE
+        addUpdateListener {
+            sweep = it.animatedValue as Float
+            invalidate()
+        }
+    }
+
+    fun set(f: Float, animate: Boolean) {
+        val to = f.coerceIn(0f, 1f)
+        glide?.cancel()
+        if (!animate) {
+            shown = to
+            invalidate()
+            return
+        }
+        glide = android.animation.ValueAnimator.ofFloat(shown, to).apply {
+            duration = 260L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                shown = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        sweeper.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        sweeper.cancel()
+        glide?.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val h = height.toFloat()
+        val w = width.toFloat()
+        r.set(0f, 0f, w, h)
+        c.drawRoundRect(r, h / 2f, h / 2f, track)
+        if (shown <= 0f) return
+        val fw = (w * shown).coerceAtLeast(h)
+        val accent = if (Palette.ACCENT == Palette.INK) Color.rgb(90, 170, 255) else Palette.ACCENT
+        fill.shader = android.graphics.LinearGradient(0f, 0f, fw, 0f, accent, Color.WHITE, android.graphics.Shader.TileMode.CLAMP)
+        r.set(0f, 0f, fw, h)
+        c.drawRoundRect(r, h / 2f, h / 2f, fill)
+        val x = -fw * 0.3f + fw * 1.6f * sweep
+        shine.shader = android.graphics.LinearGradient(x - fw * 0.25f, 0f, x + fw * 0.25f, 0f,
+            intArrayOf(Color.TRANSPARENT, Color.argb(110, 255, 255, 255), Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, h / 2f, h / 2f, shine)
     }
 }
