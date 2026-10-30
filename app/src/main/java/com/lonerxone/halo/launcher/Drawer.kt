@@ -70,9 +70,31 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     var isOpen = false
         private set
 
-    /** Liquid Glass over your picture, or solid black. */
+    /** A soft wash of your wallpaper's colour across the top, behind the apps. */
+    private val wash = View(context)
+    private val heading = context.text(30f, Palette.INK, bold = true).apply { text = "Apps" }
+    private val count = context.text(13f, Palette.GREY)
+
+    /**
+     * Liquid Glass over your picture, or black; either way with a wash of
+     * your wallpaper's colour across the top, and the letter you're on, the
+     * jump bubble and the handle in that colour too.
+     */
     fun restyle() {
         background = if (Glass.enabled(context)) GlassDrawable(this, dpf(2f), darkness = 0.66f, bendPx = 0f, rimLight = false) else android.graphics.drawable.ColorDrawable(Color.BLACK)
+        val wc = Glass.wallColor(context)
+        wash.background = if (wc == null) null else android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.argb(150, (Color.red(wc) * 0.55f).toInt(), (Color.green(wc) * 0.55f).toInt(), (Color.blue(wc) * 0.55f).toInt()),
+                Color.argb(40, (Color.red(wc) * 0.4f).toInt(), (Color.green(wc) * 0.4f).toInt(), (Color.blue(wc) * 0.4f).toInt()),
+                Color.TRANSPARENT,
+            ),
+        )
+        val accent = if (wc == null) Palette.INK else Glass.accent(context)
+        letters.accent = accent
+        bubble.background = context.round(accent, dpf(30f))
+        bubble.setTextColor(if (Color.red(accent) * 0.3 + Color.green(accent) * 0.59 + Color.blue(accent) * 0.11 > 150) Color.BLACK else Color.WHITE)
         pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(27f), darkness = 0.3f, bendPx = dpf(10f)) else context.round(Color.rgb(32, 32, 35), dpf(27f)).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
     }
 
@@ -132,22 +154,17 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         pill.addView(searchClose, LinearLayout.LayoutParams(dp(32), dp(32)))
 
-        usedTitle = context.text(10.5f, Palette.GREY, caps = true).apply {
-            text = "Most used"
-            setPadding(dp(6), dp(18), 0, dp(6))
-        }
-        content.addView(usedTitle)
-        // Suggestions sit straight on the background, like the Pixel and iOS: no box.
-        usedRow = LinearLayout(context).apply {
+        // No "Most used" row any more: a clean heading, how many apps, then all of them A to Z.
+        usedTitle = context.text(10.5f, Palette.GREY, caps = true)
+        usedRow = LinearLayout(context)
+        val head = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(2), dp(18), dp(4))
+            gravity = Gravity.BOTTOM
+            setPadding(dp(6), dp(6), dp(18), dp(4))
         }
-        content.addView(usedRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        content.addView(View(context).apply { setBackgroundColor(Color.argb(30, 255, 255, 255)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
-            topMargin = dp(10)
-            marginStart = dp(6)
-            marginEnd = dp(24)
-        })
+        head.addView(heading, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(count.apply { setPadding(0, 0, 0, dp(6)) })
+        content.addView(head)
 
         grid = GridView(context).apply {
             numColumns = 4
@@ -168,6 +185,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
         content.addView(extras, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         content.addView(grid, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(wash, LayoutParams(LayoutParams.MATCH_PARENT, dp(320)))
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         // A–Z strip down the right edge: slide along it to jump.
@@ -293,18 +311,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     fun refresh() {
         filter()
-        usedRow.removeAllViews()
         val hidden = Prefs.list(context, Prefs.HIDDEN).toSet()
-        val used = AppRepo.apps.filter { it.key !in hidden }
-            .map { it to AppRepo.launches(context, it) }
-            .filter { it.second > 0 }
-            .sortedByDescending { it.second }
-            .take(4)
-            .map { it.first }
-        val list = used.ifEmpty { AppRepo.apps.filter { it.key !in hidden }.take(4) }
-        for (a in list) {
-            usedRow.addView(iconFor(a), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
+        val n = AppRepo.apps.count { it.key !in hidden }
+        count.text = if (n == 1) "1 app" else "$n apps"
     }
 
     private fun filter() {
@@ -313,9 +322,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
         shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
             .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
-        val v = if (q.isEmpty()) View.VISIBLE else View.GONE
-        usedRow.visibility = v
-        usedTitle.visibility = v
+        heading.text = if (q.isEmpty()) "Apps" else "Results"
+        count.text = if (q.isEmpty()) count.text else "${shown.size}"
         letters.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
         letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
@@ -588,6 +596,12 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 /** The A–Z strip: touch and slide along it to jump through the list. */
 @SuppressLint("ViewConstructor")
 class LetterStrip(context: Context, private val onPick: (Char?) -> Unit) : View(context) {
+    /** The letter under your finger, in your wallpaper's colour. */
+    var accent = Palette.INK
+        set(v) {
+            field = v
+            invalidate()
+        }
     var letters: List<Char> = emptyList()
         set(v) {
             field = v
@@ -610,7 +624,7 @@ class LetterStrip(context: Context, private val onPick: (Char?) -> Unit) : View(
         val total = size * letters.size
         val top = (height - total) / 2f
         for ((i, c) in letters.withIndex()) {
-            paint.color = if (c == current) Palette.INK else Palette.SILVER
+            paint.color = if (c == current) accent else Palette.SILVER
             canvas.drawText(c.toString(), width / 2f, top + size * i + size * 0.75f, paint)
         }
     }
