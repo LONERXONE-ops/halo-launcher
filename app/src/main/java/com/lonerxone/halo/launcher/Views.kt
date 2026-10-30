@@ -391,7 +391,8 @@ class DockBar(context: Context) : LinearLayout(context) {
                     setStroke(dp(1), Color.argb(50, 255, 255, 255))
                 }
             }
-            else -> if (Glass.enabled(context)) GlassDrawable(this, r, 0.22f) else context.round(Palette.TILE, r)
+            // Glass means glass, whatever the theme (the Solid theme used to turn it into a tile).
+            else -> GlassDrawable(this, r, 0.22f)
         }
     }
 

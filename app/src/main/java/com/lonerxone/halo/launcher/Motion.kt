@@ -71,12 +71,17 @@ object Motion {
                 PAGE_DEPTH -> if (o > 0f) {
                     // The next page rises from behind instead of sliding in
                     // (drawn underneath, so the page you leave slides over it).
+                    // It only appears once the page you're leaving has mostly
+                    // gone, so the two never show through each other.
                     v.translationZ = -1f
                     v.translationX = -w * o
-                    val s = 0.82f + 0.18f * (1f - o)
+                    val s = 0.84f + 0.16f * (1f - o)
                     v.scaleX = s
                     v.scaleY = s
-                    v.alpha = 1f - o
+                    v.alpha = ((0.55f - o) / 0.55f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+                } else {
+                    // The page you leave fades out quickly as it slides away.
+                    v.alpha = (1f + o * 2f).coerceIn(0f, 1f)
                 }
                 PAGE_ZOOM -> {
                     val s = 1f - 0.16f * abs(o)
@@ -95,7 +100,8 @@ object Motion {
                     val s = 1f + 0.12f * o
                     v.scaleX = s
                     v.scaleY = s
-                    v.alpha = 1f + o * 0.7f
+                    // Gone before the next page covers it, so they don't show through each other.
+                    v.alpha = (1f + o * 1.6f).coerceIn(0f, 1f)
                 }
                 PAGE_CAROUSEL -> {
                     v.cameraDistance = w * 10f

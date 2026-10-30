@@ -191,10 +191,82 @@ class SettingsActivity : Activity() {
             setOnClickListener { go(Page.MENU) }
         }
         col.addView(back, LinearLayout.LayoutParams(dp(42), dp(42)).apply { topMargin = dp(10) })
-        col.addView(text(30f, Palette.INK, bold = true).apply {
-            text = page.title
-            setPadding(dp(4), dp(26), 0, dp(14))
+        // The page's own colour tile (the same as in the menu) beside a big title.
+        val (icon, key) = pageIcon()
+        val tc = tileColours[key] ?: Palette.GRAPHITE
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(22), 0, dp(14))
+        }
+        head.addView(ImageView(this).apply {
+            setImageResource(icon)
+            imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Color.WHITE)
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(lighten(tc), tc)).apply { cornerRadius = dpf(15f) }
+            elevation = dpf(6f)
+        }, LinearLayout.LayoutParams(dp(50), dp(50)).apply { marginEnd = dp(14) })
+        head.addView(text(28f, Palette.INK, bold = true).apply { text = page.title }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(head)
+    }
+
+    /** The menu icon and colour of the page being shown. */
+    private fun pageIcon(): Pair<Int, String> = when (page) {
+        Page.THEME -> R.drawable.ic_glass to "Theme"
+        Page.LOOK -> R.drawable.ic_image to "Background"
+        Page.CLOCK -> R.drawable.ic_clock to "Clock & date"
+        Page.MOTION -> R.drawable.ic_gesture to "Animations"
+        Page.ICONS -> R.drawable.ic_apps to "Icons"
+        Page.DOCK -> R.drawable.ic_dock to "Dock"
+        Page.WIDGETS -> R.drawable.ic_widgets to "Widgets"
+        Page.GESTURES -> R.drawable.ic_gesture to "Gestures"
+        Page.WEATHER -> R.drawable.w_sun to "Weather"
+        Page.HALO -> R.drawable.ic_halo to "Halo"
+        Page.BACKUP -> R.drawable.ic_arrow_down to "Backup & restore"
+        else -> R.drawable.ic_info to "About"
+    }
+
+    /**
+     * Explanations fold to two lines with "More"; tap to read the rest.
+     * Pages used to open with walls of grey text.
+     */
+    private fun foldable(t: String, color: Int, bg: Int): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = round(bg, dpf(18f))
+            layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
+        }
+        box.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_info)
+            imageTintList = ColorStateList.valueOf(Palette.GREY)
+        }, LinearLayout.LayoutParams(dp(16), dp(16)).apply {
+            marginEnd = dp(10)
+            topMargin = dp(2)
         })
+        val tv = text(13f, color, lines = 2).apply {
+            text = t
+            setLineSpacing(0f, 1.18f)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        box.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val more = text(12f, Palette.INK, bold = true).apply {
+            text = "More"
+            setPadding(dp(8), 0, 0, 0)
+        }
+        box.addView(more)
+        // Short enough to fit? No "More".
+        tv.post {
+            val l = tv.layout ?: return@post
+            if (l.lineCount <= 2 && l.getEllipsisCount(l.lineCount - 1) == 0) more.visibility = View.GONE
+        }
+        box.setOnClickListener {
+            val open = tv.maxLines > 2
+            tv.maxLines = if (open) 2 else 40
+            more.text = if (open) "More" else "Less"
+        }
+        return box
     }
 
     // =====================================================================
@@ -258,12 +330,7 @@ class SettingsActivity : Activity() {
             Page.BACKUP -> "Save your whole setup (layout, widgets, theme, dock, icons) to a file, and load it back on a new phone or after a reset."
             else -> null
         } ?: return
-        col.addView(text(13.5f, Palette.SILVER, lines = 6).apply {
-            text = t
-            setLineSpacing(0f, 1.15f)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = round(Color.argb(22, 255, 255, 255), dpf(16f))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        col.addView(foldable(t, Palette.SILVER, Color.argb(22, 255, 255, 255)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
     }
 
     private fun updateCard(): View {
@@ -764,60 +831,146 @@ class SettingsActivity : Activity() {
 
     private var packStatus = ""
 
+    /**
+     * The icon center. On top, a live preview: your background with apps in
+     * the look, size and names you've picked. Under it the three looks side
+     * by side (tap one, the preview changes), then size and names, then icon
+     * packs as a row of tiles, then free packs to get.
+     */
     private fun iconsPage(col: LinearLayout) {
-        note(col, "Pick a look, and (if you like) an icon pack. Icon packs are real packs made by designers; any pack that works with Nova or Lawnchair works here.")
         val samples = sampleApps()
         val style = Icons.style(this)
         val followTheme = !Prefs.get(this).contains(Prefs.ICON_STYLE)
-        val about = mapOf(
-            Icons.ORIGINAL to "The icons as the app (or your icon pack) draws them.",
-            Icons.GLASS to "iOS 26 style: each app's symbol floating on a pane of Liquid Glass that bends your background. Works with any phone and any icon pack.",
-            Icons.MONO to "Just the white symbol, like Android's themed icons.",
-        )
-        for (i in listOf(Icons.GLASS, Icons.ORIGINAL, Icons.MONO)) {
-            val card = choiceCard(style == i) {
-                Prefs.get(this).edit().putInt(Prefs.ICON_STYLE, i).apply()
-                Icons.forgetAll()
-                render()
-            }
-            card.gravity = Gravity.START
-            card.addView(text(15f, Palette.INK, bold = true).apply { text = Icons.NAMES[i] + if (followTheme && style == i) "  ·  with theme" else "" })
-            card.addView(text(12.5f, Palette.GREY, lines = 3).apply {
-                text = about[i]
-                setPadding(0, dp(3), 0, dp(10))
-            })
-            val st = stage(dpf(16f))
+        val p = Prefs.get(this)
+        // The same sizes the home screen uses, so the preview is true to life.
+        val size = listOf(54, 62, 70)[p.getInt(Prefs.HOME_ICON_SIZE, 1).coerceIn(0, 2)] - if (p.getBoolean(Prefs.SHOW_LABELS, false)) 6 else 0
+        val names = p.getBoolean(Prefs.SHOW_LABELS, false)
+
+        // Live preview
+        val st = stage(dpf(26f))
+        val grid = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(18), dp(10), dp(18))
+        }
+        for (rowApps in samples.chunked(4).take(2)) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(4), dp(8), dp(4), dp(6))
+                gravity = Gravity.CENTER
             }
-            for (a in samples) row.addView(AppIconView(this, a, 46, false, forceStyle = i, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            st.addView(row)
-            card.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            col.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+            for (a in rowApps) row.addView(AppIconView(this, a, size, names, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            for (k in rowApps.size until 4) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
+        st.addView(grid, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        col.addView(st, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        // The three looks, side by side
+        section(col, "Look")
+        val about = mapOf(
+            Icons.ORIGINAL to "The icons as the app (or your icon pack) draws them.",
+            Icons.GLASS to "iOS 26 style: each app's symbol on a pane of Liquid Glass that bends your background.",
+            Icons.MONO to "Just the white symbol, like Android's themed icons.",
+        )
+        val looks = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((n, i) in listOf(Icons.ORIGINAL, Icons.GLASS, Icons.MONO).withIndex()) {
+            val on = style == i
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(8), dp(12), dp(8), dp(10))
+                background = round(if (on) Palette.TILE2 else Palette.TILE, dpf(20f)).apply { setStroke(dp(2), if (on) Palette.INK else Color.argb(16, 255, 255, 255)) }
+                pressable()
+                setOnClickListener {
+                    it.bounce()
+                    p.edit().putInt(Prefs.ICON_STYLE, i).apply()
+                    Icons.forgetAll()
+                    render()
+                }
+            }
+            val mini = stage(dpf(14f))
+            val pair = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+            }
+            for (a in samples.take(2)) pair.addView(AppIconView(this, a, 34, false, forceStyle = i, liveGlass = false), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            mini.addView(pair)
+            card.addView(mini, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            card.addView(text(12.5f, if (on) Palette.INK else Palette.SILVER, bold = true).apply {
+                text = Icons.NAMES[i]
+                gravity = Gravity.CENTER
+                setPadding(0, dp(8), 0, 0)
+            })
+            looks.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (n > 0) marginStart = dp(8) })
+        }
+        col.addView(looks)
+        col.addView(text(12.5f, Palette.GREY, lines = 3).apply {
+            text = about[style].orEmpty() + if (followTheme) "  Follows your theme until you pick one." else ""
+            setPadding(dp(6), dp(8), dp(6), 0)
+        })
 
         // Home screen apps
-        section(col, "Apps on the home screen")
-        col.addView(group(switchRow("Show names", "Names under apps you put on the home screen", Prefs.SHOW_LABELS, false)))
         chips(col, "Size", Prefs.HOME_ICON_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
+        col.addView(group(switchRow("Show names", "Names under apps you put on the home screen", Prefs.SHOW_LABELS, false) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
 
-        // Installed packs
+        // Installed packs, as a row of tiles
         section(col, "Icon pack")
         val current = IconPacks.current(this)
         val packs = IconPacks.installed(this)
-        val rows = ArrayList<View>()
-        rows += row("App icons", "No pack: each app's own icon", chip(if (current.isEmpty()) "Using" else "Use", current.isEmpty())) { usePack("") }
-        for (pk in packs) {
-            val r = row(pk.label, pk.pkg, chip(if (current == pk.pkg) "Using" else "Use", current == pk.pkg)) { usePack(pk.pkg) }
-            try {
-                r.addView(ImageView(this).apply { setImageDrawable(packageManager.getApplicationIcon(pk.pkg)) }, 0, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(12) })
-            } catch (_: Exception) {
-            }
-            rows += r
+        val strip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, dp(8), 0)
         }
-        col.addView(group(*rows.toTypedArray()))
-        if (packs.isEmpty()) note(col, "No icon packs installed yet. Get a free one below, or any from the Play Store.")
+        fun packTile(label: String, using: Boolean, icon: android.graphics.drawable.Drawable?, onClick: () -> Unit) {
+            val t = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(10), dp(14), dp(10), dp(12))
+                background = round(if (using) Palette.TILE2 else Palette.TILE, dpf(20f)).apply { setStroke(dp(2), if (using) Palette.INK else Color.argb(16, 255, 255, 255)) }
+                pressable()
+                setOnClickListener {
+                    it.bounce()
+                    onClick()
+                }
+            }
+            t.addView(ImageView(this).apply {
+                if (icon != null) setImageDrawable(icon) else {
+                    setImageResource(R.drawable.ic_apps)
+                    imageTintList = ColorStateList.valueOf(Palette.INK)
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                    background = round(Palette.GRAPHITE, dpf(12f))
+                }
+            }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            t.addView(text(12f, Palette.INK, bold = true).apply {
+                text = label
+                gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(8), 0, dp(6))
+            }, LinearLayout.LayoutParams(dp(84), ViewGroup.LayoutParams.WRAP_CONTENT))
+            t.addView(chip(if (using) "Using" else "Use", using).apply { textSize = 11f })
+            strip.addView(t, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
+        }
+        packTile("App icons", current.isEmpty(), null) { usePack("") }
+        for (pk in packs) {
+            val ic = try {
+                packageManager.getApplicationIcon(pk.pkg)
+            } catch (_: Exception) {
+                null
+            }
+            packTile(pk.label, current == pk.pkg, ic) { usePack(pk.pkg) }
+        }
+        col.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipToPadding = false
+            addView(strip)
+        })
+        if (packs.isEmpty()) col.addView(text(12.5f, Palette.GREY, lines = 2).apply {
+            text = "No icon packs installed yet. Get a free one below, or any from the Play Store."
+            setPadding(dp(6), dp(8), dp(6), 0)
+        })
 
         // Free packs to get
         section(col, "Get free icon packs")
@@ -1134,11 +1287,7 @@ class SettingsActivity : Activity() {
     // =====================================================================
 
     private fun note(col: LinearLayout, t: String) {
-        col.addView(text(13.5f, Palette.GREY, lines = 5).apply {
-            text = t
-            setLineSpacing(0f, 1.15f)
-            setPadding(dp(4), 0, dp(4), dp(10))
-        })
+        col.addView(foldable(t, Palette.GREY, Color.argb(12, 255, 255, 255)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
     }
 
     private fun section(col: LinearLayout, t: String) {
