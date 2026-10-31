@@ -44,6 +44,45 @@ object Glass {
 
     fun enabled(c: Context) = Prefs.get(c).getInt(Prefs.THEME, THEME_GLASS) == THEME_GLASS
 
+    /** Experimental chromatic dispersion strength (Settings → Theme), 0 = off. */
+    @Volatile var disperse = 0f
+    /** How much a bright, reflective wallpaper shines on the glass (0..1), and its light's colour. */
+    @Volatile var shine = 0f
+    @Volatile var glintColor = Color.WHITE
+
+    /**
+     * Works out the shine from the wallpaper's colour: sky blues, golds and
+     * yellows, and bright silvers catch the light; dark or muddy ones don't.
+     */
+    fun updateLight(c: Context) {
+        disperse = if (Prefs.get(c).getBoolean(Prefs.GLASS_DISPERSE, false)) 1f else 0f
+        val wc = wallColor(c)
+        if (wc == null) {
+            shine = 0f
+            glintColor = Color.WHITE
+            return
+        }
+        val hsv = FloatArray(3)
+        Color.colorToHSV(wc, hsv)
+        val (h, sat, v) = Triple(hsv[0], hsv[1], hsv[2])
+        fun bump(lo: Float, hi: Float): Float {
+            if (h < lo - 15f || h > hi + 15f) return 0f
+            return when {
+                h < lo -> (h - (lo - 15f)) / 15f
+                h > hi -> ((hi + 15f) - h) / 15f
+                else -> 1f
+            }
+        }
+        fun ramp(x: Float, a: Float, b: Float) = ((x - a) / (b - a)).coerceIn(0f, 1f)
+        val sky = bump(180f, 225f)
+        val gold = bump(35f, 70f)
+        val colourful = maxOf(sky, gold) * ramp(sat, 0.18f, 0.45f) * ramp(v, 0.42f, 0.8f)
+        val silver = (1f - ramp(sat, 0.06f, 0.18f)) * ramp(v, 0.72f, 0.92f) * 0.7f
+        shine = maxOf(colourful, silver).coerceIn(0f, 1f)
+        // The glare takes a little of the wallpaper's colour, like light off it.
+        glintColor = Color.HSVToColor(floatArrayOf(h, (sat * 0.35f).coerceAtMost(0.3f), 1f))
+    }
+
     const val THEME_GLASS = 0
     const val THEME_SOLID = 1
 
@@ -412,6 +451,10 @@ object Glass {
         uniform float4 tint;
         uniform float4 hue;
         uniform float light;
+        // Experimental: how far the colours split at the rim (0 = the usual hint).
+        uniform float disperse;
+        // Glare off a bright, reflective wallpaper (sky blue, gold, silver): colour and amount.
+        uniform float4 glint;
 
         half4 main(float2 p) {
             float2 c = size * 0.5;
@@ -429,9 +472,28 @@ object Glass {
             float k = pow(e, 2.2) * bend;
             float2 s = origin + p - g * k;
             half3 col;
-            col.r = image.eval(s - g * k * 0.08).r;
-            col.g = image.eval(s).g;
-            col.b = image.eval(s + g * k * 0.08).b;
+            if (disperse > 0.0) {
+                // Chromatic dispersion like real glass: seven samples across the
+                // spectrum, each adding to the colours it belongs to, so the rim
+                // breaks into a smooth rainbow instead of three ghost copies.
+                float spread = k * (0.10 + 0.34 * disperse);
+                half3 acc = half3(0.0);
+                half3 wsum = half3(0.0);
+                for (int i = 0; i < 7; i++) {
+                    float t = float(i) / 6.0;
+                    half3 w = half3(clamp(1.0 - t * 2.2, 0.0, 1.0) + clamp(t * 3.0 - 2.6, 0.0, 0.35),
+                                    clamp(1.0 - abs(t - 0.5) * 2.4, 0.0, 1.0),
+                                    clamp(t * 2.2 - 1.2, 0.0, 1.0));
+                    half3 smp = image.eval(s + g * spread * (t - 0.5) * 2.0).rgb;
+                    acc += smp * w;
+                    wsum += w;
+                }
+                col = acc / max(wsum, half3(0.001));
+            } else {
+                col.r = image.eval(s - g * k * 0.08).r;
+                col.g = image.eval(s).g;
+                col.b = image.eval(s + g * k * 0.08).b;
+            }
             // Vibrancy: what shows through keeps its colour (like iOS glass), not washed grey.
             half lum = dot(col, half3(0.299, 0.587, 0.114));
             col = mix(half3(lum), col, half(1.2));
@@ -450,6 +512,23 @@ object Glass {
             float y = p.y / size.y;
             col += half3(0.045 * light * (1.0 - smoothstep(0.0, 0.38, y)));
             col *= half(1.0 - 0.06 * smoothstep(0.7, 1.0, y));
+            if (disperse > 0.0) {
+                // A thin iridescent line just inside the rim, its colour turning
+                // with the direction the edge faces.
+                float ang = atan(g.y, g.x) / 6.2831853;
+                half3 irid = half3(0.5 + 0.5 * cos(6.2831853 * (ang + float3(0.0, 0.33, 0.67))));
+                float line = smoothstep(0.62, 0.9, e) * (1.0 - smoothstep(0.93, 1.0, e));
+                col += irid * half(line * 0.16 * disperse * (0.5 + 0.5 * light));
+            }
+            if (glint.a > 0.0) {
+                // Shine: a bright wallpaper lights the glass. A soft glare band
+                // sweeps diagonally across, a thinner streak beside it, and the
+                // lit rim gets a hot highlight in the wallpaper's own light.
+                float dpos = (p.x / size.x) * 0.62 + y * 0.38;
+                float band = exp(-pow((dpos - 0.30) / 0.075, 2.0)) * 0.11 + exp(-pow((dpos - 0.43) / 0.022, 2.0)) * 0.07;
+                float hot = pow(rim, 0.7) * 0.42 + rim2 * 0.16 + edge * 0.05;
+                col += half3(glint.rgb) * half((band * (0.6 + 0.4 * light) + hot) * glint.a);
+            }
             return half4(clamp(col, half3(0.0), half3(1.0)), 1.0);
         }
     """
@@ -550,6 +629,9 @@ class GlassDrawable(
             val hc = Palette.GLASS_TINT
             rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
             rs.setFloatUniform("light", if (rimLight) 1f else 0.4f)
+            rs.setFloatUniform("disperse", Glass.disperse)
+            val gc = Glass.glintColor
+            rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine * (if (rimLight) 1f else 0.6f))
             paint.shader = rs
             canvas.save()
             canvas.translate(rect.left, rect.top)
@@ -580,6 +662,7 @@ class GlassDrawable(
                 fallback.color = Color.argb((255 * Palette.GLASS_TINT_AMT).toInt(), Color.red(hc), Color.green(hc), Color.blue(hc))
                 canvas.drawRoundRect(rect, radius, radius, fallback)
             }
+            glare(canvas)
         } else {
             // No picture to bend (the phone's wallpaper is out of reach): smoked
             // glass, see-through and tinted with the wallpaper's colour.
@@ -608,25 +691,51 @@ class GlassDrawable(
             fallback.shader = sheenShader
             canvas.drawRoundRect(rect, radius, radius, fallback)
             fallback.shader = null
+            glare(canvas)
         }
         // A crisp hairline that's bright where the light hits.
         val sw = host.dpf(1.1f)
         rimPaint.strokeWidth = sw
         // Built once per size, not every frame.
-        val rk = ((rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()) xor (Palette.GLASS_TINT.toLong() * 31)
+        val rk = ((rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()) xor (Palette.GLASS_TINT.toLong() * 31) xor (Glass.shine * 1000).toLong()
         if (rimShader == null || rk != rimFor) {
             rimFor = rk
             // The far edge glows faintly in the wallpaper's hue with Adaptive colour.
             val far = if (Palette.GLASS_TINT_AMT > 0f) Palette.ACCENT.let { Color.argb(70, Color.red(it), Color.green(it), Color.blue(it)) } else Color.argb(55, 255, 255, 255)
+            // A shiny wallpaper makes the lit edge brighter.
+            val lit = ((if (rimLight) 120 else 60) + 110 * Glass.shine).toInt().coerceAtMost(235)
             rimShader = LinearGradient(
                 rect.left, rect.top, rect.right, rect.bottom,
-                intArrayOf(Color.argb(if (rimLight) 120 else 60, 255, 255, 255), Color.argb(18, 255, 255, 255), far),
+                intArrayOf(Color.argb(lit, 255, 255, 255), Color.argb(18, 255, 255, 255), far),
                 floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP,
             )
         }
         rimPaint.shader = rimShader
         rect.inset(sw / 2f, sw / 2f)
         canvas.drawRoundRect(rect, radius - sw / 2f, radius - sw / 2f, rimPaint)
+    }
+
+    private var glareShader: Shader? = null
+    private var glareFor = 0L
+
+    /** Older Android: the shine as a soft diagonal glare band (the lens shader does its own). */
+    private fun glare(canvas: Canvas) {
+        val amt = Glass.shine
+        if (amt <= 0f) return
+        val gk = ((rect.left.toLong() shl 48) xor (rect.top.toLong() shl 32) xor (rect.right.toLong() shl 16) xor rect.bottom.toLong()) xor (amt * 1000).toLong() xor Glass.glintColor.toLong()
+        if (glareShader == null || gk != glareFor) {
+            glareFor = gk
+            val c = Glass.glintColor
+            fun a(v: Float) = Color.argb((255 * v * amt).toInt().coerceIn(0, 255), Color.red(c), Color.green(c), Color.blue(c))
+            glareShader = LinearGradient(
+                rect.left, rect.top, rect.right, rect.bottom,
+                intArrayOf(a(0.10f), a(0f), a(0.16f), a(0f), a(0.08f), a(0f)),
+                floatArrayOf(0f, 0.18f, 0.3f, 0.4f, 0.45f, 0.52f), Shader.TileMode.CLAMP,
+            )
+        }
+        fallback.shader = glareShader
+        canvas.drawRoundRect(rect, radius, radius, fallback)
+        fallback.shader = null
     }
 
     override fun setAlpha(alpha: Int) {

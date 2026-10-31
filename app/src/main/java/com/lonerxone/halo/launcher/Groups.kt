@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.abs
@@ -287,6 +288,8 @@ class FolderSheet(
         setPadding(dp(20), dp(20), dp(20), dp(18))
     }
     private var from: View? = null
+    private val underline = View(context)
+    private val pen = ImageView(context)
     private val title: android.widget.EditText
 
     init {
@@ -310,26 +313,60 @@ class FolderSheet(
             background = null
             setPadding(0, 0, 0, 0)
             isSingleLine = true
+            // Long names stop short of the + button.
+            maxWidth = (resources.displayMetrics.widthPixels * 0.55f).toInt()
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
             isFocusable = false
             isFocusableInTouchMode = false
-            if (!readOnly) setOnClickListener {
-                isFocusableInTouchMode = true
-                isFocusable = true
-                requestFocus()
-                setSelection(text.length)
-                context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showSoftInput(this, 0)
-            }
-            setOnEditorActionListener { v, _, _ ->
-                saveName()
-                v.clearFocus()
-                context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken, 0)
+            if (!readOnly) setOnClickListener { startRename() }
+            setOnEditorActionListener { _, _, _ ->
+                finishRename()
                 true
             }
         }
-        card.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // Name, a pen beside it (tap either to rename), and + to add apps.
+        val head = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val nameBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        nameBox.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // A line that draws itself under the name while you're renaming.
+        underline.apply {
+            background = context.round(Palette.INK, dpf(1f))
+            scaleX = 0f
+            pivotX = 0f
+        }
+        nameBox.addView(underline, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)).apply { topMargin = dp(2) })
+        head.addView(nameBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { weight = 0f })
+        if (!readOnly) {
+            pen.apply {
+                setImageResource(R.drawable.ic_edit)
+                imageTintList = android.content.res.ColorStateList.valueOf(Palette.SILVER)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                setOnClickListener { if (title.hasFocus()) finishRename() else startRename() }
+            }
+            head.addView(pen, LinearLayout.LayoutParams(dp(30), dp(30)).apply { marginStart = dp(6) })
+        }
+        head.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        if (!readOnly) head.addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_plus)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.BLACK)
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Palette.INK)
+            }
+            contentDescription = "Add apps"
+            pressable()
+            setOnClickListener {
+                it.bounce()
+                host.addApps(this@FolderSheet.folderId)
+            }
+        }, LinearLayout.LayoutParams(dp(38), dp(38)))
+        card.addView(head)
         card.addView(context.text(12.5f, Palette.GREY).apply {
-            text = (if (apps.size == 1) "1 app" else "${apps.size} apps") + if (readOnly) "" else "  ·  tap the name to rename"
+            text = if (apps.size == 1) "1 app" else "${apps.size} apps"
             setPadding(0, dp(4), 0, dp(16))
         })
 
@@ -374,14 +411,6 @@ class FolderSheet(
         }
         card.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // Add apps: one wide button at the bottom.
-        if (!readOnly) card.addView(context.text(14.5f, Color.BLACK, bold = true).apply {
-            text = "Add apps"
-            gravity = Gravity.CENTER
-            background = context.round(Palette.INK, dpf(23f))
-            pressable()
-            setOnClickListener { host.addApps(this@FolderSheet.folderId) }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(8) })
     }
 
     /** A touch anywhere outside the folder closes it straight away (and never reaches the home screen). */
@@ -406,6 +435,41 @@ class FolderSheet(
     }
 
     private var renamed = false
+
+    /** Tap the name or the pen: the line draws in under it, the pen turns into a tick, type away. */
+    private fun startRename() {
+        title.isFocusableInTouchMode = true
+        title.isFocusable = true
+        title.requestFocus()
+        title.setSelection(title.text.length)
+        context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showSoftInput(title, 0)
+        underline.animate().scaleX(1f).setDuration(260L).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        pen.animate().rotation(-90f).scaleX(0.6f).scaleY(0.6f).setDuration(120L).withEndAction {
+            pen.setImageResource(R.drawable.ic_check)
+            pen.imageTintList = android.content.res.ColorStateList.valueOf(Palette.GREEN)
+            pen.rotation = 90f
+            pen.animate().rotation(0f).scaleX(1f).scaleY(1f).setDuration(260L).setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
+        }.start()
+    }
+
+    /** Done: the name pops into place, the line slides away, the tick turns back into the pen. */
+    private fun finishRename() {
+        saveName()
+        title.clearFocus()
+        title.isFocusable = false
+        title.isFocusableInTouchMode = false
+        context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(title.windowToken, 0)
+        underline.animate().scaleX(0f).setDuration(200L).start()
+        title.scaleX = 0.92f
+        title.scaleY = 0.92f
+        title.pivotX = 0f
+        title.animate().scaleX(1f).scaleY(1f).setDuration(380L).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+        pen.animate().scaleX(0.6f).scaleY(0.6f).setDuration(110L).withEndAction {
+            pen.setImageResource(R.drawable.ic_edit)
+            pen.imageTintList = android.content.res.ColorStateList.valueOf(Palette.SILVER)
+            pen.animate().scaleX(1f).scaleY(1f).setDuration(260L).setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
+        }.start()
+    }
 
     /** Grows out of [from] (the folder tile). */
     fun show(from: View) {

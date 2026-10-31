@@ -29,9 +29,9 @@ import kotlin.math.abs
 /**
  * All your apps. Swipe up and the list rises out of the home screen (which
  * sinks back behind it), following your finger the whole way; let go and it
- * settles with a spring. A search pill, your most used apps, then A–Z with a
- * letter strip on the right to jump. Swipe down anywhere at the top of the
- * list, or fling down, to close.
+ * settles with a spring. A search pill, then your apps and folders in the
+ * order you arranged them (A to Z until you move something). Swipe down
+ * anywhere at the top of the list, or fling down, to close.
  */
 @SuppressLint("ViewConstructor")
 class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
@@ -69,11 +69,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private var searchAnim: android.animation.ValueAnimator? = null
     private var navBottom = 0
     private var imeBottom = 0
-    private val letters: LetterStrip
     /** Beyond apps: a calculator answer, and searching the web or the Play Store. */
     private val extras: LinearLayout
 
-    private val bubble: TextView
     private val pages: HomePager
     private val dots: ListDots
     private var pagesKey = ""
@@ -105,7 +103,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     /**
      * Liquid Glass over your picture; with Solid, near-black with an even
      * hint of your wallpaper's colour (no glow). The letter you're on, the
-     * jump bubble and the page dots take your wallpaper's colour.
+     * Done button and the page dots take your wallpaper's colour.
      */
     fun restyle() {
         val wc = Glass.wallColor(context)
@@ -116,10 +114,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             android.graphics.drawable.ColorDrawable(Color.rgb((Color.red(c) * 0.09f).toInt(), (Color.green(c) * 0.09f).toInt(), (Color.blue(c) * 0.09f).toInt()))
         }
         val accent = if (wc == null) Palette.INK else Glass.accent(context)
-        letters.accent = accent
         dots.accent = accent
-        bubble.background = context.round(accent, dpf(30f))
-        bubble.setTextColor(if (Color.red(accent) * 0.3 + Color.green(accent) * 0.59 + Color.blue(accent) * 0.11 > 150) Color.BLACK else Color.WHITE)
+        doneBtn.background = context.round(accent, dpf(22f))
+        doneBtn.setTextColor(if (Color.red(accent) * 0.3 + Color.green(accent) * 0.59 + Color.blue(accent) * 0.11 > 150) Color.BLACK else Color.WHITE)
         pill.background = if (Glass.enabled(context)) GlassDrawable(pill, dpf(27f), darkness = 0.3f, bendPx = dpf(10f)) else context.round(Color.rgb(32, 32, 35), dpf(27f)).apply { setStroke(dp(1), Color.argb(30, 255, 255, 255)) }
     }
 
@@ -235,20 +232,26 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         content.addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(20)).apply { bottomMargin = dp(96) })
         addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
-        // A–Z strip down the right edge: slide along it to jump.
-        letters = LetterStrip(context) { letter -> jumpTo(letter) }
-        addView(letters, LayoutParams(dp(22), LayoutParams.MATCH_PARENT, Gravity.END).apply {
-            topMargin = dp(200)
-            bottomMargin = dp(90)
-            rightMargin = dp(2)
-        })
-        bubble = context.text(30f, Color.BLACK, bold = true).apply {
+        // Arranging: a hint at the top and a Done button where the search button sits.
+        arrangeHint = context.text(12.5f, Palette.SILVER).apply {
+            text = "Hold and drag apps or folders to move them"
             gravity = Gravity.CENTER
-            background = context.round(Palette.INK, dpf(30f))
-            visibility = View.INVISIBLE
-            elevation = dpf(8f)
+            alpha = 0f
+            visibility = View.GONE
         }
-        addView(bubble, LayoutParams(dp(60), dp(60), Gravity.END or Gravity.TOP).apply { rightMargin = dp(46) })
+        addView(arrangeHint, LayoutParams(LayoutParams.MATCH_PARENT, dp(30), Gravity.TOP).apply { topMargin = dp(14) })
+        doneBtn = context.text(15f, Color.BLACK, bold = true).apply {
+            text = "Done"
+            gravity = Gravity.CENTER
+            setPadding(dp(30), 0, dp(30), 0)
+            elevation = dpf(6f)
+            visibility = View.GONE
+            setOnClickListener {
+                it.bounce()
+                endArrange()
+            }
+        }
+        addView(doneBtn, LayoutParams(LayoutParams.WRAP_CONTENT, dp(48), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(28) })
         addView(pill, LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(24) })
         restyle()
 
@@ -306,6 +309,8 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     private var imeAnimating = false
+    private lateinit var arrangeHint: TextView
+    private lateinit var doneBtn: TextView
 
     private fun placePill() {
         val lp = pill.layoutParams as? LayoutParams ?: return
@@ -401,18 +406,22 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         val all = AppRepo.apps.filter { it.key !in hidden || q.isNotEmpty() }
         shown = if (q.isEmpty()) all else all.filter { it.label.lowercase().contains(q) }
             .sortedBy { if (it.label.lowercase().startsWith(q)) 0 else 1 }
-        // Your folders first, then every app that isn't in one, A to Z.
+        // Your folders and every app that isn't in one, in the order you
+        // arranged them. Until you move something it's folders, then A to Z;
+        // anything new (an app you just installed) goes at the end.
         val folderIds = if (q.isEmpty()) DrawerFolders.ids(context) else emptyList()
         hasFolders = folderIds.isNotEmpty()
-        entries = if (hasFolders) {
+        val base = if (hasFolders) {
             val inside = DrawerFolders.foldered(context)
             folderIds.map { Entry.Folder(it, DrawerFolders.size(context, it)) } + shown.filter { it.key !in inside }.map { Entry.AppE(it) }
         } else {
             shown.map { Entry.AppE(it) }
         }
-        // Searching always shows results as a list; otherwise your chosen layout.
-        val paged = horizontal && q.isEmpty()
-        val spanned = !paged && hasFolders
+        entries = if (q.isEmpty()) ordered(base) else base
+        // Searching shows results as a plain list; otherwise your chosen
+        // layout (arranging always uses the scrolling one).
+        val paged = horizontal && q.isEmpty() && !arranging
+        val spanned = !paged && q.isEmpty()
         grid.visibility = if (paged || spanned) View.GONE else View.VISIBLE
         folderScroll.visibility = if (spanned) View.VISIBLE else View.GONE
         if (spanned) buildSpan()
@@ -422,8 +431,6 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             buildPages()
             dots.visibility = if (pages.childCount > 1) View.VISIBLE else View.GONE
         }
-        letters.visibility = if (q.isEmpty() && !horizontal) View.VISIBLE else View.GONE
-        letters.letters = shown.map { firstLetter(it.label) }.distinct()
         adapter.notifyDataSetChanged()
         showExtras(search.text?.toString()?.trim().orEmpty())
     }
@@ -482,48 +489,21 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         }
     }
 
-    private fun firstLetter(s: String): Char {
-        val c = s.trim().firstOrNull()?.uppercaseChar() ?: '#'
-        return if (c in 'A'..'Z') c else '#'
-    }
-
-    private fun jumpTo(letter: Char?) {
-        if (letter == null) {
-            bubble.animate().alpha(0f).scaleX(0.6f).scaleY(0.6f).setDuration(160).withEndAction { bubble.visibility = View.INVISIBLE }.start()
-            return
-        }
-        if (folderScroll.visibility == View.VISIBLE) {
-            val v = (0 until span.childCount).map { span.getChildAt(it) }.firstOrNull { (it.tag as? String)?.removePrefix("app:")?.let { l -> firstLetter(l) == letter } == true }
-            if (v != null) folderScroll.scrollTo(0, v.top)
-        } else {
-            val i = shown.indexOfFirst { firstLetter(it.label) == letter }
-            if (i >= 0) grid.setSelection(i)
-        }
-        bubble.text = letter.toString()
-        bubble.translationY = (letters.top + letters.lastY - dp(30)).toFloat()
-        if (bubble.visibility != View.VISIBLE) {
-            bubble.visibility = View.VISIBLE
-            bubble.alpha = 0f
-            bubble.scaleX = 0.6f
-            bubble.scaleY = 0.6f
-            bubble.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(160).start()
-        }
-        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
-    }
-
     private fun iconFor(a: App): AppIconView = AppIconView(context, a, iconDp, names, liveGlass = false).apply {
         pressable()
         badge = HaloLink.badges[a.pkg] ?: 0
         // The view's current app (it's reused for other apps as the list scrolls).
-        setOnClickListener { host.launch((it as AppIconView).app, it) }
+        setOnClickListener { if (!arranging) host.launch((it as AppIconView).app, it) }
         setOnLongClickListener {
-            host.appMenu((it as AppIconView).app, it)
+            if (!arranging) host.appMenu((it as AppIconView).app, it)
             true
         }
     }
 
     fun updateBadges() {
         adapter.notifyDataSetChanged()
+        for (i in 0 until span.childCount) (span.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
+        for (pi in 0 until pages.childCount) (pages.getChildAt(pi) as? ViewGroup)?.let { g -> for (i in 0 until g.childCount) (g.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 } }
         for (i in 0 until usedRow.childCount) (usedRow.getChildAt(i) as? AppIconView)?.let { it.badge = HaloLink.badges[it.app.pkg] ?: 0 }
     }
 
@@ -573,16 +553,17 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     private fun viewFor(e: Entry): View = when (e) {
-        is Entry.AppE -> iconFor(e.app).also { it.tag = "app:" + e.app.label }
-        is Entry.Folder -> FolderTile(context, e.id, e.size, open = { host.openDrawerFolder(e.id, it) }, launch = { a, v -> host.launch(a, v) }, iconDp = iconDp, labels = names).apply {
+        is Entry.AppE -> iconFor(e.app).also { it.tag = "app:" + e.app.key }
+        is Entry.Folder -> FolderTile(context, e.id, e.size, open = { if (!arranging) host.openDrawerFolder(e.id, it) }, launch = { a, v -> if (!arranging) host.launch(a, v) }, iconDp = iconDp, labels = names).apply {
+            tag = e.id
             setOnLongClickListener {
-                host.drawerFolderMenu(e.id, it)
+                if (!arranging) host.drawerFolderMenu(e.id, it)
                 true
             }
         }
     }
 
-    /** Vertical with folders: everything packed into one tall grid. */
+    /** Vertical: everything packed into one tall grid (folders take 1x1, 2x2 or 4x2). */
     private fun buildSpan() {
         val key = entries.joinToString(",") { when (it) { is Entry.AppE -> it.app.key; is Entry.Folder -> it.id + it.size + Groups.folderApps(context, it.id).joinToString() } } + "|$cols|$names|$iconDp"
         if (key == spanKey) return
@@ -590,6 +571,216 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         span.removeAllViews()
         span.setup(cols, cellH())
         for (pl in pack(entries)) span.add(viewFor(pl.entry), pl.col, pl.row, pl.sx, pl.sy)
+    }
+
+    // ----- your own order -----
+
+    private fun keyOf(e: Entry) = when (e) { is Entry.AppE -> e.app.key; is Entry.Folder -> e.id }
+
+    /** [base] in your saved order; things you never placed keep their A to Z spot at the end. */
+    private fun ordered(base: List<Entry>): List<Entry> {
+        val order = Prefs.list(context, Prefs.DRAWER_ORDER)
+        if (order.isEmpty()) return base
+        val at = HashMap<String, Int>()
+        order.forEachIndexed { i, k -> at.putIfAbsent(k, i) }
+        return base.withIndex().sortedWith(compareBy({ at[keyOf(it.value)] ?: Int.MAX_VALUE }, { it.index })).map { it.value }
+    }
+
+    private var arranging = false
+    private var held: View? = null
+    private var heldKey: String? = null
+    private var grabX = 0f
+    private var grabY = 0f
+    private var fingerX = 0f
+    private var fingerY = 0f
+    private var pickUp: Runnable? = null
+    private var arrangeDownX = 0f
+    private var arrangeDownY = 0f
+    private var lastSwap = 0L
+
+    val isArranging get() = arranging
+
+    /**
+     * Arrange mode: hold anything in the list and drag it where you want
+     * it; the rest slide out of the way. Tap Done (or go back) to keep it.
+     */
+    fun arrange() {
+        if (arranging) return
+        arranging = true
+        hideKeyboard()
+        if (!search.text.isNullOrEmpty()) search.setText("")
+        closeSearch(clear = true)
+        spanKey = ""
+        filter()
+        pill.animate().alpha(0f).scaleX(0.7f).scaleY(0.7f).setDuration(160).withEndAction { pill.visibility = View.GONE }.start()
+        doneBtn.visibility = View.VISIBLE
+        doneBtn.alpha = 0f
+        doneBtn.scaleX = 0.7f
+        doneBtn.scaleY = 0.7f
+        doneBtn.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(android.view.animation.OvershootInterpolator(1.6f)).start()
+        arrangeHint.visibility = View.VISIBLE
+        arrangeHint.translationY = -dpf(10f)
+        arrangeHint.animate().alpha(1f).translationY(0f).setDuration(260).start()
+        // Everything settles in a touch smaller, so it reads as "movable".
+        for (i in 0 until span.childCount) span.getChildAt(i).animate().scaleX(0.9f).scaleY(0.9f).setDuration(240).setStartDelay((i % 12) * 12L).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
+
+    /** Saves the order and goes back to normal. */
+    fun endArrange() {
+        if (!arranging) return
+        drop()
+        arranging = false
+        Prefs.setList(context, Prefs.DRAWER_ORDER, entries.map { keyOf(it) })
+        for (i in 0 until span.childCount) span.getChildAt(i).animate().scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(220).start()
+        doneBtn.animate().alpha(0f).scaleX(0.8f).scaleY(0.8f).setDuration(160).withEndAction { doneBtn.visibility = View.GONE }.start()
+        arrangeHint.animate().alpha(0f).setDuration(160).withEndAction { arrangeHint.visibility = View.GONE }.start()
+        pill.visibility = View.VISIBLE
+        pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(80).setDuration(260).setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
+        pagesKey = ""
+        postDelayed({ filter() }, 230)
+    }
+
+    private fun spanChildAt(x: Float, y: Float): View? {
+        for (i in span.childCount - 1 downTo 0) {
+            val c = span.getChildAt(i)
+            if (c !== held && x >= c.left && x < c.right && y >= c.top && y < c.bottom) return c
+        }
+        return null
+    }
+
+    /** Finger position inside the grid (it scrolls, so this changes as it does). */
+    private fun inSpan(rawX: Float, rawY: Float): Pair<Float, Float> {
+        val l = IntArray(2)
+        span.getLocationOnScreen(l)
+        return (rawX - l[0]) to (rawY - l[1])
+    }
+
+    private fun pick(v: View) {
+        held = v
+        heldKey = v.tag as? String
+        val (x, y) = inSpan(fingerX, fingerY)
+        grabX = x - v.left
+        grabY = y - v.top
+        v.bringToFront()
+        v.elevation = dpf(12f)
+        v.animate().scaleX(1.12f).scaleY(1.12f).alpha(0.92f).setStartDelay(0).setDuration(160).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        postOnAnimation(edgeScroll)
+    }
+
+    /** The held item follows the finger; when it's over another spot, things make room. */
+    private fun follow() {
+        val v = held ?: return
+        val (x, y) = inSpan(fingerX, fingerY)
+        v.translationX = x - grabX - v.left
+        v.translationY = y - grabY - v.top
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastSwap < 90) return
+        val over = spanChildAt(x, y) ?: return
+        val from = entries.indexOfFirst { keyOf(it) == heldKey }
+        val to = entries.indexOfFirst { keyOf(it) == over.tag }
+        if (from < 0 || to < 0 || from == to) return
+        lastSwap = now
+        val list = entries.toMutableList()
+        list.add(to, list.removeAt(from))
+        entries = list
+        relayout()
+    }
+
+    /** Moves every item to its new spot and slides it there from where it was. */
+    private fun relayout() {
+        val before = HashMap<View, Pair<Int, Int>>()
+        for (i in 0 until span.childCount) span.getChildAt(i).let { before[it] = it.left to it.top }
+        val byKey = HashMap<String, View>()
+        for (i in 0 until span.childCount) span.getChildAt(i).let { c -> (c.tag as? String)?.let { byKey[it] = c } }
+        for (pl in pack(entries)) byKey[keyOf(pl.entry)]?.let { span.place(it, pl.col, pl.row, pl.sx, pl.sy) }
+        span.requestLayout()
+        span.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                span.viewTreeObserver.removeOnPreDrawListener(this)
+                for ((c, old) in before) {
+                    if (c === held) continue
+                    val dx = (old.first - c.left).toFloat()
+                    val dy = (old.second - c.top).toFloat()
+                    if (dx == 0f && dy == 0f) continue
+                    c.translationX = dx + c.translationX
+                    c.translationY = dy + c.translationY
+                    c.animate().translationX(0f).translationY(0f).setStartDelay(0).setDuration(260).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.25f, 1f)).start()
+                }
+                follow()
+                return true
+            }
+        })
+        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    /** Near the top or bottom of the list while holding something: the list scrolls. */
+    private val edgeScroll: Runnable = object : Runnable {
+        override fun run() {
+            if (held == null) return
+            val l = IntArray(2)
+            folderScroll.getLocationOnScreen(l)
+            val zone = dpf(90f)
+            val top = l[1] + zone
+            val bottom = l[1] + folderScroll.height - zone
+            val sp = when {
+                fingerY < top -> -((top - fingerY) / zone).coerceAtMost(1f) * dpf(16f)
+                fingerY > bottom -> ((fingerY - bottom) / zone).coerceAtMost(1f) * dpf(16f)
+                else -> 0f
+            }
+            if (sp != 0f) {
+                folderScroll.scrollBy(0, sp.toInt())
+                follow()
+            }
+            postOnAnimation(this)
+        }
+    }
+
+    /** Lets go: the item glides into its spot. */
+    private fun drop() {
+        pickUp?.let { removeCallbacks(it) }
+        pickUp = null
+        val v = held ?: return
+        held = null
+        heldKey = null
+        removeCallbacks(edgeScroll)
+        v.animate().translationX(0f).translationY(0f).scaleX(if (arranging) 0.9f else 1f).scaleY(if (arranging) 0.9f else 1f).alpha(1f)
+            .setStartDelay(0).setDuration(280).setInterpolator(android.view.animation.OvershootInterpolator(1.1f))
+            .withEndAction { v.elevation = 0f }.start()
+    }
+
+    /** Arrange-mode touches: hold to pick up, a quick swipe still scrolls. */
+    private fun arrangeTouch(e: MotionEvent): Boolean {
+        fingerX = e.rawX
+        fingerY = e.rawY
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                arrangeDownX = e.rawX
+                arrangeDownY = e.rawY
+                val (x, y) = inSpan(e.rawX, e.rawY)
+                val v = if (folderScroll.visibility == View.VISIBLE) spanChildAt(x, y) else null
+                if (v != null) {
+                    pickUp = Runnable { pickUp = null; pick(v) }.also { postDelayed(it, 170) }
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (held != null) {
+                    follow()
+                    return true
+                }
+                if (pickUp != null && (abs(e.rawX - arrangeDownX) > slop || abs(e.rawY - arrangeDownY) > slop)) {
+                    removeCallbacks(pickUp)
+                    pickUp = null
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val was = held != null
+                drop()
+                return was
+            }
+        }
+        return held != null
     }
 
     private inner class AppsAdapter : BaseAdapter() {
@@ -632,7 +823,6 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         content.alpha = ((p - 0.15f) / 0.85f).coerceIn(0f, 1f)
         content.scaleX = 0.94f + 0.06f * p
         content.scaleY = 0.94f + 0.06f * p
-        letters.alpha = content.alpha
         // The search button pops up last.
         val sp = ((p - 0.4f) / 0.6f).coerceIn(0f, 1f)
         pill.alpha = sp
@@ -652,6 +842,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     /** Closes, keeping your place in the list for next time (search is cleared). */
     fun close() {
+        endArrange()
         isOpen = false
         hideKeyboard()
         if (!search.text.isNullOrEmpty()) search.setText("")
@@ -703,13 +894,15 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     // fling down closes even from a short swipe.
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        if (arranging) return arrangeTouch(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downY = e.rawY
                 downX = e.rawX
                 dragging = false
                 val gl = IntArray(2)
-                grid.getLocationOnScreen(gl)
+                // Whichever list is showing (the others keep a stale spot).
+                (if (folderScroll.visibility == View.VISIBLE) folderScroll else if (pages.visibility == View.VISIBLE) pages else grid).getLocationOnScreen(gl)
                 downTopZone = e.rawY < gl[1]
                 tracker?.recycle()
                 tracker = VelocityTracker.obtain()
@@ -735,6 +928,10 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (arranging) {
+            arrangeTouch(e)
+            return true
+        }
         if (!dragging) return super.onTouchEvent(e)
         tracker?.addMovement(e)
         val h = height.toFloat().coerceAtLeast(1f)
@@ -755,69 +952,6 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
                 } else {
                     animateTo(1f, vy)
                 }
-            }
-        }
-        return true
-    }
-}
-
-/** The A–Z strip: touch and slide along it to jump through the list. */
-@SuppressLint("ViewConstructor")
-class LetterStrip(context: Context, private val onPick: (Char?) -> Unit) : View(context) {
-    /** The letter under your finger, in your wallpaper's colour. */
-    var accent = Palette.INK
-        set(v) {
-            field = v
-            invalidate()
-        }
-    var letters: List<Char> = emptyList()
-        set(v) {
-            field = v
-            invalidate()
-        }
-    var lastY = 0
-        private set
-    private var current: Char? = null
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
-        textSize = dpf(10f)
-        typeface = Fonts.semibold(context)
-        color = Palette.SILVER
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        if (letters.isEmpty()) return
-        val step = height / letters.size.toFloat()
-        val size = step.coerceAtMost(dpf(16f))
-        val total = size * letters.size
-        val top = (height - total) / 2f
-        for ((i, c) in letters.withIndex()) {
-            paint.color = if (c == current) accent else Palette.SILVER
-            canvas.drawText(c.toString(), width / 2f, top + size * i + size * 0.75f, paint)
-        }
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (letters.isEmpty()) return false
-        when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                parent?.requestDisallowInterceptTouchEvent(true)
-                val size = (height / letters.size.toFloat()).coerceAtMost(dpf(16f))
-                val top = (height - size * letters.size) / 2f
-                val i = ((e.y - top) / size).toInt().coerceIn(0, letters.size - 1)
-                lastY = e.y.toInt()
-                val c = letters[i]
-                if (c != current) {
-                    current = c
-                    invalidate()
-                    onPick(c)
-                }
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                current = null
-                invalidate()
-                onPick(null)
             }
         }
         return true
@@ -941,7 +1075,7 @@ class ListDots(context: Context) : View(context) {
  * 2x2 or 4x2). [cols] across, each row [cellH] tall.
  */
 class SpanGrid(context: Context, private var cols: Int, private var cellH: Int) : ViewGroup(context) {
-    private class Spot(val col: Int, val row: Int, val sx: Int, val sy: Int) : ViewGroup.LayoutParams(0, 0)
+    private class Spot(var col: Int, var row: Int, var sx: Int, var sy: Int) : ViewGroup.LayoutParams(0, 0)
 
     fun setup(cols: Int, cellH: Int) {
         this.cols = cols
@@ -950,6 +1084,16 @@ class SpanGrid(context: Context, private var cols: Int, private var cellH: Int) 
     }
 
     fun add(v: View, col: Int, row: Int, sx: Int, sy: Int) = addView(v, Spot(col, row, sx, sy))
+
+    /** Moves a child to another spot (call requestLayout after moving them all). */
+    fun place(v: View, col: Int, row: Int, sx: Int, sy: Int) {
+        (v.layoutParams as? Spot)?.let {
+            it.col = col
+            it.row = row
+            it.sx = sx
+            it.sy = sy
+        }
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)

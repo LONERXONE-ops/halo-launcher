@@ -291,6 +291,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         when {
             sheet != null -> sheet?.close()
             editor.editing -> editor.exit()
+            drawer.isArranging -> drawer.endArrange()
             drawer.isOpen -> drawer.close()
             pager.current != 0 -> pager.snapTo(0)
         }
@@ -987,6 +988,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             Prefs.setList(this, Prefs.DOCK, cur)
             rebuildApps()
         }
+        if (drawer.isOpen) menu.add("Arrange apps", R.drawable.ic_widgets) { drawer.arrange() }
         if (drawer.isOpen) menu.add("Add to folder", R.drawable.ic_apps) {
             val fm = HaloMenu(anchor).header("Add ${app.label} to")
             for (f in DrawerFolders.ids(this)) fm.add(Groups.folderName(this, f), R.drawable.ic_apps) {
@@ -1411,6 +1413,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         }
         m.divider()
         m.add("Open and rename", R.drawable.ic_edit) { openFolder(id, anchor) }
+        m.add("Arrange apps", R.drawable.ic_widgets) { drawer.arrange() }
         m.add("Remove folder", R.drawable.ic_trash, danger = true) {
             DrawerFolders.delete(this, id)
             drawer.refresh()

@@ -388,7 +388,7 @@ class DockBar(context: Context) : LinearLayout(context) {
     /** One UI 9-style dock styles: glass, solid, clear, or tinted with the wallpaper's colour. */
     fun restyle() {
         val r = dpf(34f)
-        background = when (Prefs.get(context).getInt(Prefs.DOCK_STYLE, GLASS).let { if (it == TINTED) GLASS else it }) {
+        background = when (style(context)) {
             SOLID -> context.round(Palette.TILE, r)
             CLEAR -> null
             TINTED -> {
@@ -408,6 +408,17 @@ class DockBar(context: Context) : LinearLayout(context) {
         const val CLEAR = 2
         const val TINTED = 3
         val NAMES = listOf("Glass", "Solid", "Clear")
+
+        /**
+         * The dock's look: what you picked in Settings → Dock, or, until you
+         * pick, the theme's (glass with Liquid Glass, solid with Solid).
+         * Choosing a theme puts it back to following the theme.
+         */
+        fun style(c: Context): Int {
+            val p = Prefs.get(c)
+            if (!p.contains(Prefs.DOCK_STYLE)) return if (Glass.enabled(c)) GLASS else SOLID
+            return p.getInt(Prefs.DOCK_STYLE, GLASS).let { if (it == TINTED) GLASS else it }
+        }
     }
 
     /** Icon size for this many apps. */

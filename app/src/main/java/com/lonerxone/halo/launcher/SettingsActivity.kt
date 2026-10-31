@@ -311,7 +311,7 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_clock, "Clock & date", ClockFaces.current(this).name) { go(Page.CLOCK) },
             nav(R.drawable.ic_apps, "Icons", (Icons.NAMES[Icons.style(this)] ?: "Normal") + IconPacks.current(this).let { p -> if (p.isEmpty()) "" else " · " + (IconPacks.installed(this).firstOrNull { it.pkg == p }?.label ?: "icon pack") }) { go(Page.ICONS) },
             nav(R.drawable.ic_apps, "App list", (if (Prefs.get(this).getInt(Prefs.DRAWER_LAYOUT, 0) == 1) "Horizontal" else "Vertical") + " · " + (if (Prefs.get(this).getInt(Prefs.DRAWER_COLS, 0) == 1) "5" else "4") + " across") { go(Page.DRAWER) },
-            nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(Prefs.get(this).getInt(Prefs.DOCK_STYLE, 0)) { "Glass" }) { go(Page.DOCK) },
+            nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(DockBar.style(this)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
         ))
         section(col, "Use")
@@ -501,6 +501,8 @@ class SettingsActivity : Activity() {
                 Prefs.get(this).edit()
                     .putInt(Prefs.THEME, i)
                     .remove(Prefs.ICON_STYLE)
+                    // The dock goes with the theme again (glass with glass, solid with solid).
+                    .remove(Prefs.DOCK_STYLE)
                     .putInt(Prefs.CLOCK_GLASS, 0)
                     .apply()
                 Icons.forgetAll()
@@ -517,6 +519,21 @@ class SettingsActivity : Activity() {
             row.addView(card, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i == 1) marginStart = dp(12) })
         }
         col.addView(row)
+        if (cur == Glass.THEME_GLASS) {
+            section(col, "Glass light")
+            col.addView(group(switchRow("Chromatic dispersion", "Experimental. The glass splits light into a rainbow at its edges, like a real prism", Prefs.GLASS_DISPERSE, false) {
+                Glass.updateLight(this)
+                heroCache = null
+                render()
+            }))
+            val sh = Glass.shine
+            note(col, when {
+                Build.VERSION.SDK_INT < 33 -> "Dispersion needs Android 13 or newer. Bright, shiny wallpapers still add a glare to the glass."
+                sh > 0.5f -> "Your wallpaper is bright and reflective, so the glass shines with it."
+                sh > 0.05f -> "Your wallpaper catches a little light on the glass. Sky blue, gold or silver ones shine the most."
+                else -> "Bright sky blue, gold or silver wallpapers make the glass shine."
+            })
+        }
         section(col, "Adaptive colour")
         note(col, "Everything takes on your wallpaper's colour, and follows when you change it.")
         val ad = Prefs.get(this).getInt(Prefs.ADAPTIVE, Palette.ADAPT_OFF)
@@ -604,7 +621,7 @@ class SettingsActivity : Activity() {
             p.getInt(Prefs.THEME, 0), p.getInt(Prefs.ADAPTIVE, 0), p.getString(Prefs.CLOCK_FACE, ""), p.getInt(Prefs.CLOCK_COLOR, 0),
             p.getInt(Prefs.CLOCK_GLASS, 0), p.getInt(Prefs.CLOCK_TWOTONE, 0), p.getInt(Prefs.CLOCK_HOURS, 0), p.getBoolean(Prefs.CLOCK_ZERO, true),
             p.getBoolean(Prefs.CLOCK_SHADOW, false), p.getInt(Prefs.DATE_STYLE, 0), Prefs.list(this, Prefs.DOCK).joinToString(), Icons.style(this),
-            p.getInt(Prefs.DOCK_STYLE, DockBar.GLASS),
+            DockBar.style(this),
             IconPacks.current(this), System.identityHashCode(Glass.backdrop), Palette.TILE, Palette.GLASS_TINT,
         ).joinToString("|")
     }
@@ -689,7 +706,7 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        dock.background = when (if (forTheme) (if (glass) DockBar.GLASS else DockBar.SOLID) else Prefs.get(this).getInt(Prefs.DOCK_STYLE, DockBar.GLASS)) {
+        dock.background = when (if (forTheme) (if (glass) DockBar.GLASS else DockBar.SOLID) else DockBar.style(this)) {
             DockBar.SOLID -> round(Palette.TILE, dpf(18f))
             DockBar.CLEAR -> null
             else -> previewGlass(dpf(18f))
@@ -1266,7 +1283,7 @@ class SettingsActivity : Activity() {
             bottomMargin = dp(12)
         })
         col.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(14) })
-        chips(col, "Style", Prefs.DOCK_STYLE, DockBar.NAMES, def = DockBar.GLASS)
+        chips(col, "Style", Prefs.DOCK_STYLE, DockBar.NAMES, def = DockBar.style(this))
         col.addView(group(switchRow("Notification counts", "The red number on dock apps with notifications", Prefs.DOCK_BADGES, true)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(14) })
         col.addView(View(this), LinearLayout.LayoutParams(1, dp(16)))
         col.addView(button("Choose dock apps") {
@@ -1285,7 +1302,9 @@ class SettingsActivity : Activity() {
         val p = Prefs.get(this)
         val cur = p.getInt(Prefs.DRAWER_LAYOUT, 0)
         section(col, "Layout")
-        val apps = (AppRepo.apps.filter { it.key !in Prefs.list(this, Prefs.HIDDEN) }.ifEmpty { sampleApps() }).take(32)
+        // In your own order, like the real list.
+        val order = Prefs.list(this, Prefs.DRAWER_ORDER).withIndex().associate { it.value to it.index }
+        val apps = (AppRepo.apps.filter { it.key !in Prefs.list(this, Prefs.HIDDEN) }.sortedBy { order[it.key] ?: Int.MAX_VALUE }.ifEmpty { sampleApps() }).take(32)
         val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for (mode in 0..1) {
             val on = mode == cur
@@ -1308,7 +1327,7 @@ class SettingsActivity : Activity() {
                 setPadding(dp(6), dp(12), 0, 0)
             })
             inner.addView(text(12f, Palette.GREY, lines = 2).apply {
-                text = if (mode == 0) "Scroll, jump with A to Z" else "Swipe through pages"
+                text = if (mode == 0) "Scroll up and down" else "Swipe through pages"
                 setPadding(dp(6), dp(2), dp(4), 0)
             })
             card.addView(inner)
@@ -1332,6 +1351,15 @@ class SettingsActivity : Activity() {
         chips(col, "Icon size", Prefs.DRAWER_SIZE, listOf("Normal", "Large", "Extra large"), def = 1)
         col.addView(group(switchRow("Show names", "Names under apps in the list", Prefs.DRAWER_NAMES, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
         note(col, "Make your own folders in the list: hold an app and pick Add to folder. Hold a folder to make it small, medium or large. Searching always shows the results as a list.")
+        section(col, "Order")
+        val custom = Prefs.list(this, Prefs.DRAWER_ORDER).isNotEmpty()
+        col.addView(group(row("Sort A to Z", if (custom) "Put everything back in A to Z order" else "Already A to Z", null) {
+            if (!custom) return@row
+            p.edit().remove(Prefs.DRAWER_ORDER).apply()
+            Toast.makeText(this, "Back to A to Z", Toast.LENGTH_SHORT).show()
+            render()
+        }))
+        note(col, "Put apps and folders wherever you like: in the list, hold an app and pick Arrange apps, then hold and drag. New apps go at the end.")
         section(col, "Home screen folders")
         col.addView(group(row("Group my home screen apps", "Apps of the same kind (Social, Games, Money…) go into folders", chevron()) { autoFolders() }))
     }
@@ -1371,7 +1399,7 @@ class SettingsActivity : Activity() {
      * A small phone screen of your apps that moves like the real thing, drawn
      * with your settings: the columns, icon size and names you picked. It has
      * the handle at the top and the search button at the bottom, like the
-     * real list. Vertical scrolls (with room for the A to Z strip); Horizontal
+     * real list. Vertical scrolls up and down; Horizontal
      * swipes between pages with its dots. Runs only while it's on screen.
      */
     private fun drawerPreview(sideways: Boolean, apps: List<App>): View {
@@ -1406,23 +1434,10 @@ class SettingsActivity : Activity() {
         val anim: android.animation.ObjectAnimator
         if (!sideways) {
             val rows = 12
-            val g = grid(apps, rows, 18)
+            val g = grid(apps, rows, 6)
             // Its full height: as WRAP_CONTENT it was squeezed to the preview's
             // height, so the rows that scroll into view were never drawn.
             st.addView(g, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22 + rows * rowH)))
-            // The A to Z strip, with its own lane so apps never touch it.
-            st.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                for (ch in "ABCDEFGHIJKLMN") addView(text(5.5f, Palette.SILVER).apply {
-                    text = ch.toString()
-                    gravity = Gravity.CENTER
-                })
-            }, FrameLayout.LayoutParams(dp(12), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END).apply {
-                topMargin = dp(26)
-                bottomMargin = dp(34)
-                rightMargin = dp(2)
-            })
             val travel = -dpf((22 + rows * rowH - 230 + 40).toFloat()).coerceAtLeast(0f)
             val ease = android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f)
             anim = android.animation.ObjectAnimator.ofPropertyValuesHolder(g, android.animation.PropertyValuesHolder.ofKeyframe(View.TRANSLATION_Y,

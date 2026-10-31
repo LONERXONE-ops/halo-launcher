@@ -63,9 +63,11 @@ object Palette {
      * changed (so the home screen redraws in the new colours).
      */
     fun adapt(c: Context): Boolean {
+        // The glass's light (shine off bright wallpapers, dispersion) changes with the wallpaper too.
+        Glass.updateLight(c)
         val mode = Prefs.get(c).getInt(Prefs.ADAPTIVE, ADAPT_OFF)
         val wc = if (mode == ADAPT_OFF) null else Glass.wallColor(c)
-        val key = "$mode/$wc"
+        val key = "$mode/$wc/${Glass.shine}/${Glass.disperse}"
         if (key == lastKey) return false
         lastKey = key
         if (wc == null) {
@@ -210,7 +212,7 @@ object Prefs {
     const val MUSIC_OFF = "music_off"
     /** 0 glass, 1 solid, 2 clear (no background), 3 tinted with your wallpaper's colour. */
     const val DOCK_STYLE = "dock_style"
-    /** App list: 0 = scroll up and down (A to Z strip), 1 = swipe sideways through pages. */
+    /** App list: 0 = scroll up and down, 1 = swipe sideways through pages. */
     const val DRAWER_LAYOUT = "drawer_layout"
     /** App list columns: 0 = 4, 1 = 5. */
     const val DRAWER_COLS = "drawer_cols"
@@ -220,6 +222,10 @@ object Prefs {
     const val DRAWER_SIZE = "drawer_size"
     /** App list arrangement: 0 = A to Z, 1 = grouped into folders by kind (Social, Games…). */
     const val DRAWER_GROUPS = "drawer_groups"
+    /** Experimental chromatic dispersion on Liquid Glass. */
+    const val GLASS_DISPERSE = "glass_disperse"
+    /** Your own order for the app list (app keys and folder ids); empty = A to Z. */
+    const val DRAWER_ORDER = "drawer_order"
     /** Notification counts on the dock's apps. */
     const val DOCK_BADGES = "dock_badges"
     /** Colour for Tinted icons (0 = from the wallpaper). */

@@ -88,9 +88,10 @@ class Cell(
             if (minusFromCentre >= 0) {
                 addView(it, LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { leftMargin = -minusFromCentre * 2 })
             } else {
+                // Tucked inside the card's rounded corner (it used to hang off the edge).
                 addView(it, LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START).apply {
-                    leftMargin = dp(6)
-                    topMargin = dp(6)
+                    leftMargin = dp(14)
+                    topMargin = dp(14)
                 })
             }
         }
@@ -106,8 +107,8 @@ class Cell(
         }
         sizePill?.let {
             addView(it, LayoutParams(LayoutParams.WRAP_CONTENT, dp(24), Gravity.BOTTOM or Gravity.END).apply {
-                rightMargin = dp(8)
-                bottomMargin = dp(8)
+                rightMargin = dp(14)
+                bottomMargin = dp(14)
             })
         }
         if (placeholder) {
