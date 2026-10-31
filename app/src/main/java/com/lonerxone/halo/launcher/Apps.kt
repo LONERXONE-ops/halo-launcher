@@ -260,7 +260,7 @@ object Icons {
         }
     }
 
-    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v5"
+    private fun keyOf(app: App, style: Int, size: Int) = "${app.key}|$style|$size|$pack|v6"
 
     fun load(ctx: Context, app: App, style: Int, size: Int, done: (Result) -> Unit) {
         val k = keyOf(app, style, size)
@@ -447,10 +447,20 @@ object Icons {
                 fill = 0.74f
             }
         }
-        src.recycle()
-
-        // White line: every symbol pure white.
+        // White line and Clear glass: every symbol white. A busy picture
+        // (a photo, a gradient, a full square) has no shape of its own, and
+        // whitening it gave a plain white blob. Those are turned into a
+        // white engraving of the picture instead: its light and dark parts
+        // become solid and see-through white, so you still see the design.
         if (!keepColour) {
+            val blob = coverage(sym) > 0.5f
+            if (blob) {
+                sym.recycle()
+                val t = tonal(src, size)
+                src.recycle()
+                return centred(t, size, 0.74f)
+            }
+            src.recycle()
             val w = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             Canvas(w).drawBitmap(sym, 0f, 0f, android.graphics.Paint().apply {
                 colorFilter = android.graphics.PorterDuffColorFilter(Palette.INK, PorterDuff.Mode.SRC_IN)
@@ -458,7 +468,85 @@ object Icons {
             sym.recycle()
             return centred(w, size, fill)
         }
+        src.recycle()
         return centred(sym, size, fill)
+    }
+
+    /** How much of the symbol's own box is solid (near 1 = a filled square or circle, not a symbol). */
+    private fun coverage(b: Bitmap): Float {
+        val box = bounds(b) ?: return 0f
+        val w = b.width
+        val px = IntArray(w * b.height)
+        b.getPixels(px, 0, w, 0, 0, w, b.height)
+        var solid = 0
+        var all = 0
+        for (y in box.top until box.bottom) for (x in box.left until box.right) {
+            all++
+            if (android.graphics.Color.alpha(px[y * w + x]) > 150) solid++
+        }
+        // Fills most of its box and the box is most of the icon: a blob.
+        val big = box.width() * box.height() > w * b.height * 0.45f
+        return if (big && all > 0) solid.toFloat() / all else 0f
+    }
+
+    /**
+     * A white engraving of a busy icon: brightness becomes white, darkness
+     * becomes see-through (flipped when the design is dark on light), the
+     * contrast stretched so the design reads, and the square's outer edge
+     * faded away so it doesn't come out as a box.
+     */
+    private fun tonal(src: Bitmap, size: Int): Bitmap {
+        val px = IntArray(size * size)
+        src.getPixels(px, 0, size, 0, 0, size, size)
+        val half = size / 2f
+        val lums = ArrayList<Int>(px.size / 4)
+        var edgeSum = 0.0
+        var edgeN = 0
+        var midSum = 0.0
+        var midN = 0
+        for (n in px.indices step 3) {
+            val p = px[n]
+            if (android.graphics.Color.alpha(p) < 160) continue
+            val l = luma(p).toInt()
+            lums += l
+            val x = n % size - half
+            val y = n / size - half
+            val r = maxOf(kotlin.math.abs(x), kotlin.math.abs(y)) / half
+            if (r > 0.72f && r < 0.86f) { edgeSum += l; edgeN++ }
+            if (r < 0.32f) { midSum += l; midN++ }
+        }
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        if (lums.isEmpty()) return out
+        lums.sort()
+        var lo = lums[(lums.size * 0.08f).toInt()].toFloat()
+        var hi = lums[(lums.size * 0.92f).toInt().coerceAtMost(lums.size - 1)].toFloat()
+        if (hi - lo < 24f) {
+            val m = (hi + lo) / 2f
+            lo = m - 12f
+            hi = m + 12f
+        }
+        // The design is whatever stands out from the edge: brighter or darker than it.
+        val invert = edgeN > 0 && midN > 0 && edgeSum / edgeN > midSum / midN
+        val o = IntArray(size * size)
+        val ink = Palette.INK
+        for (n in px.indices) {
+            val p = px[n]
+            val a = android.graphics.Color.alpha(p)
+            if (a == 0) continue
+            var t = ((luma(p).toFloat() - lo) / (hi - lo)).coerceIn(0f, 1f)
+            if (invert) t = 1f - t
+            t = ((t - 0.28f) / 0.5f).coerceIn(0f, 1f)
+            t = t * t * (3 - 2 * t)
+            val x = n % size - half
+            val y = n / size - half
+            val r = maxOf(kotlin.math.abs(x), kotlin.math.abs(y)) / half
+            val edge = 1f - ((r - 0.7f) / 0.2f).coerceIn(0f, 1f)
+            val alpha = (t * edge * a).toInt()
+            if (alpha <= 4) continue
+            o[n] = android.graphics.Color.argb(alpha, android.graphics.Color.red(ink), android.graphics.Color.green(ink), android.graphics.Color.blue(ink))
+        }
+        out.setPixels(o, 0, size, 0, 0, size, size)
+        return out
     }
 
     /**

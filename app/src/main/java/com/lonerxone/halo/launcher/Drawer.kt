@@ -214,6 +214,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
             clipToPadding = false
             visibility = View.GONE
             addView(span)
+            setOnScrollChangeListener { _, _, _, _, _ -> revealOnScroll() }
         }
         content.addView(folderScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         // Sideways pages (Settings → App list → Horizontal), with dots under them.
@@ -572,6 +573,32 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         span.removeAllViews()
         span.setup(cols, cellH())
         for (pl in pack(entries)) span.add(viewFor(pl.entry), pl.col, pl.row, pl.sx, pl.sy)
+        span.post { revealOnScroll() }
+    }
+
+    /**
+     * Apps rise and fade in as they scroll up into view from the bottom,
+     * instead of just appearing there.
+     */
+    private fun revealOnScroll() {
+        if (arranging || held != null) return
+        val vh = folderScroll.height
+        if (vh <= 0) return
+        val sy = folderScroll.scrollY
+        val zone = dpf(110f)
+        val bottom = vh - dpf(40f)
+        for (i in 0 until span.childCount) {
+            val c = span.getChildAt(i)
+            val mid = c.top + c.height / 2f - sy
+            if (mid < -c.height || mid > vh + c.height) continue
+            val f = ((bottom - mid) / zone).coerceIn(0f, 1f)
+            val e = 1f - (1f - f) * (1f - f)
+            c.alpha = 0.15f + 0.85f * e
+            val sc = 0.88f + 0.12f * e
+            c.scaleX = sc
+            c.scaleY = sc
+            c.translationY = (1f - e) * dpf(14f)
+        }
     }
 
     // ----- your own order -----
@@ -623,7 +650,7 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         arrangeHint.translationY = -dpf(10f)
         arrangeHint.animate().alpha(1f).translationY(0f).setDuration(260).start()
         // Everything settles in a touch smaller, so it reads as "movable".
-        for (i in 0 until span.childCount) span.getChildAt(i).animate().scaleX(0.9f).scaleY(0.9f).setDuration(240).setStartDelay((i % 12) * 12L).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        for (i in 0 until span.childCount) span.getChildAt(i).apply { alpha = 1f; translationY = 0f }.animate().scaleX(0.9f).scaleY(0.9f).setDuration(240).setStartDelay((i % 12) * 12L).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
         performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
@@ -639,7 +666,10 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
         pill.visibility = View.VISIBLE
         pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(80).setDuration(260).setInterpolator(android.view.animation.OvershootInterpolator(1.4f)).start()
         pagesKey = ""
-        postDelayed({ filter() }, 230)
+        postDelayed({
+            filter()
+            revealOnScroll()
+        }, 230)
     }
 
     private fun spanChildAt(x: Float, y: Float): View? {

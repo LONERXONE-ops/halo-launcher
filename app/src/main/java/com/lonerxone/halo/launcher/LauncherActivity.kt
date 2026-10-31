@@ -101,7 +101,13 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private val tick = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
-                Intent.ACTION_BATTERY_CHANGED, Intent.ACTION_POWER_CONNECTED, Intent.ACTION_POWER_DISCONNECTED -> refreshWidgets("battery")
+                Intent.ACTION_BATTERY_CHANGED -> refreshWidgets("battery")
+                Intent.ACTION_POWER_CONNECTED, Intent.ACTION_POWER_DISCONNECTED -> {
+                    refreshWidgets("battery")
+                    // The battery report catches up a moment after the plug: look again.
+                    root.postDelayed({ refreshWidgets("battery") }, 1200L)
+                    root.postDelayed({ refreshWidgets("battery") }, 4000L)
+                }
                 else -> onMinute()
             }
         }
@@ -991,14 +997,17 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         if (drawer.isOpen) menu.add("Arrange apps", R.drawable.ic_widgets) { drawer.arrange() }
         if (drawer.isOpen) menu.add("Add to folder", R.drawable.ic_apps) {
             val fm = HaloMenu(anchor).header("Add ${app.label} to")
-            for (f in DrawerFolders.ids(this)) fm.add(Groups.folderName(this, f), R.drawable.ic_apps) {
-                DrawerFolders.add(this, f, app.key)
-                drawer.refresh()
-            }
+            // New folder first, so it's never pushed out of sight by a long list.
             fm.add("New folder", R.drawable.ic_plus) {
                 DrawerFolders.create(this, listOf(app.key), AppRepo.group(app).let { if (it == "Other") "Folder" else it })
                 drawer.refresh()
-                Toast.makeText(this, "Folder made. Add more apps from their menu, or open it and tap Add apps", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Folder made. Add more apps from their menu, or open it and tap +", Toast.LENGTH_LONG).show()
+            }
+            val ids = DrawerFolders.ids(this)
+            if (ids.isNotEmpty()) fm.divider()
+            for (f in ids) fm.add(Groups.folderName(this, f), R.drawable.ic_apps, checked = app.key in Groups.folderApps(this, f)) {
+                DrawerFolders.add(this, f, app.key)
+                drawer.refresh()
             }
             fm.show()
         }

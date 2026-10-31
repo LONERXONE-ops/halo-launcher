@@ -170,7 +170,12 @@ abstract class BaseWidget(context: Context, protected val actions: WidgetActions
     }
 
     protected fun glow(color: Int, pulse: Boolean = true) {
-        if (color == glowColor) return
+        // Same colour and still showing: nothing to do. (If something else
+        // replaced the foreground, put the glow back.)
+        if (color == glowColor && (color == 0 || foreground === glowDrawable)) {
+            if (color != 0 && pulse && isAttachedToWindow && !breathe.isStarted) breathe.start()
+            return
+        }
         glowColor = color
         breathe.cancel()
         if (color == 0) {
@@ -196,7 +201,7 @@ abstract class BaseWidget(context: Context, protected val actions: WidgetActions
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (glowDrawable != null) breathe.start()
+        if (glowDrawable != null && !breathe.isStarted) breathe.start()
     }
 
     override fun onDetachedFromWindow() {
@@ -399,8 +404,19 @@ class BatteryWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Battery") 
 
     override fun refresh() {
         val bm = context.getSystemService(BatteryManager::class.java) ?: return
-        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val charging = bm.isCharging
+        // Plugged in counts as charging, from Android's last battery report.
+        // (isCharging alone missed it right after plugging in, and stays
+        // false while Samsung's battery protection holds the charge.)
+        val sticky = try {
+            context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        } catch (_: Exception) {
+            null
+        }
+        val plugged = (sticky?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+        val status = sticky?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+            ?: sticky?.let { it.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) * 100 / it.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1) } ?: 0
+        val charging = bm.isCharging || plugged || status == BatteryManager.BATTERY_STATUS_CHARGING
         val low = level <= 20 && !charging
         val color = when {
             charging -> Palette.GREEN
@@ -445,7 +461,7 @@ class Capsule(context: Context) : View(context) {
     var charging = false
         set(v) {
             field = v
-            if (v && isAttachedToWindow) run.start() else run.cancel()
+            if (v && isAttachedToWindow) { if (!run.isStarted) run.start() } else run.cancel()
             invalidate()
         }
     /** Plain progress bar without the battery cap (steps, storage). */
@@ -464,7 +480,7 @@ class Capsule(context: Context) : View(context) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (charging) run.start()
+        if (charging && !run.isStarted) run.start()
     }
 
     override fun onDetachedFromWindow() {

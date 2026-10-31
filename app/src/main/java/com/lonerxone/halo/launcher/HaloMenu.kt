@@ -85,8 +85,26 @@ class HaloMenu(private val anchor: View) {
         } else {
             ctx.round(Palette.TILE2, dpf(22f)).apply { setStroke(dp(1), Color.argb(34, 255, 255, 255)) }
         }
+        // Long menus (lots of folders) scroll inside the card, with soft faded
+        // edges, instead of running off the screen. The title stays put.
+        val rh0 = (anchor.rootView.height.takeIf { it > 0 } ?: ctx.resources.displayMetrics.heightPixels)
+        val maxList = (rh0 * 0.62f).toInt()
+        val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = object : android.widget.ScrollView(ctx) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                super.onMeasure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(maxList, View.MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dp(28))
+            addView(list)
+        }
         var i = 0
-        for (e in entries) {
+        for ((idx, e) in entries.withIndex()) {
+            // The title row sits above the scrolling part.
+            val k = if (idx == 0 && e is Entry.Header) k else list
             when (e) {
                 is Entry.Header -> k.addView(ctx.text(10.5f, Palette.GREY, caps = true).apply {
                     text = e.text
@@ -124,12 +142,13 @@ class HaloMenu(private val anchor: View) {
                     if (Prefs.animations(ctx)) {
                         row.alpha = 0f
                         row.translationY = -dpf(6f)
-                        row.animate().alpha(1f).translationY(0f).setStartDelay(40L + i * 18L).setDuration(180).start()
+                        row.animate().alpha(1f).translationY(0f).setStartDelay(40L + i.coerceAtMost(10) * 18L).setDuration(180).start()
                     }
                     i++
                 }
             }
         }
+        k.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         c.addView(k, FrameLayout.LayoutParams(dp(240), ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(c, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         catcher = c

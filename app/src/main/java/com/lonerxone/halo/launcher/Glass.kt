@@ -442,6 +442,12 @@ object Glass {
      * outward-in (refraction), split slightly per colour (dispersion), and the
      * rim catches light from the top-left.
      */
+    /** The lens without dispersion (same uniforms), for GPUs that reject the full one. */
+    val AGSL_SAFE: String by lazy {
+        AGSL.replace(Regex("//@A[\\s\\S]*?//@B"), "float3 Nd = float3(0.0, 0.0, 1.0);\n            col.r = image.eval(s - g * k * 0.08).r;\n            col.g = image.eval(s).g;\n            col.b = image.eval(s + g * k * 0.08).b;\n")
+            .replace(Regex("//@C[\\s\\S]*?//@D"), "")
+    }
+
     const val AGSL = """
         uniform shader image;
         uniform float2 size;
@@ -456,13 +462,24 @@ object Glass {
         // Glare off a bright, reflective wallpaper (sky blue, gold, silver): colour and amount.
         uniform float4 glint;
 
+        // Snell's law for light coming straight at the screen through a
+        // surface facing N, with eta = outside / inside index. Returns the
+        // sideways drift of the ray (what we see shifts by this much).
+        float2 bendThrough(float3 N, float eta) {
+            float cosi = N.z;
+            float kk = 1.0 - eta * eta * (1.0 - cosi * cosi);
+            if (kk < 0.0) return float2(0.0);
+            float3 T = eta * float3(0.0, 0.0, -1.0) + (eta * cosi - sqrt(kk)) * N;
+            return T.xy;
+        }
+
         half4 main(float2 p) {
             float2 c = size * 0.5;
             float2 q = abs(p - c) - (c - radius);
             float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
             // The bevel is a thin rim, never more than a fraction of a small pane
             // (on a folder or icon a wide bevel looked like a pyramid).
-            float bevel = min(min(radius, 30.0), min(size.x, size.y) * 0.16);
+            float bevel = min(min(radius, 30.0), min(size.x, size.y) * 0.16) * (1.0 + 0.3 * disperse);
             float e = clamp(1.0 + d / bevel, 0.0, 1.0);
             // Which way the rim faces, blended smoothly round the corners
             // (no hard seams running in from the corners).
@@ -472,28 +489,52 @@ object Glass {
             float k = pow(e, 2.2) * bend;
             float2 s = origin + p - g * k;
             half3 col;
-            if (disperse > 0.0) {
-                // Chromatic dispersion like real glass: seven samples across the
-                // spectrum, each adding to the colours it belongs to, so the rim
-                // breaks into a smooth rainbow instead of three ghost copies.
-                float spread = k * (0.10 + 0.34 * disperse);
+            //@A
+            float3 Nd = float3(0.0, 0.0, 1.0);
+            if (disperse > 0.0 && e > 0.01) {
+                // Chromatic dispersion, the way real glass does it (and the way
+                // Apple's lens and the well-known WebGL glass shaders model it):
+                // the rim is a rounded edge whose surface tilts more the closer
+                // you get to the edge; light passes through it by Snell's law,
+                // and the index of refraction is a little higher for blue than
+                // for red, so each colour lands in a slightly different place.
+                // Six bands (red, yellow, green, cyan, blue, violet), each
+                // sampled a few times along a short spread so the split is a
+                // smooth spectrum, then folded back into RGB.
+                float tilt = pow(e, 1.5) * (1.3 + 0.5 * disperse);
+                Nd = normalize(float3(g * tilt, 1.0));
+                float2 r0 = bendThrough(Nd, 1.0 / 1.47);
+                // Green lands where the plain lens would (the overall look stays),
+                // a bit stronger so the light has room to split.
+                float scale = k * (1.0 + 0.45 * disperse) / max(length(r0), 0.0001);
+                float spread = 0.3 * disperse;
                 half3 acc = half3(0.0);
-                half3 wsum = half3(0.0);
-                for (int i = 0; i < 7; i++) {
-                    float t = float(i) / 6.0;
-                    half3 w = half3(clamp(1.0 - t * 2.2, 0.0, 1.0) + clamp(t * 3.0 - 2.6, 0.0, 0.35),
-                                    clamp(1.0 - abs(t - 0.5) * 2.4, 0.0, 1.0),
-                                    clamp(t * 2.2 - 1.2, 0.0, 1.0));
-                    half3 smp = image.eval(s + g * spread * (t - 0.5) * 2.0).rgb;
-                    acc += smp * w;
-                    wsum += w;
+                for (int j = 0; j < 4; j++) {
+                    float jt = 1.0 + (float(j) / 3.0 - 0.5) * 0.14;
+                    float2 base = origin + p;
+                    half3 sR = image.eval(base + bendThrough(Nd, 1.0 / (1.47 - spread)) * scale * jt).rgb;
+                    half3 sY = image.eval(base + bendThrough(Nd, 1.0 / (1.47 - spread * 0.5)) * scale * jt).rgb;
+                    half3 sG = image.eval(base + r0 * scale * jt).rgb;
+                    half3 sC = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread * 0.5)) * scale * jt).rgb;
+                    half3 sB = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread)) * scale * jt).rgb;
+                    half3 sV = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread * 1.5)) * scale * jt).rgb;
+                    half r = sR.r * 0.5;
+                    half gg = sG.g * 0.5;
+                    half b = sB.b * 0.5;
+                    half y = (2.0 * sY.r + 2.0 * sY.g - sY.b) / 6.0;
+                    half c2 = (2.0 * sC.g + 2.0 * sC.b - sC.r) / 6.0;
+                    half v = (2.0 * sV.b + 2.0 * sV.r - sV.g) / 6.0;
+                    acc += half3(r + (2.0 * v + 2.0 * y - c2) / 3.0,
+                                 gg + (2.0 * y + 2.0 * c2 - v) / 3.0,
+                                 b + (2.0 * c2 + 2.0 * v - y) / 3.0);
                 }
-                col = acc / max(wsum, half3(0.001));
+                col = acc * 0.25;
             } else {
                 col.r = image.eval(s - g * k * 0.08).r;
                 col.g = image.eval(s).g;
                 col.b = image.eval(s + g * k * 0.08).b;
             }
+            //@B
             // Vibrancy: what shows through keeps its colour (like iOS glass), not washed grey.
             half lum = dot(col, half3(0.299, 0.587, 0.114));
             col = mix(half3(lum), col, half(1.2));
@@ -512,14 +553,33 @@ object Glass {
             float y = p.y / size.y;
             col += half3(0.045 * light * (1.0 - smoothstep(0.0, 0.38, y)));
             col *= half(1.0 - 0.06 * smoothstep(0.7, 1.0, y));
-            if (disperse > 0.0) {
-                // A thin iridescent line just inside the rim, its colour turning
-                // with the direction the edge faces.
-                float ang = atan(g.y, g.x) / 6.2831853;
-                half3 irid = half3(0.5 + 0.5 * cos(6.2831853 * (ang + float3(0.0, 0.33, 0.67))));
-                float line = smoothstep(0.62, 0.9, e) * (1.0 - smoothstep(0.93, 1.0, e));
-                col += irid * half(line * 0.16 * disperse * (0.5 + 0.5 * light));
+            //@C
+            if (disperse > 0.0 && e > 0.01) {
+                // Light on a prism: the highlights on the curved edge split too.
+                // Each colour's highlight is worked out from a surface shifted a
+                // hair in or out, so a white glint comes with red on one side
+                // and blue on the other, like light through a real glass ring.
+                float3 Ld = normalize(float3(-0.55, -0.85, 0.75));
+                float3 Lb = normalize(float3(0.55, 0.85, 0.9));
+                float sh = 0.3 * disperse;
+                half3 spec = half3(0.0);
+                for (int ci = 0; ci < 3; ci++) {
+                    float ec = clamp(e + (float(ci) - 1.0) * sh, 0.0, 1.0);
+                    float3 Nc = normalize(float3(g * pow(ec, 1.5) * (1.3 + 0.5 * disperse), 1.0));
+                    float sp = pow(max(dot(Nc, Ld), 0.0), 40.0) + 0.5 * pow(max(dot(Nc, Lb), 0.0), 40.0);
+                    if (ci == 0) spec.r = half(sp); else if (ci == 1) spec.g = half(sp); else spec.b = half(sp);
+                }
+                // Fresnel: glass reflects more as the surface turns away from you.
+                float fres = pow(1.0 - Nd.z, 3.0);
+                col += spec * half(0.6 * disperse * (0.45 + 0.55 * light)) + half3(fres * 0.12 * disperse);
+                // Thin-film colour, like the rainbow bands on a soap bubble's
+                // rim: it follows the edge's thickness, so the bands run
+                // parallel to the edge.
+                float band = smoothstep(0.45, 0.8, e) * (1.0 - smoothstep(0.92, 1.0, e));
+                half3 film = half3(0.5 + 0.5 * cos(6.2831853 * (e * 1.6 + float3(0.0, 0.33, 0.67))));
+                col += film * half(band * 0.18 * disperse);
             }
+            //@D
             if (glint.a > 0.0) {
                 // Shine: a bright wallpaper lights the glass. A soft glare band
                 // sweeps diagonally across, a thinner streak beside it, and the
@@ -758,6 +818,11 @@ class GlassDrawable(
             (shared as? RuntimeShader)?.let { return it }
             return try {
                 RuntimeShader(Glass.AGSL).also { shared = it }
+            } catch (_: Throwable) {
+                null
+            } ?: try {
+                // A GPU that can't take the dispersion code still gets the lens.
+                RuntimeShader(Glass.AGSL_SAFE).also { shared = it }
             } catch (_: Throwable) {
                 // A GPU that won't take the shader: frosted glass instead, never a crash.
                 shaderBroken = true

@@ -86,7 +86,13 @@ class Cell(
         }
         minus?.let {
             if (minusFromCentre >= 0) {
-                addView(it, LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { leftMargin = -minusFromCentre * 2 })
+                // On the icon's top-left corner, overlapping it a little, so it
+                // moves with the icon instead of floating off to the side (the
+                // old offset was doubled and sat half an icon away). Counts stay top-right.
+                addView(it, LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                    leftMargin = -minusFromCentre + dp(3)
+                    topMargin = dp(1)
+                })
             } else {
                 // Tucked inside the card's rounded corner (it used to hang off the edge).
                 addView(it, LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START).apply {
