@@ -506,12 +506,6 @@ object Glass {
             return 1.0 - sqrt(max(1.0 - x * x, 0.0));
         }
 
-        half3 behind(float2 at) {
-            half3 a = clearImg.eval(at).rgb;
-            half3 b = frostImg.eval(at).rgb;
-            return mix(a, b, half(frost));
-        }
-
         half4 main(float2 p) {
             float2 hs = size * 0.5;
             float2 cc = p - hs;
@@ -522,7 +516,7 @@ object Glass {
             float2 dir = edgeDir(cc, hs, min(r * 1.5, min(hs.x, hs.y)));
             half3 col;
             if (inside >= refrH) {
-                col = behind(here);
+                col = mix(clearImg.eval(here).rgb, frostImg.eval(here).rgb, half(frost));
             } else {
                 // Refraction: near the rim the picture is pulled in from
                 // further inside, so the background curls round the edge
@@ -535,18 +529,18 @@ object Glass {
                     // edges behind the rim split into a spectrum. Seven
                     // samples spread along the bend.
                     float2 sp = n * d * zoom * (0.18 + 0.22 * disperse);
-                    half3 c0 = behind(at + sp);
-                    half3 c1 = behind(at + sp * 0.6667);
-                    half3 c2 = behind(at + sp * 0.3333);
-                    half3 c3 = behind(at);
-                    half3 c4 = behind(at - sp * 0.3333);
-                    half3 c5 = behind(at - sp * 0.6667);
-                    half3 c6 = behind(at - sp);
+                    half3 c0 = mix(clearImg.eval(at + sp).rgb, frostImg.eval(at + sp).rgb, half(frost));
+                    half3 c1 = mix(clearImg.eval(at + sp * 0.6667).rgb, frostImg.eval(at + sp * 0.6667).rgb, half(frost));
+                    half3 c2 = mix(clearImg.eval(at + sp * 0.3333).rgb, frostImg.eval(at + sp * 0.3333).rgb, half(frost));
+                    half3 c3 = mix(clearImg.eval(at).rgb, frostImg.eval(at).rgb, half(frost));
+                    half3 c4 = mix(clearImg.eval(at - sp * 0.3333).rgb, frostImg.eval(at - sp * 0.3333).rgb, half(frost));
+                    half3 c5 = mix(clearImg.eval(at - sp * 0.6667).rgb, frostImg.eval(at - sp * 0.6667).rgb, half(frost));
+                    half3 c6 = mix(clearImg.eval(at - sp).rgb, frostImg.eval(at - sp).rgb, half(frost));
                     col.r = (c0.r + c1.r + c2.r) / 3.5 + c6.r / 7.0;
                     col.g = c1.g / 7.0 + (c2.g + c3.g + c4.g) / 3.5;
                     col.b = (c4.b + c5.b + c6.b) / 3.0;
                 } else {
-                    col = behind(at);
+                    col = mix(clearImg.eval(at).rgb, frostImg.eval(at).rgb, half(frost));
                 }
             }
             // Vibrancy: colours seen through glass stay rich, not washed out.
@@ -702,44 +696,50 @@ class GlassDrawable(
         // lens shader at all: the cheaper frosted path looks the same.
         val rs0 = if (frost != null && bendPx > 0f && Build.VERSION.SDK_INT >= 33 && !shaderBroken) sharedShader() else null
         if (frost != null && rs0 != null && Build.VERSION.SDK_INT >= 33) {
-            val rs = rs0
-            val w = rect.width()
-            val h = rect.height()
-            rs.setInputShader("clearImg", Glass.clear() ?: frost)
-            rs.setInputShader("frostImg", frost)
-            rs.setFloatUniform("size", w, h)
-            // Where the pane's middle is on screen, and how much it's scaled
-            // (pressed glass is drawn bigger, so it samples a bigger area too).
-            val zx = (host.scaleX * ((host.parent as? View)?.scaleX ?: 1f)).coerceAtLeast(0.01f)
-            val zy = (host.scaleY * ((host.parent as? View)?.scaleY ?: 1f)).coerceAtLeast(0.01f)
-            rs.setFloatUniform("center", loc[0] + (b.left + w / 2f) * zx, loc[1] + (b.top + h / 2f) * zy)
-            rs.setFloatUniform("zoom", zx, zy)
-            val rad = radius.coerceAtMost(minOf(w, h) / 2f)
-            rs.setFloatUniform("radius", rad)
-            // The rim: how deep the curved edge runs, and how far it bends the picture.
-            val depthPx = (minOf(w, h) * 0.32f).coerceIn(host.dpf(7f), host.dpf(26f))
-            rs.setFloatUniform("refrH", depthPx * (1f + 0.25f * press))
-            rs.setFloatUniform("refrAmt", bendPx * 1.5f * (1f + 0.35f * press))
-            // Pressed, it bulges like a drop of water (it magnifies a little).
-            rs.setFloatUniform("depth", (if (owned) 0.2f else 0f) + 0.5f * press)
-            rs.setFloatUniform("frost", frostAmt * (1f - 0.4f * press))
-            val t = Palette.TILE
-            rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness * 0.85f)
-            val hc = Palette.GLASS_TINT
-            rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
-            rs.setFloatUniform("light", (if (rimLight) 1f else 0.45f) * (1f + 0.4f * press))
-            rs.setFloatUniform("disperse", Glass.disperse)
-            val gc = Glass.glintColor
-            rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine)
-            rs.setFloatUniform("touch", touchX - b.left, touchY - b.top, press)
-            paint.shader = rs
-            canvas.save()
-            canvas.translate(rect.left, rect.top)
-            rect.offsetTo(0f, 0f)
-            canvas.drawRoundRect(rect, radius, radius, paint)
-            canvas.restore()
-            rect.set(b)
-            // The shader draws its own rim light.
+            try {
+                val rs = rs0
+                val w = rect.width()
+                val h = rect.height()
+                rs.setInputShader("clearImg", Glass.clear() ?: frost)
+                rs.setInputShader("frostImg", frost)
+                rs.setFloatUniform("size", w, h)
+                // Where the pane's middle is on screen, and how much it's scaled
+                // (pressed glass is drawn bigger, so it samples a bigger area too).
+                val zx = (host.scaleX * ((host.parent as? View)?.scaleX ?: 1f)).coerceAtLeast(0.01f)
+                val zy = (host.scaleY * ((host.parent as? View)?.scaleY ?: 1f)).coerceAtLeast(0.01f)
+                rs.setFloatUniform("center", loc[0] + (b.left + w / 2f) * zx, loc[1] + (b.top + h / 2f) * zy)
+                rs.setFloatUniform("zoom", zx, zy)
+                val rad = radius.coerceAtMost(minOf(w, h) / 2f)
+                rs.setFloatUniform("radius", rad)
+                // The rim: how deep the curved edge runs, and how far it bends the picture.
+                val depthPx = (minOf(w, h) * 0.32f).coerceIn(host.dpf(7f), host.dpf(26f))
+                rs.setFloatUniform("refrH", depthPx * (1f + 0.25f * press))
+                rs.setFloatUniform("refrAmt", bendPx * 1.5f * (1f + 0.35f * press))
+                // Pressed, it bulges like a drop of water (it magnifies a little).
+                rs.setFloatUniform("depth", (if (owned) 0.2f else 0f) + 0.5f * press)
+                rs.setFloatUniform("frost", frostAmt * (1f - 0.4f * press))
+                val t = Palette.TILE
+                rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness * 0.85f)
+                val hc = Palette.GLASS_TINT
+                rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
+                rs.setFloatUniform("light", (if (rimLight) 1f else 0.45f) * (1f + 0.4f * press))
+                rs.setFloatUniform("disperse", Glass.disperse)
+                val gc = Glass.glintColor
+                rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine)
+                rs.setFloatUniform("touch", touchX - b.left, touchY - b.top, press)
+                paint.shader = rs
+                canvas.save()
+                canvas.translate(rect.left, rect.top)
+                rect.offsetTo(0f, 0f)
+                canvas.drawRoundRect(rect, radius, radius, paint)
+                canvas.restore()
+                rect.set(b)
+            } catch (_: Throwable) {
+                // A phone whose GPU refuses the lens: frosted glass from now on.
+                shaderBroken = true
+                rect.set(b)
+                invalidateSelf()
+            }
             return
         } else if (frost != null) {
             // Older Android: frosted glass, same rim light.
