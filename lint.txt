@@ -1,0 +1,415 @@
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Backup.kt:78: Warning: Consider using apply() instead; commit writes its data to persistent storage immediately, whereas apply will handle it in the background [ApplySharedPref]
+        ed.commit()
+           ~~~~~~~~
+
+   Explanation for issues of type "ApplySharedPref":
+   Consider using apply() instead of commit on shared preferences. Whereas
+   commit blocks and writes its data to persistent storage immediately, apply
+   will handle it in the background.
+
+/home/runner/work/halo-launcher/halo-launcher/app/build.gradle.kts:15: Warning: Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details. [OldTargetApi]
+        targetSdk = 35
+        ~~~~~~~~~~~~~~
+
+   Explanation for issues of type "OldTargetApi":
+   When your application runs on a version of Android that is more recent than
+   your targetSdkVersion specifies that it has been tested with, various
+   compatibility modes kick in. This ensures that your application continues
+   to work, but it may look out of place. For example, if the targetSdkVersion
+   is less than 14, your app may get an option button in the UI.
+
+   To fix this issue, set the targetSdkVersion to the highest available value.
+   Then test your app to make sure everything works correctly. You may want to
+   consult the compatibility notes to see what changes apply to each version
+   you are adding support for:
+   https://developer.android.com/reference/android/os/Build.VERSION_CODES.html
+   as well as follow this guide:
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.
+   html
+
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.html
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HaloLink.kt:97: Error: receiver is missing RECEIVER_EXPORTED or RECEIVER_NOT_EXPORTED flag for unprotected broadcasts registered for com.lonerxone.halo.action.STATE [UnspecifiedRegisterReceiverFlag]
+                c.applicationContext.registerReceiver(receiver, f, PERMISSION, null)
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UnspecifiedRegisterReceiverFlag":
+   In Android U, all receivers registering for non-system broadcasts are
+   required to include a flag indicating the receiver's exported state. Apps
+   registering for non-system broadcasts should use the
+   ContextCompat#registerReceiver APIs with flags set to either
+   RECEIVER_EXPORTED or RECEIVER_NOT_EXPORTED.
+
+   If you are not expecting broadcasts from other apps on the device, register
+   your receiver with RECEIVER_NOT_EXPORTED to protect your receiver on all
+   platform releases.
+
+   https://developer.android.com/reference/androidx/core/content/ContextCompat#registerReceiver(android.content.Context,android.content.BroadcastReceiver,android.content.IntentFilter,int)
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/AndroidManifest.xml:104: Warning: Should not restrict activity to fixed orientation. This may not be suitable for different form factors, causing the app to be letterboxed. [DiscouragedApi]
+            android:screenOrientation="nosensor"
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/IconPacks.kt:109: Warning: Use of this function is discouraged because resource reflection makes it harder to perform build optimizations and compile-time verification of code. It is much more efficient to retrieve resources by identifier (e.g. R.foo.bar) than by name (e.g. getIdentifier("bar", "foo", null)). [DiscouragedApi]
+            val id = res.getIdentifier("appfilter", "xml", pkg)
+                         ~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/IconPacks.kt:148: Warning: Use of this function is discouraged because resource reflection makes it harder to perform build optimizations and compile-time verification of code. It is much more efficient to retrieve resources by identifier (e.g. R.foo.bar) than by name (e.g. getIdentifier("bar", "foo", null)). [DiscouragedApi]
+        val id = l.res.getIdentifier(name, "drawable", l.pkg).takeIf { it != 0 } ?: l.res.getIdentifier(name, "mipmap", l.pkg)
+                       ~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/IconPacks.kt:148: Warning: Use of this function is discouraged because resource reflection makes it harder to perform build optimizations and compile-time verification of code. It is much more efficient to retrieve resources by identifier (e.g. R.foo.bar) than by name (e.g. getIdentifier("bar", "foo", null)). [DiscouragedApi]
+        val id = l.res.getIdentifier(name, "drawable", l.pkg).takeIf { it != 0 } ?: l.res.getIdentifier(name, "mipmap", l.pkg)
+                                                                                          ~~~~~~~~~~~~~
+
+   Explanation for issues of type "DiscouragedApi":
+   Discouraged APIs are allowed and are not deprecated, but they may be unfit
+   for common use (e.g. due to slow performance or subtle behavior).
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/AndroidManifest.xml:87: Warning: The attribute android:allowBackup is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute android:dataExtractionRules specifying an @xml resource which configures cloud backups and device transfers on Android 12 and higher. [DataExtractionRules]
+        android:allowBackup="false"
+                             ~~~~~
+
+   Explanation for issues of type "DataExtractionRules":
+   Before Android 12, the attributes android:allowBackup and
+   android:fullBackupContent were used to configure all forms of backup,
+   including cloud backups, device-to-device transfers and adb backup.
+
+   In Android 12 and higher, these attributes have been deprecated and will
+   only apply to cloud backups. You should instead use the attribute
+   android:dataExtractionRules, specifying an @xml resource that configures
+   which files to back up, for cloud backups and for device-to-device
+   transfers, separately. If your minSdkVersion supports older versions,
+   you'll still want to specify an android:fullBackupContent resource if the
+   default behavior is not right for your app.
+
+   https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   https://goo.gle/DataExtractionRules
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:516: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                p.shader = android.graphics.LinearGradient(x - fw * 0.2f, 0f, x + fw * 0.2f, 0f,
+                           ^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:516: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                p.shader = android.graphics.LinearGradient(x - fw * 0.2f, 0f, x + fw * 0.2f, 0f,
+                           ^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:2174: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+        fill.shader = android.graphics.LinearGradient(0f, 0f, fw, 0f, accent, Color.WHITE, android.graphics.Shader.TileMode.CLAMP)
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:2174: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+        fill.shader = android.graphics.LinearGradient(0f, 0f, fw, 0f, accent, Color.WHITE, android.graphics.Shader.TileMode.CLAMP)
+                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:2178: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+        shine.shader = android.graphics.LinearGradient(x - fw * 0.25f, 0f, x + fw * 0.25f, 0f,
+                       ^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:2178: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+        shine.shader = android.graphics.LinearGradient(x - fw * 0.25f, 0f, x + fw * 0.25f, 0f,
+                       ^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/TextArt.kt:299: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                RuntimeShader(GLASS_TEXT).also { sharedText = it }
+                ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Views.kt:140: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                    if (liveGlass) GlassDrawable(this, px * 0.2237f, darkness = 0.02f, bendPx = dpf(8f), owned = true)
+                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Views.kt:141: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                    else LiquidTile(px * 0.2237f)
+                         ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Views.kt:144: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+                val sheen = sheenTile ?: LiquidSheen(px * 0.2237f).also { d -> sheenTile = d }
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Views.kt:523: Warning: Avoid object allocations during draw/layout operations (preallocate and reuse instead) [DrawAllocation]
+        if (widthsBuf.size != pages) widthsBuf = FloatArray(pages)
+                                                 ~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "DrawAllocation":
+   You should avoid allocating objects during a drawing or layout operation.
+   These are called frequently, so a smooth UI can be interrupted by garbage
+   collection pauses caused by the object allocations.
+
+   The way this is generally handled is to allocate the needed objects up
+   front and to reuse them for each drawing operation.
+
+   Some methods allocate memory on your behalf (such as Bitmap.create), and
+   these should be handled in the same way.
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/res/mipmap-anydpi-v26: Warning: This folder configuration (v26) is unnecessary; minSdkVersion is 30. Merge all the resources in this folder into mipmap-anydpi. [ObsoleteSdkInt]
+
+   Explanation for issues of type "ObsoleteSdkInt":
+   This check flags version checks that are not necessary, because the
+   minSdkVersion (or surrounding known API level) is already at least as high
+   as the version checked for.
+
+   Similarly, it also looks for resources in -vNN folders, such as values-v14
+   where the version qualifier is less than or equal to the minSdkVersion,
+   where the contents should be merged into the best folder.
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Data.kt:15: Warning: Do not place Android context classes in static fields (static reference to Steps which has field ctx pointing to Context); this is a memory leak [StaticFieldLeak]
+/**
+^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Data.kt:24: Warning: Do not place Android context classes in static fields; this is a memory leak [StaticFieldLeak]
+    private var ctx: Context? = null
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Weather.kt:223: Warning: Do not place Android context classes in static fields (static reference to App0 which has field ctx pointing to Context); this is a memory leak [StaticFieldLeak]
+/** Application context holder (set by the launcher on start). */
+^
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Weather.kt:225: Warning: Do not place Android context classes in static fields; this is a memory leak [StaticFieldLeak]
+    var ctx: Context? = null
+    ~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "StaticFieldLeak":
+   A static field will leak contexts.
+
+   Non-static inner classes have an implicit reference to their outer class.
+   If that outer class is for example a Fragment or Activity, then this
+   reference means that the long-running handler/loader/task will hold a
+   reference to the activity which prevents it from getting garbage
+   collected.
+
+   Similarly, direct field references to activities and fragments from these
+   longer running instances can cause leaks.
+
+   ViewModel classes should never point to Views or non-application Contexts.
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/res/drawable/ic_settings_fg.xml:6: Warning: Very long vector path (904 characters), which is bad for performance. Considering reducing precision, removing minor details or rasterizing vector. [VectorPath]
+        <path android:fillColor="#FFF2F2F4" android:pathData="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z" />
+                                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "VectorPath":
+   Using long vector paths is bad for performance. There are several ways to
+   make the pathData shorter:
+   * Using less precision
+   * Removing some minor details
+   * Using the Android Studio vector conversion tool
+   * Rasterizing the image (converting to PNG)
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/res/drawable/ic_more.xml:2: Warning: The resource R.drawable.ic_more appears to be unused [UnusedResources]
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+^
+
+   Explanation for issues of type "UnusedResources":
+   Unused resources make applications larger and slow down builds.
+
+
+   The unused resource check can ignore tests. If you want to include
+   resources that are only referenced from tests, consider packaging them in a
+   test source set instead.
+
+   You can include test sources in the unused resource check by setting the
+   system property lint.unused-resources.include-tests =true, and to exclude
+   them (usually for performance reasons), use
+   lint.unused-resources.exclude-tests =true.
+   ,
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Drawer.kt:1108: Warning: Custom view SpanGrid is missing constructor used by tools: (Context) or (Context,AttributeSet) or (Context,AttributeSet,int) [ViewConstructor]
+class SpanGrid(context: Context, private var cols: Int, private var cellH: Int) : ViewGroup(context) {
+      ~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeLayout.kt:281: Warning: Custom view HomeGrid is missing constructor used by tools: (Context) or (Context,AttributeSet) or (Context,AttributeSet,int) [ViewConstructor]
+class HomeGrid(context: Context, val page: Int) : ViewGroup(context) {
+      ~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/TextArt.kt:424: Warning: Custom view ClockFace is missing constructor used by tools: (Context) or (Context,AttributeSet) or (Context,AttributeSet,int) [ViewConstructor]
+class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null) : TextArt(context) {
+      ~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/TextArt.kt:521: Warning: Custom view DateFace is missing constructor used by tools: (Context) or (Context,AttributeSet) or (Context,AttributeSet,int) [ViewConstructor]
+class DateFace(context: Context, private val forceStyle: Int = -1) : TextArt(context) {
+      ~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Views.kt:310: Warning: Custom view BackgroundView is missing constructor used by tools: (Context) or (Context,AttributeSet) or (Context,AttributeSet,int) [ViewConstructor]
+class BackgroundView(
+      ~~~~~~~~~~~~~~
+
+   Explanation for issues of type "ViewConstructor":
+   Some layout tools (such as the Android layout editor) need to find a
+   constructor with one of the following signatures:
+   * View(Context context)
+   * View(Context context, AttributeSet attrs)
+   * View(Context context, AttributeSet attrs, int defStyle)
+
+   If your custom view needs to perform initialization which does not apply
+   when used in a layout editor, you can surround the given code with a check
+   to see if View#isInEditMode() is false, since that method will return false
+   at runtime but true within a user interface editor.
+
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Drawer.kt:241: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Hold and drag apps or folders to move them"
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Drawer.kt:248: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Done"
+                    ~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/Groups.kt:202: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                        text = "+${apps.size - (slots - 1)}"
+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:284: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            titleView.text = "Weather"
+                              ~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:310: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            text = "${w.temp}°"
+                   ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:317: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            now.addView(small(Palette.SILVER, 11.5f, 1).apply { text = "H ${d.max}°  L ${d.min}°" })
+                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:341: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                r.addView(small(Palette.INK, 13f, 1).apply { text = "${d.max}°  "; typeface = Fonts.semibold(context) })
+                                                                    ~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:342: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                r.addView(small(Palette.SILVER, 13f, 1).apply { text = "${d.min}°" })
+                                                                       ~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:372: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            text = "${h.temp}°"
+                   ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:426: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        pct.text = "$level%"
+                   ~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:556: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                sub.text = "This phone has no step sensor"
+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:561: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                sub.text = "Tap to count your steps"
+                            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:567: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                sub.text = "${(s * 100 / goal).coerceAtMost(999)}% of ${String.format(java.util.Locale.getDefault(), "%,d", goal)}"
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:567: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                sub.text = "${(s * 100 / goal).coerceAtMost(999)}% of ${String.format(java.util.Locale.getDefault(), "%,d", goal)}"
+                                                                 ~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:626: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "Tap to show your events here"
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:634: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "Nothing else today"
+                        ~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:832: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        hint.text = "Tap to pick a photo"
+                     ~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:921: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:921: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:921: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
+                        ~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:921: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            sub.text = "Ends " + DateFormat.getTimeFormat(context).format(Date(end)) + " · tap to hide"
+                                                                                        ~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:928: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        sub.text = "Tap to start"
+                    ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:1114: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            titleView.text = "Countdown"
+                              ~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:1116: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            sub.text = "Tap to pick a date"
+                        ~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:1127: Warning: Number formatting does not take into account locale settings. Consider using String.format instead. [SetTextI18n]
+        days.text = kotlin.math.abs(n).toString()
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/HomeWidgets.kt:1164: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        pct.text = "${(used * 100).toInt()}%"
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/MusicCard.kt:788: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                text = "$name doesn't share what's up next."
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/MusicCard.kt:788: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "$name doesn't share what's up next."
+                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/MusicCard.kt:801: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        head.addView(c.text(10.5f, Color.argb(200, 255, 255, 255), bold = true, caps = true).apply { text = "Up next" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                                                                                             ~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:140: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Get started"
+                    ~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:247: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                text = s.where + if (s.page != null) "  ›" else ""
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:523: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Done"
+                    ~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:738: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Normal"
+                    ~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:908: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                    explain.text = rows[k].second + "\n" + rows[k].third
+                                   ~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/OnboardingActivity.kt:908: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                    explain.text = rows[k].second + "\n" + rows[k].third
+                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:187: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "Halo Launcher"
+                        ~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:192: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "Made by LONERXONE"
+                        ~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:368: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        left.addView(text(11f, Palette.GREY, caps = true).apply { text = "Halo Launcher" })
+                                                                          ~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:370: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            text = "v" + version()
+                   ~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:395: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            info.addView(text(12.5f, Palette.GREY).apply { text = "Downloading ${rel?.tag ?: ""}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:395: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            info.addView(text(12.5f, Palette.GREY).apply { text = "Downloading ${rel?.tag ?: ""}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                                                   ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:413: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                head.addView(text(15f, Palette.INK, bold = true).apply { text = "What's new in ${rel.tag}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:413: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                head.addView(text(15f, Palette.INK, bold = true).apply { text = "What's new in ${rel.tag}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                                                                 ~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:729: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                text = "No background yet"
+                        ~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:931: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                    colourNote?.text = ClockFaces.COLOUR_NAMES[i] + if (i == 1) ": follows your wallpaper" else ""
+                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:1123: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                    text = about[i].orEmpty() + if (followTheme && on) ", from your theme" else ""
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:1207: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "No icon packs installed yet. Get a free one below, or any from the Play Store."
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/SettingsActivity.kt:1672: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Halo is the dynamic island for your camera. The two apps share a private link, so the launcher gets:"
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:153: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        titles.addView(text(26f, Palette.INK, bold = true).apply { text = "Wallpapers" })
+                                                                           ~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:154: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        titles.addView(text(11.5f, Palette.GREY).apply { text = "From wallhaven.cc, by their artists" })
+                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:219: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        sb.addView(text(14f, Palette.INK, bold = true).apply { text = "Change daily" })
+                                                                       ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:220: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        sb.addView(text(12f, Palette.GREY, lines = 2).apply { text = "A different saved wallpaper each day. Hold one to remove it." })
+                                                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:519: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Drag to move · pinch to zoom · double-tap to reset"
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:588: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            busy.text = "Setting…"
+                         ~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WallpaperActivity.kt:606: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            busy.text = "Saving…"
+                         ~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WidgetPickActivity.kt:55: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Add a widget"
+                    ~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WidgetPickActivity.kt:59: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            text = "Widgets sit on your second page. Tap one to add it."
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/runner/work/halo-launcher/halo-launcher/app/src/main/java/com/lonerxone/halo/launcher/WidgetPickActivity.kt:116: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+            col.addView(text(14f, Palette.WHITE70).apply { text = "No widgets found on this phone." })
+                                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "SetTextI18n":
+   When calling TextView#setText
+   * Never call Number#toString() to format numbers; it will not handle
+   fraction separators and locale-specific digits properly. Consider using
+   String#format with proper format specifications (%d or %f) instead.
+   * Do not pass a string literal (e.g. "Hello") to display text. Hardcoded
+   text can not be properly translated to other languages. Consider using
+   Android resource strings instead.
+   * Do not build messages by concatenating text chunks. Such messages can not
+   be properly translated.
+
+   https://developer.android.com/guide/topics/resources/localization.html
+
+1 errors, 88 warnings
