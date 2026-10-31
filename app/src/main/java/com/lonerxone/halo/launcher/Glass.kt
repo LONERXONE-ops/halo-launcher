@@ -589,6 +589,10 @@ object Glass {
             half3 lc = half3(mix(float3(1.0), glint.rgb, glint.a * 0.5));
             float shine = 1.0 + glint.a * 0.8;
             col += lc * half((edgeLine * 0.55 + glow * glow * 0.16) * lit * light * shine);
+            // The glow: a broad, soft light along the whole rim, strongest on
+            // the lit side, so the glass looks lit from within at its edges.
+            float wide = 1.0 - smoothstep(0.0, refrH * 1.7, inside);
+            col += lc * half(pow(wide, 1.6) * (0.30 + 0.70 * lit) * 0.24 * light * shine);
             // A faint lift across the top, a touch of depth at the bottom.
             float y = p.y / size.y;
             col += half3(0.035 * light * (1.0 - smoothstep(0.0, 0.45, y)));

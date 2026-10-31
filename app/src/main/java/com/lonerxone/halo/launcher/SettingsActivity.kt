@@ -83,7 +83,10 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         Prefs.get(this).registerOnSharedPreferenceChangeListener(watch)
-        if (Palette.adapt(this)) stale = true
+        // Recolour if the colours changed since this page was drawn, even when
+        // another screen already worked them out (the launcher, the wallpaper browser).
+        Palette.adapt(this)
+        if (Palette.key != drawnPalette) stale = true
         ensureBackdrop()
         // Only redraw if something actually changed: no flash every time you come back.
         if (stale || shown == null) render()
@@ -105,8 +108,11 @@ class SettingsActivity : Activity() {
         render()
     }
 
+    private var drawnPalette = ""
+
     private fun render() {
         stale = false
+        drawnPalette = Palette.key
         live.clear()
         val same = shown == page
         shown?.let { old -> scroll?.let { scrollMemory[old] = it.scrollY } }
@@ -639,6 +645,8 @@ class SettingsActivity : Activity() {
     private fun ensureBackdrop() {
         val b = windowManager.currentWindowMetrics.bounds
         Glass.load(this, b.width(), b.height()) {
+            // A new picture: new colours for the whole menu straight away.
+            Palette.adapt(this)
             heroCache = null
             render()
         }

@@ -358,7 +358,12 @@ abstract class TextArt(context: Context) : View(context) {
 
             half4 main(float2 p) {
                 float cov = float(hard.eval(p).a);
-                if (cov < 0.004) return half4(0.0);
+                if (cov < 0.004) {
+                    // Just outside the letters: a soft glow around them.
+                    float halo = float(soft.eval(p).a);
+                    float ga = halo * halo * 0.30 * (1.0 + glint.a * 0.6);
+                    return half4(half3(ga), half(ga));
+                }
                 // How thick the glass is here (1 deep inside a letter, 0 at its edge)
                 // and which way its surface slopes.
                 float h = clamp(float(soft.eval(p).a) * 1.25, 0.0, 1.0);
@@ -389,6 +394,9 @@ abstract class TextArt(context: Context) : View(context) {
                 float shine = 1.0 + glint.a * 0.8;
                 float3 lc = mix(float3(1.0), glint.rgb, glint.a * 0.5);
                 col += lc * (edge * 0.55 + glow * glow * 0.18) * lit * shine;
+                // The glow inside the letters: their lit faces shine softly all the way in.
+                float spec = pow(max(dot(-n, L), 0.0), 2.5) * clamp(gl * 6.0, 0.0, 1.0);
+                col += lc * spec * 0.40 * shine;
                 // A soft shade on the far side gives the letters depth.
                 col *= 1.0 - 0.12 * glow * clamp(-facing, 0.0, 1.0);
                 return half4(half3(clamp(col, 0.0, 1.0) * cov), half(cov));
