@@ -18,17 +18,21 @@ import android.os.Build
 import android.view.View
 
 /**
- * Liquid Glass, after Apple's material: a pane that bends the picture behind
- * it. The middle is softly frosted for legibility; towards the rim the glass
- * thickens and refracts, pulling the background in like a lens, with a hint
- * of colour fringing; light catches the top-left edge and a fainter glint
- * the bottom-right.
+ * Liquid Glass, rebuilt from scratch after Apple's material (and the way
+ * the open source Backdrop library by Kyant models it, Apache 2.0, see
+ * docs/licenses): a clear pane with a rounded, thick edge. Through the
+ * middle you see the background almost as it is (lightly softened, colours
+ * kept rich); at the rim the edge curves away like a quarter circle and the
+ * picture is pulled in round it, the way a real glass lens bends light.
+ * A crisp line of light runs where the edge faces the light (top left, and
+ * fainter bottom right). Touch it and the glass swells, lights up under your
+ * finger and stretches after it, then springs back.
  *
  * Android can't see other windows, so Halo Launcher draws its own background
  * (your picture, or your wallpaper when Android lets us read it) and every
- * glass pane samples that same image at its exact place on screen. On
- * Android 13+ the lens runs as an AGSL shader on the GPU; older phones get
- * frosted glass with the same rim light.
+ * pane samples that same image at its exact place on screen. On Android 13+
+ * the lens runs as an AGSL shader on the GPU; older phones get frosted
+ * glass with the same rim light.
  */
 object Glass {
     /** The background as drawn on screen (window-sized), and a blurred copy for the frost. */
@@ -36,6 +40,8 @@ object Glass {
         private set
     private var blurred: Bitmap? = null
     private var blurredShader: BitmapShader? = null
+    /** Half size, only lightly softened: what you see through clear glass. */
+    private var clearShader: BitmapShader? = null
     private const val SCALE = 4
     private val listeners = mutableListOf<() -> Unit>()
 
@@ -92,6 +98,7 @@ object Glass {
             backdrop = null
             blurred = null
             blurredShader = null
+            clearShader = null
             for (l in listeners.toList()) l()
             return
         }
@@ -104,6 +111,7 @@ object Glass {
         }
         Canvas(out).drawBitmap(src, m, Paint(Paint.FILTER_BITMAP_FLAG))
         backdrop = out
+        clearShader = clearOf(out)
         val small = Bitmap.createScaledBitmap(out, (w / SCALE).coerceAtLeast(1), (h / SCALE).coerceAtLeast(1), true)
         val b = boxBlur(small, 4)
         blurred = b
@@ -114,6 +122,18 @@ object Glass {
     }
 
     fun frost(): BitmapShader? = blurredShader
+
+    /** The lightly softened background for clear glass (falls back to the frost). */
+    fun clear(): BitmapShader? = clearShader ?: blurredShader
+
+    private fun clearOf(full: Bitmap): BitmapShader {
+        val half = Bitmap.createScaledBitmap(full, (full.width / 2).coerceAtLeast(1), (full.height / 2).coerceAtLeast(1), true)
+        val soft = boxBlur(half, 1)
+        if (half !== full) half.recycle()
+        return BitmapShader(soft, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(Matrix().apply { setScale(2f, 2f) })
+        }
+    }
 
     private var sharpShader: BitmapShader? = null
     private var sharpOf: Bitmap? = null
@@ -359,7 +379,7 @@ object Glass {
         null
     }
 
-    private class Prepared(val full: Bitmap, val blur: Bitmap)
+    private class Prepared(val full: Bitmap, val blur: Bitmap, val clear: BitmapShader)
 
     private fun prepare(src: Bitmap, w: Int, h: Int): Prepared {
         val s = maxOf(w.toFloat() / src.width, h.toFloat() / src.height)
@@ -373,7 +393,7 @@ object Glass {
         }
         Canvas(out).drawBitmap(src, m, Paint(Paint.FILTER_BITMAP_FLAG))
         val small = Bitmap.createScaledBitmap(out, (w / SCALE).coerceAtLeast(1), (h / SCALE).coerceAtLeast(1), true)
-        return Prepared(out, boxBlur(small, 4))
+        return Prepared(out, boxBlur(small, 4), clearOf(out))
     }
 
     private fun install(p: Prepared?) {
@@ -381,9 +401,11 @@ object Glass {
             backdrop = null
             blurred = null
             blurredShader = null
+            clearShader = null
         } else {
             backdrop = p.full
             blurred = p.blur
+            clearShader = p.clear
             blurredShader = BitmapShader(p.blur, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
                 setLocalMatrix(Matrix().apply { setScale(SCALE.toFloat(), SCALE.toFloat()) })
             }
@@ -436,158 +458,130 @@ object Glass {
     }
 
     /**
-     * The lens. p is the pixel inside the pane; origin is the pane's place on
-     * screen. A rounded-rectangle distance field gives how close we are to the
-     * rim and which way it faces; near the rim the sample point is pushed
-     * outward-in (refraction), split slightly per colour (dispersion), and the
-     * rim catches light from the top-left.
+     * The lens, from scratch. Clear glass with a thick rounded rim: inside
+     * the rim you see the softened background as it is; across the rim the
+     * picture is pulled in from further inside along a quarter-circle
+     * profile (the bend grows steeply towards the very edge), so the
+     * background curls round the edge. Optional chromatic dispersion splits
+     * that bend into seven colour samples. Then vibrancy, the legibility
+     * tint, the rim light, and the glow under your finger.
      */
-    /** The lens without dispersion (same uniforms), for GPUs that reject the full one. */
-    val AGSL_SAFE: String by lazy {
-        AGSL.replace(Regex("//@A[\\s\\S]*?//@B"), "float3 Nd = float3(0.0, 0.0, 1.0);\n            col.r = image.eval(s - g * k * 0.08).r;\n            col.g = image.eval(s).g;\n            col.b = image.eval(s + g * k * 0.08).b;\n")
-            .replace(Regex("//@C[\\s\\S]*?//@D"), "")
-    }
-
     const val AGSL = """
-        uniform shader image;
+        uniform shader clearImg;
+        uniform shader frostImg;
         uniform float2 size;
-        uniform float2 origin;
+        uniform float2 center;
+        uniform float2 zoom;
         uniform float radius;
-        uniform float bend;
+        uniform float refrH;
+        uniform float refrAmt;
+        uniform float depth;
+        uniform float frost;
         uniform float4 tint;
         uniform float4 hue;
         uniform float light;
-        // Experimental: how far the colours split at the rim (0 = the usual hint).
         uniform float disperse;
-        // Glare off a bright, reflective wallpaper (sky blue, gold, silver): colour and amount.
         uniform float4 glint;
+        uniform float3 touch;
 
-        // Snell's law for light coming straight at the screen through a
-        // surface facing N, with eta = outside / inside index. Returns the
-        // sideways drift of the ray (what we see shifts by this much).
-        float2 bendThrough(float3 N, float eta) {
-            float cosi = N.z;
-            float kk = 1.0 - eta * eta * (1.0 - cosi * cosi);
-            if (kk < 0.0) return float2(0.0);
-            float3 T = eta * float3(0.0, 0.0, -1.0) + (eta * cosi - sqrt(kk)) * N;
-            return T.xy;
+        // Distance to the edge of a rounded rectangle centred on 0
+        // (negative inside), and which way the edge faces.
+        float sdBox(float2 p, float2 hs, float r) {
+            float2 q = abs(p) - (hs - float2(r));
+            return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+        }
+
+        float2 edgeDir(float2 p, float2 hs, float r) {
+            float2 q = abs(p) - (hs - float2(r));
+            if (q.x >= 0.0 || q.y >= 0.0) return sign(p) * normalize(max(q, 0.0001));
+            float gx = step(q.y, q.x);
+            return sign(p) * float2(gx, 1.0 - gx);
+        }
+
+        // The glass's edge is rounded like a quarter circle: flat inside,
+        // curving down steeply at the rim. This is how far the light bends
+        // at a depth t (0 = the very edge, 1 = where the curve ends).
+        float bendAt(float t) {
+            float x = 1.0 - t;
+            return 1.0 - sqrt(max(1.0 - x * x, 0.0));
+        }
+
+        half3 behind(float2 at) {
+            half3 a = clearImg.eval(at).rgb;
+            half3 b = frostImg.eval(at).rgb;
+            return mix(a, b, half(frost));
         }
 
         half4 main(float2 p) {
-            float2 c = size * 0.5;
-            float2 q = abs(p - c) - (c - radius);
-            float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
-            // The bevel is a thin rim, never more than a fraction of a small pane
-            // (on a folder or icon a wide bevel looked like a pyramid).
-            float bevel = min(min(radius, 30.0), min(size.x, size.y) * 0.16) * (1.0 + 0.3 * disperse);
-            float e = clamp(1.0 + d / bevel, 0.0, 1.0);
-            // Which way the rim faces, blended smoothly round the corners
-            // (no hard seams running in from the corners).
-            float2 qq = max(q + bevel, 0.01);
-            float2 gv = sign(p - c) * qq * qq * qq;
-            float2 g = gv / max(length(gv), 0.000001);
-            float k = pow(e, 2.2) * bend;
-            float2 s = origin + p - g * k;
+            float2 hs = size * 0.5;
+            float2 cc = p - hs;
+            float r = min(radius, min(hs.x, hs.y));
+            float sd = sdBox(cc, hs, r);
+            float2 here = center + cc * zoom;
+            float inside = -sd;
+            float2 dir = edgeDir(cc, hs, min(r * 1.5, min(hs.x, hs.y)));
             half3 col;
-            //@A
-            float3 Nd = float3(0.0, 0.0, 1.0);
-            if (disperse > 0.0 && e > 0.01) {
-                // Chromatic dispersion, the way real glass does it (and the way
-                // Apple's lens and the well-known WebGL glass shaders model it):
-                // the rim is a rounded edge whose surface tilts more the closer
-                // you get to the edge; light passes through it by Snell's law,
-                // and the index of refraction is a little higher for blue than
-                // for red, so each colour lands in a slightly different place.
-                // Six bands (red, yellow, green, cyan, blue, violet), each
-                // sampled a few times along a short spread so the split is a
-                // smooth spectrum, then folded back into RGB.
-                float tilt = pow(e, 1.5) * (1.3 + 0.5 * disperse);
-                Nd = normalize(float3(g * tilt, 1.0));
-                float2 r0 = bendThrough(Nd, 1.0 / 1.47);
-                // Green lands where the plain lens would (the overall look stays),
-                // a bit stronger so the light has room to split.
-                float scale = k * (1.0 + 0.45 * disperse) / max(length(r0), 0.0001);
-                float spread = 0.3 * disperse;
-                half3 acc = half3(0.0);
-                for (int j = 0; j < 4; j++) {
-                    float jt = 1.0 + (float(j) / 3.0 - 0.5) * 0.14;
-                    float2 base = origin + p;
-                    half3 sR = image.eval(base + bendThrough(Nd, 1.0 / (1.47 - spread)) * scale * jt).rgb;
-                    half3 sY = image.eval(base + bendThrough(Nd, 1.0 / (1.47 - spread * 0.5)) * scale * jt).rgb;
-                    half3 sG = image.eval(base + r0 * scale * jt).rgb;
-                    half3 sC = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread * 0.5)) * scale * jt).rgb;
-                    half3 sB = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread)) * scale * jt).rgb;
-                    half3 sV = image.eval(base + bendThrough(Nd, 1.0 / (1.47 + spread * 1.5)) * scale * jt).rgb;
-                    half r = sR.r * 0.5;
-                    half gg = sG.g * 0.5;
-                    half b = sB.b * 0.5;
-                    half y = (2.0 * sY.r + 2.0 * sY.g - sY.b) / 6.0;
-                    half c2 = (2.0 * sC.g + 2.0 * sC.b - sC.r) / 6.0;
-                    half v = (2.0 * sV.b + 2.0 * sV.r - sV.g) / 6.0;
-                    acc += half3(r + (2.0 * v + 2.0 * y - c2) / 3.0,
-                                 gg + (2.0 * y + 2.0 * c2 - v) / 3.0,
-                                 b + (2.0 * c2 + 2.0 * v - y) / 3.0);
-                }
-                col = acc * 0.25;
+            if (inside >= refrH) {
+                col = behind(here);
             } else {
-                col.r = image.eval(s - g * k * 0.08).r;
-                col.g = image.eval(s).g;
-                col.b = image.eval(s + g * k * 0.08).b;
-            }
-            //@B
-            // Vibrancy: what shows through keeps its colour (like iOS glass), not washed grey.
-            half lum = dot(col, half3(0.299, 0.587, 0.114));
-            col = mix(half3(lum), col, half(1.2));
-            col = mix(col, half3(tint.rgb), half(tint.a));
-            // Adaptive colour: a wash of your wallpaper's hue through the whole pane.
-            col = mix(col, half3(hue.rgb), half(hue.a));
-            col *= 1.04;
-            float2 L = normalize(float2(-0.55, -0.85));
-            float rim = smoothstep(0.55, 1.0, e) * pow(max(dot(g, L), 0.0), 1.5);
-            float rim2 = smoothstep(0.75, 1.0, e) * pow(max(dot(g, -L), 0.0), 2.0);
-            float edge = smoothstep(0.9, 1.0, e);
-            // The light on the rim picks up a little of the hue too.
-            half3 lightCol = mix(half3(1.0), half3(hue.rgb) * 1.6, half(min(hue.a * 1.5, 0.3)));
-            col += lightCol * half(rim * 0.40 * light + rim2 * 0.14 * light) + half3(edge * 0.05);
-            // A soft sheen across the top third, and a touch of depth at the bottom.
-            float y = p.y / size.y;
-            col += half3(0.045 * light * (1.0 - smoothstep(0.0, 0.38, y)));
-            col *= half(1.0 - 0.06 * smoothstep(0.7, 1.0, y));
-            //@C
-            if (disperse > 0.0 && e > 0.01) {
-                // Light on a prism: the highlights on the curved edge split too.
-                // Each colour's highlight is worked out from a surface shifted a
-                // hair in or out, so a white glint comes with red on one side
-                // and blue on the other, like light through a real glass ring.
-                float3 Ld = normalize(float3(-0.55, -0.85, 0.75));
-                float3 Lb = normalize(float3(0.55, 0.85, 0.9));
-                float sh = 0.3 * disperse;
-                half3 spec = half3(0.0);
-                for (int ci = 0; ci < 3; ci++) {
-                    float ec = clamp(e + (float(ci) - 1.0) * sh, 0.0, 1.0);
-                    float3 Nc = normalize(float3(g * pow(ec, 1.5) * (1.3 + 0.5 * disperse), 1.0));
-                    float sp = pow(max(dot(Nc, Ld), 0.0), 40.0) + 0.5 * pow(max(dot(Nc, Lb), 0.0), 40.0);
-                    if (ci == 0) spec.r = half(sp); else if (ci == 1) spec.g = half(sp); else spec.b = half(sp);
+                // Refraction: near the rim the picture is pulled in from
+                // further inside, so the background curls round the edge
+                // like it does through a thick glass lens.
+                float d = bendAt(max(inside, 0.0) / refrH) * refrAmt;
+                float2 n = normalize(dir + depth * cc / max(length(cc), 0.001));
+                float2 at = here - n * d * zoom;
+                if (disperse > 0.0) {
+                    // Chromatic dispersion: red bends least, violet most, so
+                    // edges behind the rim split into a spectrum. Seven
+                    // samples spread along the bend.
+                    float2 sp = n * d * zoom * (0.18 + 0.22 * disperse);
+                    half3 c0 = behind(at + sp);
+                    half3 c1 = behind(at + sp * 0.6667);
+                    half3 c2 = behind(at + sp * 0.3333);
+                    half3 c3 = behind(at);
+                    half3 c4 = behind(at - sp * 0.3333);
+                    half3 c5 = behind(at - sp * 0.6667);
+                    half3 c6 = behind(at - sp);
+                    col.r = (c0.r + c1.r + c2.r) / 3.5 + c6.r / 7.0;
+                    col.g = c1.g / 7.0 + (c2.g + c3.g + c4.g) / 3.5;
+                    col.b = (c4.b + c5.b + c6.b) / 3.0;
+                } else {
+                    col = behind(at);
                 }
-                // Fresnel: glass reflects more as the surface turns away from you.
-                float fres = pow(1.0 - Nd.z, 3.0);
-                col += spec * half(0.6 * disperse * (0.45 + 0.55 * light)) + half3(fres * 0.12 * disperse);
-                // Thin-film colour, like the rainbow bands on a soap bubble's
-                // rim: it follows the edge's thickness, so the bands run
-                // parallel to the edge.
-                float band = smoothstep(0.45, 0.8, e) * (1.0 - smoothstep(0.92, 1.0, e));
-                half3 film = half3(0.5 + 0.5 * cos(6.2831853 * (e * 1.6 + float3(0.0, 0.33, 0.67))));
-                col += film * half(band * 0.18 * disperse);
             }
-            //@D
+            // Vibrancy: colours seen through glass stay rich, not washed out.
+            half lum = dot(col, half3(0.213, 0.715, 0.072));
+            col = mix(half3(lum), col, half(1.45));
+            // Legibility tint, then your wallpaper's hue (Adaptive colour).
+            col = mix(col, half3(tint.rgb), half(tint.a));
+            col = mix(col, half3(hue.rgb), half(hue.a));
+
+            // Light on the rim: a crisp line where the edge faces the light
+            // (top left and, fainter, bottom right), plus a soft glow inside
+            // the curve, like a real glass edge catching the sky.
+            float2 L = normalize(float2(-1.0, -1.0));
+            float facing = dot(dir, L);
+            float lit = pow(abs(facing), 1.2) * (facing > 0.0 ? 1.0 : 0.55);
+            float edgeLine = 1.0 - smoothstep(0.0, 1.6, inside);
+            float glow = 1.0 - smoothstep(0.0, refrH * 0.9, inside);
+            half3 lc = half3(mix(float3(1.0), glint.rgb, glint.a * 0.5));
+            float shine = 1.0 + glint.a * 0.8;
+            col += lc * half((edgeLine * 0.55 + glow * glow * 0.16) * lit * light * shine);
+            // A faint lift across the top, a touch of depth at the bottom.
+            float y = p.y / size.y;
+            col += half3(0.035 * light * (1.0 - smoothstep(0.0, 0.45, y)));
+            col *= half(1.0 - 0.05 * smoothstep(0.65, 1.0, y));
+            // Bright, reflective wallpapers: a soft glare band across the pane.
             if (glint.a > 0.0) {
-                // Shine: a bright wallpaper lights the glass. A soft glare band
-                // sweeps diagonally across, a thinner streak beside it, and the
-                // lit rim gets a hot highlight in the wallpaper's own light.
                 float dpos = (p.x / size.x) * 0.62 + y * 0.38;
-                float band = exp(-pow((dpos - 0.30) / 0.075, 2.0)) * 0.11 + exp(-pow((dpos - 0.43) / 0.022, 2.0)) * 0.07;
-                float hot = pow(rim, 0.7) * 0.42 + rim2 * 0.16 + edge * 0.05;
-                col += half3(glint.rgb) * half((band * (0.6 + 0.4 * light) + hot) * glint.a);
+                float band = exp(-pow((dpos - 0.30) / 0.08, 2.0)) * 0.09 + exp(-pow((dpos - 0.44) / 0.025, 2.0)) * 0.05;
+                col += half3(glint.rgb) * half(band * glint.a * light);
+            }
+            // Touch: the glass lights up where your finger is, and a little all over.
+            if (touch.z > 0.0) {
+                float rr = min(size.x, size.y) * 1.5;
+                float spot = smoothstep(rr, rr * 0.35, distance(p, touch.xy));
+                col += half3(touch.z * (0.07 + 0.16 * spot));
             }
             return half4(clamp(col, half3(0.0), half3(1.0)), 1.0);
         }
@@ -623,6 +617,37 @@ class GlassDrawable(
     private var oldBmp: Bitmap? = null
     private val drawnAt = IntArray(2)
     private val now = IntArray(2)
+
+    // ----- touch (set by LiquidTouch) -----
+    /** 0 = resting, 1 = fully pressed: the glass swells, bends more and lights up. */
+    var press = 0f
+    /** Where the finger is, in this pane's own pixels. */
+    var touchX = 0f
+    var touchY = 0f
+
+    private var glowAnim: android.animation.ValueAnimator? = null
+
+    /**
+     * A soft glow on the pane under the finger (menus, where the rows take
+     * the touches): fades in on [down], follows, fades out on release.
+     */
+    fun glowAt(x: Float, y: Float, down: Boolean) {
+        touchX = x
+        touchY = y
+        glowAnim?.cancel()
+        glowAnim = android.animation.ValueAnimator.ofFloat(press, if (down) 0.7f else 0f).apply {
+            duration = if (down) 160L else 320L
+            addUpdateListener {
+                press = it.animatedValue as Float
+                invalidateSelf()
+            }
+            start()
+        }
+        invalidateSelf()
+    }
+
+    /** Clear (icons, dock, buttons) or more frosted (widgets, menus, sheets with text on them). */
+    private val frostAmt = (darkness * 2.2f).coerceIn(0.1f, 0.85f)
 
     /**
      * Before every frame, check whether the pane moved on screen (page swipe,
@@ -678,20 +703,35 @@ class GlassDrawable(
         val rs0 = if (frost != null && bendPx > 0f && Build.VERSION.SDK_INT >= 33 && !shaderBroken) sharedShader() else null
         if (frost != null && rs0 != null && Build.VERSION.SDK_INT >= 33) {
             val rs = rs0
-            rs.setInputShader("image", frost)
-            rs.setFloatUniform("size", rect.width(), rect.height())
-            rs.setFloatUniform("origin", ox, oy)
-            rs.setFloatUniform("radius", radius.coerceAtMost(minOf(rect.width(), rect.height()) / 2f))
-            rs.setFloatUniform("bend", bendPx)
-            // The glass's tint: neutral, or your wallpaper's hue with Adaptive colour.
+            val w = rect.width()
+            val h = rect.height()
+            rs.setInputShader("clearImg", Glass.clear() ?: frost)
+            rs.setInputShader("frostImg", frost)
+            rs.setFloatUniform("size", w, h)
+            // Where the pane's middle is on screen, and how much it's scaled
+            // (pressed glass is drawn bigger, so it samples a bigger area too).
+            val zx = (host.scaleX * ((host.parent as? View)?.scaleX ?: 1f)).coerceAtLeast(0.01f)
+            val zy = (host.scaleY * ((host.parent as? View)?.scaleY ?: 1f)).coerceAtLeast(0.01f)
+            rs.setFloatUniform("center", loc[0] + (b.left + w / 2f) * zx, loc[1] + (b.top + h / 2f) * zy)
+            rs.setFloatUniform("zoom", zx, zy)
+            val rad = radius.coerceAtMost(minOf(w, h) / 2f)
+            rs.setFloatUniform("radius", rad)
+            // The rim: how deep the curved edge runs, and how far it bends the picture.
+            val depthPx = (minOf(w, h) * 0.32f).coerceIn(host.dpf(7f), host.dpf(26f))
+            rs.setFloatUniform("refrH", depthPx * (1f + 0.25f * press))
+            rs.setFloatUniform("refrAmt", bendPx * 1.5f * (1f + 0.35f * press))
+            // Pressed, it bulges like a drop of water (it magnifies a little).
+            rs.setFloatUniform("depth", (if (owned) 0.2f else 0f) + 0.5f * press)
+            rs.setFloatUniform("frost", frostAmt * (1f - 0.4f * press))
             val t = Palette.TILE
-            rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness)
+            rs.setFloatUniform("tint", Color.red(t) / 255f * 0.5f, Color.green(t) / 255f * 0.5f, Color.blue(t) / 255f * 0.5f, darkness * 0.85f)
             val hc = Palette.GLASS_TINT
             rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
-            rs.setFloatUniform("light", if (rimLight) 1f else 0.4f)
+            rs.setFloatUniform("light", (if (rimLight) 1f else 0.45f) * (1f + 0.4f * press))
             rs.setFloatUniform("disperse", Glass.disperse)
             val gc = Glass.glintColor
-            rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine * (if (rimLight) 1f else 0.6f))
+            rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine)
+            rs.setFloatUniform("touch", touchX - b.left, touchY - b.top, press)
             paint.shader = rs
             canvas.save()
             canvas.translate(rect.left, rect.top)
@@ -699,6 +739,8 @@ class GlassDrawable(
             canvas.drawRoundRect(rect, radius, radius, paint)
             canvas.restore()
             rect.set(b)
+            // The shader draws its own rim light.
+            return
         } else if (frost != null) {
             // Older Android: frosted glass, same rim light.
             val bmp = Glass.blurredBitmap()
@@ -818,11 +860,6 @@ class GlassDrawable(
             (shared as? RuntimeShader)?.let { return it }
             return try {
                 RuntimeShader(Glass.AGSL).also { shared = it }
-            } catch (_: Throwable) {
-                null
-            } ?: try {
-                // A GPU that can't take the dispersion code still gets the lens.
-                RuntimeShader(Glass.AGSL_SAFE).also { shared = it }
             } catch (_: Throwable) {
                 // A GPU that won't take the shader: frosted glass instead, never a crash.
                 shaderBroken = true

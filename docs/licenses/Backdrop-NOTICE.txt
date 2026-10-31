@@ -1,0 +1,12 @@
+Halo Launcher's Liquid Glass lens and touch response are written for Halo
+Launcher, following the approach of:
+
+Backdrop (Liquid Glass for Compose) by Kyant
+https://github.com/Kyant0/AndroidLiquidGlass
+Copyright 2025 Kyant
+Licensed under the Apache License, Version 2.0
+http://www.apache.org/licenses/LICENSE-2.0
+
+The rounded rectangle distance field, the quarter circle refraction
+profile, the seven sample dispersion, the rim highlight and the spring
+values for the press, lean and stretch come from that work.

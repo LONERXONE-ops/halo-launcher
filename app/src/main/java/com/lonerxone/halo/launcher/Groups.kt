@@ -370,32 +370,31 @@ class FolderSheet(
             setPadding(0, dp(4), 0, dp(16))
         })
 
-        val grid = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        var row: LinearLayout? = null
+        // Hold an app and drag it to put it where you want; hold and let go
+        // without moving for its menu (remove from folder).
+        val grid = ReorderGrid(context, 4, enabled = !readOnly)
         for ((i, a) in apps.withIndex()) {
-            if (i % 4 == 0) {
-                row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-                grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(12) })
-            }
-            row?.addView(AppIconView(context, a, 56, true, liveGlass = false).apply {
+            grid.addView(AppIconView(context, a, 56, true, liveGlass = false).apply {
+                tag = a.key
                 badge = HaloLink.badges[a.pkg] ?: 0
                 pressable()
                 setOnClickListener { host.launch(a, it) }
-                if (!readOnly) setOnLongClickListener {
-                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                    host.removeFromFolder(this@FolderSheet.folderId, a, it)
-                    true
-                }
                 // The apps pop in one after another as the folder opens.
                 alpha = 0f
                 scaleX = 0.6f
                 scaleY = 0.6f
                 animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(90L + i.coerceAtMost(16) * 18L).setDuration(320L)
                     .setInterpolator(android.view.animation.OvershootInterpolator(1.6f)).start()
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            })
         }
-        val rem = apps.size % 4
-        if (rem != 0) repeat(4 - rem) { row?.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f)) }
+        grid.onHoldStill = { v ->
+            val a = (v as AppIconView).app
+            host.removeFromFolder(this@FolderSheet.folderId, a, v)
+        }
+        grid.onReordered = { keys ->
+            Groups.setFolderApps(context, folderId, keys)
+            renamed = true
+        }
         // Many apps: the grid scrolls inside the folder (with soft edges) instead of running off the screen.
         val maxH = (resources.displayMetrics.heightPixels * 0.5f).toInt()
         val scroller = object : android.widget.ScrollView(context) {
@@ -611,5 +610,164 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
             swiping = false
         }
         return true
+    }
+}
+
+/**
+ * A grid of app icons you can rearrange: hold one and it lifts, drag it and
+ * the others slide out of the way, let go and it settles into its new spot.
+ * Holding without moving calls [onHoldStill] instead (for a menu).
+ */
+@SuppressLint("ViewConstructor")
+class ReorderGrid(context: Context, private val cols: Int, private val enabled: Boolean) : ViewGroup(context) {
+    var onReordered: ((List<String>) -> Unit)? = null
+    var onHoldStill: ((View) -> Unit)? = null
+    private val order = ArrayList<View>()
+    private var held: View? = null
+    private var grabX = 0f
+    private var grabY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var moved = false
+    private var changed = false
+    private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var candidate: View? = null
+    private val lift = Runnable { candidate?.let { pick(it) } }
+
+    override fun addView(child: View?) {
+        super.addView(child)
+        if (child != null) order += child
+    }
+
+    private fun cellW() = (width - paddingLeft - paddingRight) / cols
+    private fun cellH() = order.firstOrNull()?.measuredHeight ?: 0
+    private val gap get() = dp(12)
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val cw = (w - paddingLeft - paddingRight) / cols
+        var ch = 0
+        for (c in order) {
+            c.measure(MeasureSpec.makeMeasureSpec(cw, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            ch = maxOf(ch, c.measuredHeight)
+        }
+        val rows = (order.size + cols - 1) / cols
+        setMeasuredDimension(w, paddingTop + paddingBottom + rows * ch + (rows - 1).coerceAtLeast(0) * gap)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val cw = cellW()
+        val ch = cellH()
+        for ((i, c) in order.withIndex()) {
+            val x = paddingLeft + (i % cols) * cw
+            val y = paddingTop + (i / cols) * (ch + gap)
+            c.layout(x, y, x + cw, y + c.measuredHeight)
+        }
+    }
+
+    private fun childAt(x: Float, y: Float): View? = order.firstOrNull { it !== held && x >= it.left && x < it.right && y >= it.top && y < it.bottom }
+
+    override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
+        if (!enabled) return false
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.x
+                downY = e.y
+                moved = false
+                candidate = childAt(e.x, e.y)
+                if (candidate != null) postDelayed(lift, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (held != null) return true
+                if (kotlin.math.abs(e.x - downX) > slop || kotlin.math.abs(e.y - downY) > slop) removeCallbacks(lift)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(lift)
+                if (held != null) {
+                    finish()
+                    return true
+                }
+            }
+        }
+        return held != null
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val v = held ?: return false
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (kotlin.math.abs(e.x - downX) > slop || kotlin.math.abs(e.y - downY) > slop) moved = true
+                v.translationX = e.x - grabX - v.left
+                v.translationY = e.y - grabY - v.top
+                val over = childAt(e.x, e.y)
+                if (over != null) {
+                    val from = order.indexOf(v)
+                    val to = order.indexOf(over)
+                    if (from >= 0 && to >= 0 && from != to) {
+                        order.removeAt(from)
+                        order.add(to, v)
+                        changed = true
+                        slide(e)
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> finish()
+        }
+        return true
+    }
+
+    private fun pick(v: View) {
+        held = v
+        candidate = null
+        grabX = downX - v.left
+        grabY = downY - v.top
+        parent?.requestDisallowInterceptTouchEvent(true)
+        v.bringToFront()
+        v.elevation = dpf(10f)
+        v.animate().scaleX(1.15f).scaleY(1.15f).setDuration(180).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+        v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        // Its pressed state and long-press must not fire as well.
+        v.isPressed = false
+        v.cancelLongPress()
+    }
+
+    /** Everyone moves to their new spot, sliding there from where they were. */
+    private fun slide(e: MotionEvent) {
+        val before = order.associateWith { it.left to it.top }
+        requestLayout()
+        viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                viewTreeObserver.removeOnPreDrawListener(this)
+                for ((c, old) in before) {
+                    if (c === held) continue
+                    val dx = (old.first - c.left).toFloat()
+                    val dy = (old.second - c.top).toFloat()
+                    if (dx == 0f && dy == 0f) continue
+                    c.translationX += dx
+                    c.translationY += dy
+                    c.animate().translationX(0f).translationY(0f).setDuration(240).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.9f, 0.25f, 1f)).start()
+                }
+                held?.let {
+                    it.translationX = e.x - grabX - it.left
+                    it.translationY = e.y - grabY - it.top
+                }
+                return true
+            }
+        })
+        performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    private fun finish() {
+        val v = held ?: return
+        held = null
+        v.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(300)
+            .setInterpolator(android.view.animation.OvershootInterpolator(1.3f)).withEndAction { v.elevation = 0f }.start()
+        if (!moved && !changed) {
+            onHoldStill?.invoke(v)
+        } else if (changed) {
+            changed = false
+            onReordered?.invoke(order.mapNotNull { it.tag as? String })
+        }
     }
 }

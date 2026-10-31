@@ -123,6 +123,29 @@ class HaloMenu(private val anchor: View) {
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dp(12), dp(11), dp(14), dp(11))
                         background = rowRipple(ctx)
+                        // On glass, the card lights up under your finger as you touch a row.
+                        setOnTouchListener { rv, ev ->
+                            val g = card?.background as? GlassDrawable
+                            val kc = card
+                            if (g != null && kc != null) {
+                                val a = IntArray(2)
+                                val b = IntArray(2)
+                                rv.getLocationOnScreen(a)
+                                kc.getLocationOnScreen(b)
+                                val x = a[0] - b[0] + ev.x
+                                val y = a[1] - b[1] + ev.y
+                                when (ev.actionMasked) {
+                                    android.view.MotionEvent.ACTION_DOWN -> g.glowAt(x, y, true)
+                                    android.view.MotionEvent.ACTION_MOVE -> {
+                                        g.touchX = x
+                                        g.touchY = y
+                                        g.invalidateSelf()
+                                    }
+                                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> g.glowAt(x, y, false)
+                                }
+                            }
+                            false
+                        }
                         setOnClickListener {
                             dismiss()
                             e.onClick()

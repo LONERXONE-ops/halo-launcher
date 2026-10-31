@@ -317,6 +317,13 @@ fun Context.text(sp: Float, color: Int, bold: Boolean = false, lines: Int = 1, c
  * even briefly, is what made things overlap their neighbours).
  */
 fun View.bounce() {
+    // Liquid Glass answers a tap with a quick swell and a springy settle.
+    if (LiquidTouch.usable(this)) {
+        animate().setStartDelay(0).scaleX(1.06f).scaleY(1.06f).setDuration(90L).setInterpolator(DecelerateInterpolator(2f)).withEndAction {
+            animate().scaleX(1f).scaleY(1f).setInterpolator(Spring(0.6f)).setDuration(520L).start()
+        }.start()
+        return
+    }
     animate().setStartDelay(0).scaleX(0.94f).scaleY(0.94f).setDuration(80L).withEndAction {
         animate().scaleX(1f).scaleY(1f).setInterpolator(DecelerateInterpolator(2f)).setDuration(220L).start()
     }.start()
@@ -337,7 +344,22 @@ fun View.pressable() {
         v.removeCallbacks(press)
         if (v.scaleX != 1f || v.scaleY != 1f) v.animate().setStartDelay(0).scaleX(1f).scaleY(1f).setInterpolator(DecelerateInterpolator(2f)).setDuration(220L).start()
     }
+    // On Liquid Glass the press is the liquid one: the glass swells and
+    // follows your finger instead of dipping (decided at each touch, so a
+    // theme change applies straight away).
+    var liquid: LiquidTouch? = null
+    var liquidNow = false
     setOnTouchListener { v, e ->
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) liquidNow = LiquidTouch.usable(v)
+        if (liquidNow) {
+            val l = liquid ?: LiquidTouch(v).also { liquid = it }
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> l.down(e)
+                MotionEvent.ACTION_MOVE -> l.move(e)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> l.up()
+            }
+            return@setOnTouchListener false
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x

@@ -39,6 +39,9 @@ class AppIconView(
     var app: App = app
         private set
     private var tile: android.graphics.drawable.Drawable? = null
+
+    /** The live glass tile behind the symbol (Liquid Glass icons on the home screen and dock). */
+    fun glassTile(): GlassDrawable? = tile as? GlassDrawable
     private var sheenTile: LiquidSheen? = null
     private val tileRect = android.graphics.Rect()
     private var result: Icons.Result? = null
