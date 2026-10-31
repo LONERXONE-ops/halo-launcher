@@ -310,7 +310,16 @@ class LockActivity : Activity(), WidgetActions {
                 return
             }
         }
-        if (home != null) back.setImageBitmap(home)
+        if (home != null) {
+            back.setImageBitmap(home)
+        } else {
+            // Fresh start (the home screen hasn't loaded the picture yet): load it now.
+            Glass.load(this, sw, sh) {
+                Glass.backdrop?.let { back.setImageBitmap(it) }
+                Palette.adapt(this)
+                root.invalidateGlass()
+            }
+        }
     }
 
     /** A round glass button at the bottom corner: hold it to use (a tap just shows how). */
