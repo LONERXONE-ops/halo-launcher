@@ -532,6 +532,7 @@ class WallpaperActivity : Activity() {
             leftMargin = dp(22)
         })
         img.onFramed = { tryOn(img, clock) }
+        retry = { tryOn(img, clock) }
         val busy = text(13f, Palette.INK, bold = true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(8), dp(14), dp(8))
@@ -638,6 +639,21 @@ class WallpaperActivity : Activity() {
         clock.refresh()
     }
 
+    private var retry: (() -> Unit)? = null
+
+    // Leaving (home, another app): the trial colours never leak onto the
+    // home screen; coming back puts them on again.
+    override fun onStop() {
+        Glass.endPreview()
+        Palette.adapt(this)
+        super.onStop()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (shown != null) retry?.invoke()
+    }
+
     override fun onDestroy() {
         Glass.endPreview()
         Palette.adapt(this)
@@ -645,6 +661,7 @@ class WallpaperActivity : Activity() {
     }
 
     private fun closePreview() {
+        retry = null
         Glass.endPreview()
         Palette.adapt(this)
         shown = null
