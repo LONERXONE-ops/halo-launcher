@@ -54,6 +54,9 @@ object HaloLink {
     var badges: Map<String, Int> = emptyMap()
         private set
     var notes: List<Note> = emptyList()
+    /** Halo's own status bar is on (and clear over Halo Launcher): the launcher hides the system one. */
+    var sbOn = false
+    var sbClear = false
         private set
     var quick: List<Quick> = emptyList()
         private set
@@ -103,6 +106,8 @@ object HaloLink {
     @Suppress("DEPRECATION")
     private fun read(i: Intent) {
         lastState = SystemClock.elapsedRealtime()
+        sbOn = i.getBooleanExtra("sb_on", false)
+        sbClear = i.getBooleanExtra("sb_clear", false)
         val title = i.getStringExtra("m_title")
         val incoming = if (title.isNullOrEmpty()) null else Music(
             title = title,

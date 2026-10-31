@@ -231,8 +231,29 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         }
     }
 
+    /**
+     * Halo's own status bar with the Clear background: the phone's bar hides
+     * on the home screen so Halo's draws straight over your wallpaper.
+     */
+    private var barHidden = false
+
+    private fun applyStatusBar() {
+        val want = HaloLink.sbClear
+        if (want == barHidden) return
+        barHidden = want
+        val c = window.insetsController ?: return
+        if (want) {
+            c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(android.view.WindowInsets.Type.statusBars())
+        } else {
+            c.show(android.view.WindowInsets.Type.statusBars())
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        barHidden = !HaloLink.sbClear
+        applyStatusBar()
         // Never stay zoomed away (an app that didn't open, a quick return).
         if (pager.alpha < 0.99f) root.post { if (pager.alpha < 0.99f) animateIn() }
         startMusicTick()
@@ -710,6 +731,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     }
 
     private fun onHalo() {
+        applyStatusBar()
         refreshWidgets("music")
         startMusicTick()
         updateBadges()

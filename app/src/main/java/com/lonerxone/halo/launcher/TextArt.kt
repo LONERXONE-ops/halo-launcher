@@ -141,6 +141,9 @@ abstract class TextArt(context: Context) : View(context) {
     var preview = false
     /** In the Theme page's previews: draw as that theme, whatever the phone is using now. */
     var themeGlass: Boolean? = null
+    /** The lock screen's own layout: alignment (0 left, 1 centre, 2 right) and one line or two. */
+    var alignOverride: Int? = null
+    var stackedOverride: Boolean? = null
     private val follow = android.view.ViewTreeObserver.OnPreDrawListener {
         if (glassNow && !preview) {
             val x = loc[0]
@@ -456,7 +459,7 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
         val bw = (w - pad * 2) * if (ampm.isNotEmpty()) 0.84f else 1f
         val bh = h - pad * 2
         // Stacked when the box is tall enough for two lines, unless you chose one line.
-        val stacked = when (p.getInt(Prefs.CLOCK_LAYOUT, 0)) {
+        val stacked = stackedOverride ?: when (p.getInt(Prefs.CLOCK_LAYOUT, 0)) {
             1 -> false
             else -> h > w * 0.45f
         }
@@ -481,7 +484,7 @@ class ClockFace(context: Context, private val forceFace: ClockFaces.Face? = null
             typeface = Fonts.semibold(context)
         }
         val ampmW = if (ampm.isNotEmpty()) small.measureText(ampm) + paint.textSize * 0.08f else 0f
-        val align = p.getInt(Prefs.CLOCK_ALIGN, 0)
+        val align = alignOverride ?: p.getInt(Prefs.CLOCK_ALIGN, 0)
         val r = Rect()
         // Measure the real ink height of each line for tight stacking.
         val heights = lines.map { l -> paint.getTextBounds(l, 0, l.length, r); r.height().toFloat() to r.top.toFloat() }
@@ -523,7 +526,7 @@ class DateFace(context: Context, private val forceStyle: Int = -1) : TextArt(con
         val style = if (forceStyle >= 0) forceStyle else Prefs.get(context).getInt(Prefs.DATE_STYLE, 0)
         val d = Date()
         val colour = ClockFaces.colour(context)
-        val align = Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
+        val align = alignOverride ?: Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
         fun paint(tf: Typeface, track: Float = 0f) = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             typeface = tf
             color = colour
@@ -641,7 +644,7 @@ class WeatherFace(context: Context) : TextArt(context) {
     override fun layout(w: Int, h: Int): List<Run> {
         val now = Weather.now
         val colour = ClockFaces.colour(context)
-        val align = Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
+        val align = alignOverride ?: Prefs.get(context).getInt(Prefs.CLOCK_ALIGN, 0)
         val pad = w * 0.03f
         if (now == null) {
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {

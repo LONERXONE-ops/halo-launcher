@@ -38,7 +38,7 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
         MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), MOTION("Animations"), ICONS("Icons"), DOCK("Dock"),
-        WIDGETS("Widgets"), DRAWER("App list"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
+        WIDGETS("Widgets"), DRAWER("App list"), LOCK("Lock screen"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
     }
 
     private var page = Page.MENU
@@ -136,6 +136,7 @@ class SettingsActivity : Activity() {
             Page.DOCK -> dockPage(col)
             Page.WIDGETS -> widgetsPage(col)
             Page.DRAWER -> drawerPage(col)
+            Page.LOCK -> lockPage(col)
             Page.GESTURES -> gesturesPage(col)
             Page.WEATHER -> weatherPage(col)
             Page.HALO -> haloPage(col)
@@ -245,6 +246,7 @@ class SettingsActivity : Activity() {
         Page.DOCK -> "The bar at the bottom"
         Page.WIDGETS -> "Live info on your home pages"
         Page.DRAWER -> "How you browse all your apps"
+        Page.LOCK -> "What you see when you wake the phone"
         Page.GESTURES -> "What your fingers do"
         Page.WEATHER -> "Where the weather comes from"
         Page.HALO -> "Your dynamic island"
@@ -286,6 +288,7 @@ class SettingsActivity : Activity() {
         Page.DOCK -> R.drawable.ic_dock to "Dock"
         Page.WIDGETS -> R.drawable.ic_widgets to "Widgets"
         Page.DRAWER -> R.drawable.ic_apps to "App list"
+        Page.LOCK -> R.drawable.ic_clock to "Lock screen"
         Page.GESTURES -> R.drawable.ic_gesture to "Gestures"
         Page.WEATHER -> R.drawable.w_sun to "Weather"
         Page.HALO -> R.drawable.ic_halo to "Halo"
@@ -319,6 +322,7 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_apps, "App list", (if (Prefs.get(this).getInt(Prefs.DRAWER_LAYOUT, 0) == 1) "Horizontal" else "Vertical") + " · " + (if (Prefs.get(this).getInt(Prefs.DRAWER_COLS, 0) == 1) "5" else "4") + " across") { go(Page.DRAWER) },
             nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(DockBar.style(this)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
+            nav(R.drawable.ic_clock, "Lock screen", if (Prefs.get(this).getBoolean(Prefs.LOCK_ON, false)) listOf("Classic", "Stacked", "Side")[Prefs.get(this).getInt(Prefs.LOCK_LAYOUT, 0).coerceIn(0, 2)] + " · on" else "Off") { go(Page.LOCK) },
         ))
         section(col, "Use")
         col.addView(group(
@@ -1372,6 +1376,141 @@ class SettingsActivity : Activity() {
         col.addView(group(row("Group my home screen apps", "Apps of the same kind (Social, Games, Money…) go into folders", chevron()) { autoFolders() }))
     }
 
+    // =====================================================================
+    // Lock screen
+    // =====================================================================
+
+    /**
+     * Halo Launcher's lock screen: on or off, then how it looks. A small
+     * live preview on top follows every change.
+     */
+    private fun lockPage(col: LinearLayout) {
+        val p = Prefs.get(this)
+        val on = p.getBoolean(Prefs.LOCK_ON, false)
+        val halo = HaloLink.installed(this)
+        col.addView(lockPreview(), LinearLayout.LayoutParams(dp(180), dp(360)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(4)
+            bottomMargin = dp(14)
+        })
+        col.addView(group(switchRow("Halo lock screen", if (halo) "Shows when you wake the phone" else "Needs Halo (it puts the lock screen up)", Prefs.LOCK_ON, false) {
+            HaloLink.command(this, "lockscreen", if (p.getBoolean(Prefs.LOCK_ON, false)) "1" else "0")
+            render()
+        }))
+        note(col, "Your PIN, pattern and fingerprint stay your phone's own (only Android can check them, which keeps the phone safe): swipe up and it asks, or unlock with your fingerprint and this screen lifts away by itself. Always On Display stays your phone's.")
+        if (!on) {
+            col.addView(button("Try it") { startActivity(Intent(this, LockActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(12) })
+            return
+        }
+        chips(col, "Layout", Prefs.LOCK_LAYOUT, listOf("Classic", "Stacked", "Side"), def = 0)
+        chips(col, "Clock size", Prefs.LOCK_CLOCK_SIZE, listOf("Small", "Medium", "Large"), def = 1)
+        note(col, "The clock uses your face, colour and glass from Clock & date.")
+        // Widgets: tap to add or take off (two at most).
+        section(col, "Widgets")
+        val chosen = Prefs.list(this, Prefs.LOCK_WIDGETS)
+        val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var row: LinearLayout? = null
+        val choices = HomeWidgets.ALL.filter { it.id != "music" && it.id != "photo" && it.id != "note" }
+        for ((i, spec) in choices.withIndex()) {
+            if (i % 3 == 0) {
+                row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                grid.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (i > 0) topMargin = dp(8) })
+            }
+            val sel = spec.id in chosen
+            row?.addView(text(13f, if (sel) Color.BLACK else Palette.INK, bold = true).apply {
+                text = spec.name
+                gravity = Gravity.CENTER
+                setPadding(dp(6), dp(11), dp(6), dp(11))
+                background = round(if (sel) Palette.INK else Palette.TILE2, dpf(18f))
+                pressable()
+                setOnClickListener {
+                    val now = Prefs.list(this@SettingsActivity, Prefs.LOCK_WIDGETS).toMutableList()
+                    if (spec.id in now) now.remove(spec.id) else {
+                        if (now.size >= 2) now.removeAt(0)
+                        now.add(spec.id)
+                    }
+                    Prefs.setList(this@SettingsActivity, Prefs.LOCK_WIDGETS, now)
+                    render()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { if (i % 3 > 0) marginStart = dp(8) })
+        }
+        val rem = choices.size % 3
+        if (rem != 0) repeat(3 - rem) { row?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = dp(8) }) }
+        col.addView(grid)
+        note(col, "Up to two, under the clock. They're the same widgets as your home screen.")
+        chips(col, "Notifications", Prefs.LOCK_NOTES, listOf("Show", "Just how many", "Hidden"), def = 0)
+        col.addView(group(switchRow("What's playing", "The music card while a song plays", Prefs.LOCK_MUSIC, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        chips(col, "Bottom left", Prefs.LOCK_LEFT, listOf("None", "Flashlight", "Camera"), def = 1)
+        chips(col, "Bottom right", Prefs.LOCK_RIGHT, listOf("None", "Flashlight", "Camera"), def = 2)
+        note(col, "Hold a shortcut to use it (a tap shows how), so it never goes off in your pocket.")
+        chips(col, "Wallpaper", Prefs.LOCK_WALL, listOf("Same as home", "Your lock wallpaper"), def = 0)
+        if (p.getInt(Prefs.LOCK_WALL, 0) == 1 && Build.VERSION.SDK_INT < 34) note(col, "Your Android version doesn't share the lock wallpaper with apps, so it uses the home picture.")
+        col.addView(button("Try it") { startActivity(Intent(this, LockActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(16) })
+    }
+
+    /** A small phone showing the lock screen as set: picture, date, clock, widgets and the bottom bar. */
+    private fun lockPreview(): View {
+        val p = Prefs.get(this)
+        val st = stage(dpf(22f))
+        val layout = p.getInt(Prefs.LOCK_LAYOUT, 0)
+        val size = listOf(0.8f, 1f, 1.22f)[p.getInt(Prefs.LOCK_CLOCK_SIZE, 1).coerceIn(0, 2)]
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(22), dp(12), 0)
+        }
+        val date = DateFace(this, forceStyle = if (layout == 0) 1 else -1).apply {
+            preview = true
+            alignOverride = if (layout == 2) 0 else 1
+        }
+        val clock = ClockFace(this).apply {
+            preview = true
+            alignOverride = if (layout == 2) 0 else 1
+            stackedOverride = layout != 0
+        }
+        val ch = when (layout) {
+            0 -> (dp(48) * size).toInt()
+            1 -> (dp(96) * size).toInt()
+            else -> (dp(84) * size).toInt()
+        }
+        val cw = if (layout == 2) dp(100) else ViewGroup.LayoutParams.MATCH_PARENT
+        if (layout == 1) {
+            col.addView(clock, LinearLayout.LayoutParams(cw, ch))
+            col.addView(date, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
+        } else {
+            col.addView(date, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)))
+            col.addView(clock, LinearLayout.LayoutParams(cw, ch))
+        }
+        val ws = Prefs.list(this, Prefs.LOCK_WIDGETS).take(2)
+        if (ws.isNotEmpty()) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for ((i, id) in ws.withIndex()) {
+                row.addView(text(8f, Palette.INK, bold = true).apply {
+                    text = HomeWidgets.ALL.firstOrNull { it.id == id }?.name.orEmpty()
+                    gravity = Gravity.CENTER
+                    background = surface(dpf(12f), 0.3f)
+                }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { if (i > 0) marginStart = dp(6) })
+            }
+            if (ws.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        }
+        st.addView(col)
+        if (p.getInt(Prefs.LOCK_NOTES, 0) != 2) st.addView(View(this).apply { background = surface(dpf(12f), 0.32f) }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40), Gravity.BOTTOM).apply {
+            setMargins(dp(10), 0, dp(10), dp(52))
+        })
+        for ((g, k) in listOf(Gravity.START to Prefs.LOCK_LEFT, Gravity.END to Prefs.LOCK_RIGHT)) {
+            val kind = p.getInt(k, if (k == Prefs.LOCK_LEFT) 1 else 2)
+            if (kind == 0) continue
+            st.addView(ImageView(this).apply {
+                setImageResource(if (kind == 1) R.drawable.ic_flashlight else R.drawable.ic_camera)
+                imageTintList = ColorStateList.valueOf(Color.WHITE)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                background = surface(dpf(13f), 0.32f)
+            }, FrameLayout.LayoutParams(dp(26), dp(26), g or Gravity.BOTTOM).apply { setMargins(dp(16), 0, dp(16), dp(16)) })
+        }
+        st.addView(View(this).apply { background = round(Color.argb(220, 255, 255, 255), dpf(2f)) }, FrameLayout.LayoutParams(dp(44), dp(3), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(8) })
+        return st
+    }
+
     /**
      * Puts the apps on your home screen into folders by kind: two or more of
      * the same kind (Social, Games, Money…) become one folder where the first
@@ -1776,6 +1915,7 @@ class SettingsActivity : Activity() {
         "Dock" to 0xFF5856D6.toInt(),
         "Widgets" to 0xFFFFB020.toInt(),
         "App list" to 0xFF30C8E0.toInt(),
+        "Lock screen" to 0xFFFF375F.toInt(),
         "Gestures" to 0xFF8E8E93.toInt(),
         "Weather" to 0xFF32ADE6.toInt(),
         "Backup & restore" to 0xFF30B0C7.toInt(),

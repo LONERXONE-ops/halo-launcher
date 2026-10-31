@@ -121,7 +121,9 @@ object Glass {
         for (l in listeners.toList()) l()
     }
 
-    fun frost(): BitmapShader? = blurredShader
+    fun frost(): BitmapShader? = previewFrost ?: blurredShader
+
+    private var previewFrost: BitmapShader? = null
 
     /** The lightly softened background for clear glass (falls back to the frost). */
     fun clear(): BitmapShader? = previewBack ?: clearShader ?: blurredShader
@@ -144,11 +146,30 @@ object Glass {
             })
         }
         previewColour = average(shot)
+        previewFrost = null
+    }
+
+    /**
+     * Another picture behind the glass for a while (the lock screen's own
+     * wallpaper): clear and frosted copies of [full] (window sized), until [endPreview].
+     */
+    fun showPicture(full: Bitmap) {
+        val w = full.width
+        val h = full.height
+        previewBack = clearOf(full)
+        val small = Bitmap.createScaledBitmap(full, (w / SCALE).coerceAtLeast(1), (h / SCALE).coerceAtLeast(1), true)
+        val b = boxBlur(small, 4)
+        if (small !== full) small.recycle()
+        previewFrost = BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(Matrix().apply { setScale(SCALE.toFloat(), SCALE.toFloat()) })
+        }
+        previewColour = average(full)
     }
 
     fun endPreview() {
         previewBack = null
         previewColour = null
+        previewFrost = null
     }
 
     private fun clearOf(full: Bitmap): BitmapShader {
