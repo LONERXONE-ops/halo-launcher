@@ -240,9 +240,12 @@ class MusicCard(context: Context, private val command: (String) -> Unit) : Frame
             gravity = Gravity.CENTER_VERTICAL
         }
         prog.addView(elapsed)
-        prog.addView(wave, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
+        // A taller touch area than it looks (easier to grab), without taking more room.
+        prog.addView(wave, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
             marginStart = dp(2)
             marginEnd = dp(2)
+            topMargin = -dp(7)
+            bottomMargin = -dp(7)
         })
         prog.addView(total)
         val controls = LinearLayout(context).apply {
@@ -523,9 +526,12 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             if (f != null && m != null) elapsed.text = MusicArt.fmt((m.durationMs * f).toLong()) else tick()
         }
         prog.addView(elapsed)
-        prog.addView(wave, LinearLayout.LayoutParams(0, dp(30), 1f).apply {
+        // A taller touch area than it looks (easier to grab), without taking more room.
+        prog.addView(wave, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
             marginStart = dp(2)
             marginEnd = dp(2)
+            topMargin = -dp(7)
+            bottomMargin = -dp(7)
         })
         prog.addView(total)
         col.addView(prog, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })

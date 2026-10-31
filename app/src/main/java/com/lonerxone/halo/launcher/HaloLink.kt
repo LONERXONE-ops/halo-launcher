@@ -104,7 +104,7 @@ object HaloLink {
     private fun read(i: Intent) {
         lastState = SystemClock.elapsedRealtime()
         val title = i.getStringExtra("m_title")
-        music = if (title.isNullOrEmpty()) null else Music(
+        val incoming = if (title.isNullOrEmpty()) null else Music(
             title = title,
             artist = i.getStringExtra("m_artist").orEmpty(),
             app = i.getStringExtra("m_app").orEmpty(),
@@ -116,6 +116,18 @@ object HaloLink {
             positionAt = i.getLongExtra("m_pos_at", 0L),
             speed = i.getFloatExtra("m_speed", 1f),
         )
+        // Just after you seek, Halo can still send the old spot (sent before
+        // the player moved): keep the new spot until the player catches up,
+        // instead of the bar jumping back and then forward again.
+        val held = music
+        music = if (incoming != null && held != null && incoming.title == held.title && SystemClock.elapsedRealtime() < seekHoldUntil &&
+            kotlin.math.abs(incoming.position() - held.position()) > 1500L
+        ) {
+            Music(incoming.title, incoming.artist, incoming.app, incoming.playing, incoming.art, incoming.accent, incoming.durationMs, held.position(), SystemClock.elapsedRealtime(), incoming.speed)
+        } else {
+            if (incoming != null && held != null && kotlin.math.abs(incoming.position() - held.position()) <= 1500L) seekHoldUntil = 0L
+            incoming
+        }
         val b = HashMap<String, Int>()
         val pk = i.getStringArrayExtra("b_pkg") ?: emptyArray()
         val ct = i.getIntArrayExtra("b_count") ?: IntArray(0)
@@ -211,8 +223,11 @@ object HaloLink {
     }
 
     /** After you seek: show the new spot straight away (Halo confirms a moment later). */
+    private var seekHoldUntil = 0L
+
     fun localSeek(ms: Long) {
         val m = music ?: return
+        seekHoldUntil = SystemClock.elapsedRealtime() + 2500L
         music = Music(m.title, m.artist, m.app, m.playing, m.art, m.accent, m.durationMs, ms, SystemClock.elapsedRealtime(), m.speed)
     }
 
