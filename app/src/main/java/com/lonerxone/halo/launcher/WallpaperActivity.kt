@@ -435,6 +435,9 @@ class WallpaperActivity : Activity() {
         drawChips()
         savedBar.visibility = View.VISIBLE
         items.clear()
+        // Older versions kept a second "framed" copy of a wallpaper you moved or
+        // zoomed here too, so it showed up twice: those copies are cleared out.
+        savedDir().listFiles()?.filter { it.name.contains("_framed") }?.forEach { it.delete() }
         val files = savedDir().listFiles()?.filter { it.name.endsWith(".jpg") }?.sortedByDescending { it.lastModified() }.orEmpty()
         for (f in files) items += Wall(f.nameWithoutExtension, "", "", 0, 0, local = f)
         adapter.notifyDataSetChanged()
@@ -521,11 +524,14 @@ class WallpaperActivity : Activity() {
         preview.addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(44) })
         hint.animate().alpha(0f).setStartDelay(3500).setDuration(600).start()
         (thumbs.get(w.local?.path ?: w.thumb))?.let { img.setImageBitmap(it) }
-        // Your clock on top, to see how it looks.
-        preview.addView(ClockFace(this), FrameLayout.LayoutParams(dp(170), dp(170)).apply {
+        // Your clock on top, to see how it looks: its glass bends this
+        // picture and it takes this picture's colours (not the current wallpaper's).
+        val clock = ClockFace(this)
+        preview.addView(clock, FrameLayout.LayoutParams(dp(170), dp(170)).apply {
             topMargin = dp(70)
             leftMargin = dp(22)
         })
+        img.onFramed = { tryOn(img, clock) }
         val busy = text(13f, Palette.INK, bold = true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(8), dp(14), dp(8))
@@ -621,7 +627,26 @@ class WallpaperActivity : Activity() {
         preview.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(Spring(0.35f)).start()
     }
 
+    /** The clock (and colours) as they'd be with the picture as framed right now. */
+    private fun tryOn(img: PanZoomView, clock: ClockFace) {
+        val k = 0.35f
+        val shot = img.snapshot(k) ?: return
+        val l = IntArray(2)
+        img.getLocationInWindow(l)
+        Glass.preview(shot, l[0].toFloat(), l[1].toFloat(), k)
+        Palette.adapt(this)
+        clock.refresh()
+    }
+
+    override fun onDestroy() {
+        Glass.endPreview()
+        Palette.adapt(this)
+        super.onDestroy()
+    }
+
     private fun closePreview() {
+        Glass.endPreview()
+        Palette.adapt(this)
         shown = null
         preview.animate().alpha(0f).setDuration(160).withEndAction { preview.visibility = View.GONE }.start()
         if (savedTab) showSaved()
@@ -662,7 +687,8 @@ class WallpaperActivity : Activity() {
         io.execute {
             val ok = try {
                 val file = if (framed != null) {
-                    File(savedDir(), "${w.id}_framed.jpg").also { f -> f.outputStream().use { framed.compress(Bitmap.CompressFormat.JPEG, 93, it) } }
+                    // The framed version is only needed to set it (Saved keeps the original once).
+                    File(cacheDir, "framed.jpg").also { f -> f.outputStream().use { framed.compress(Bitmap.CompressFormat.JPEG, 93, it) } }
                 } else {
                     save(w)
                 }
@@ -732,7 +758,7 @@ class WallpaperActivity : Activity() {
             val today = android.text.format.DateFormat.format("yyyyMMdd", java.util.Date()).toString()
             if (p.getString(Prefs.WALL_DAY, "") == today) return
             p.edit().putString(Prefs.WALL_DAY, today).apply()
-            val files = File(c.filesDir, "wallpapers").listFiles()?.filter { it.name.endsWith(".jpg") }.orEmpty()
+            val files = File(c.filesDir, "wallpapers").listFiles()?.filter { it.name.endsWith(".jpg") && !it.name.contains("_framed") }.orEmpty()
             if (files.isEmpty()) return
             val f = files.random()
             Thread {
@@ -803,11 +829,26 @@ class PanZoomView(c: Context) : ImageView(c) {
         } else {
             fit(animate = false)
         }
+        post { onFramed?.invoke() }
     }
 
     fun setFull(b: Bitmap) {
         hasFull = true
         setImageBitmap(b)
+    }
+
+    /** Called when the picture or its framing settles (new picture, or a drag or pinch ends). */
+    var onFramed: (() -> Unit)? = null
+
+    /** What's on screen at [k] of its size (small: for colours and the clock's glass). */
+    fun snapshot(k: Float): Bitmap? {
+        val b = bmp ?: return null
+        if (width <= 0 || height <= 0) return null
+        val out = Bitmap.createBitmap((width * k).toInt().coerceAtLeast(1), (height * k).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val cv = android.graphics.Canvas(out)
+        cv.scale(k, k)
+        cv.drawBitmap(b, m, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+        return out
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
@@ -889,6 +930,7 @@ class PanZoomView(c: Context) : ImageView(c) {
                     clamp()
                 }
             }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> postDelayed({ onFramed?.invoke() }, 340L)
             android.view.MotionEvent.ACTION_POINTER_UP -> {
                 // Carry on with the finger that's left.
                 val up = e.actionIndex

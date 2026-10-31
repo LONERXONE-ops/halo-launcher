@@ -94,14 +94,28 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     private val glassChanged: () -> Unit = {
         bg.invalidate()
         root.invalidateGlass()
-        // A new picture can mean new colours (Adaptive colour).
-        if (Palette.adapt(this)) refreshLook()
+        // A new picture can mean new colours (Adaptive colour). Compared with
+        // what this screen was last drawn in, not just whether the palette
+        // changed: another screen (Settings, the wallpaper browser) may have
+        // worked the new colours out already, and then the home screen kept
+        // the old ones until you went into Settings and back.
+        Palette.adapt(this)
+        if (lookKey() != builtLook) refreshLook()
     }
+
+    private var builtLook = ""
+    private fun lookKey() = Palette.key + "/" + Glass.wallColor(this) + "/" + Glass.shine
 
     private val tick = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 Intent.ACTION_BATTERY_CHANGED -> refreshWidgets("battery")
+                // A new wallpaper while the home screen is up: new glass and colours straight away.
+                @Suppress("DEPRECATION")
+                Intent.ACTION_WALLPAPER_CHANGED -> {
+                    Glass.invalidate()
+                    loadBackdrop()
+                }
                 Intent.ACTION_POWER_CONNECTED, Intent.ACTION_POWER_DISCONNECTED -> {
                     refreshWidgets("battery")
                     // The battery report catches up a moment after the plug: look again.
@@ -156,6 +170,8 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
+            @Suppress("DEPRECATION")
+            addAction(Intent.ACTION_WALLPAPER_CHANGED)
         }
         registerReceiver(tick, f)
         visibleNow = true
@@ -169,6 +185,9 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         } else {
             // Let the return animation run first; update the live bits a beat later.
             root.postDelayed({
+                // Colours changed while we were away (a new wallpaper): recolour now.
+                Palette.adapt(this)
+                if (lookKey() != builtLook) refreshLook()
                 refreshWidgetsGently()
                 loadBackdrop()
             }, 380L)
@@ -386,6 +405,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     private fun refreshLook() {
         Palette.adapt(this)
+        builtLook = lookKey()
         root.setBackgroundColor(Color.TRANSPARENT)
         dock.restyle()
         drawer.restyle()

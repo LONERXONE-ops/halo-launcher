@@ -57,6 +57,8 @@ object Palette {
     var GLASS_TINT_AMT = 0f
 
     private var lastKey = ""
+    /** What the palette was last worked out from (screens compare it to know when to recolour). */
+    val key get() = lastKey
 
     /**
      * Works the palette out from the wallpaper's colour. Returns true when it
@@ -319,8 +321,8 @@ fun Context.text(sp: Float, color: Int, bold: Boolean = false, lines: Int = 1, c
 fun View.bounce() {
     // Liquid Glass answers a tap with a quick swell and a springy settle.
     if (LiquidTouch.usable(this)) {
-        animate().setStartDelay(0).scaleX(1.06f).scaleY(1.06f).setDuration(90L).setInterpolator(DecelerateInterpolator(2f)).withEndAction {
-            animate().scaleX(1f).scaleY(1f).setInterpolator(Spring(0.6f)).setDuration(520L).start()
+        animate().setStartDelay(0).scaleX(1.09f).scaleY(1.09f).setDuration(110L).setInterpolator(DecelerateInterpolator(2f)).withEndAction {
+            animate().scaleX(1f).scaleY(1f).setInterpolator(android.view.animation.OvershootInterpolator(3.2f)).setDuration(560L).start()
         }.start()
         return
     }

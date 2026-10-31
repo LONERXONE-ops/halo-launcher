@@ -555,6 +555,20 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
         addView(dots, LayoutParams(dp(12), LayoutParams.MATCH_PARENT, Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dp(2) })
     }
 
+    private var tracker: android.view.VelocityTracker? = null
+    private var peek: BaseWidget? = null
+    private var peekDir = 0
+
+    /** Never start edit mode (a long-press of the cell) from a swipe through the stack. */
+    private fun stopLongPress() {
+        var p = parent
+        while (p is View) {
+            p.cancelLongPress()
+            p = p.parent
+        }
+    }
+
+    /** Flip to the next (1) or previous (-1) widget, carrying on from wherever a drag left them. */
     fun flip(dir: Int) {
         if (widgets.size < 2) return
         val from = widgets[index]
@@ -562,17 +576,67 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
         val to = widgets[index]
         Prefs.get(context).edit().putInt("stackpos_" + stackId, index).apply()
         val h = height.toFloat()
+        for (w in widgets) if (w !== from && w !== to) w.visibility = INVISIBLE
         to.visibility = VISIBLE
-        to.translationY = h * dir
-        to.alpha = 0.4f
-        to.animate().translationY(0f).alpha(1f).setDuration(420).setInterpolator(Spring(0.4f)).start()
-        from.animate().translationY(-h * dir * 0.6f).alpha(0f).setDuration(260).withEndAction {
-            from.visibility = INVISIBLE
-            from.translationY = 0f
-            from.alpha = 1f
-        }.start()
+        if (peek !== to) {
+            to.translationY = h * dir
+            to.alpha = 0.5f
+            to.scaleX = 0.94f
+            to.scaleY = 0.94f
+        }
+        peek = null
+        to.animate().translationY(0f).alpha(1f).scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(Spring(0.45f)).start()
+        from.animate().translationY(-h * dir * 0.7f).alpha(0f).scaleX(0.92f).scaleY(0.92f).setDuration(300)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).withEndAction {
+                from.visibility = INVISIBLE
+                from.translationY = 0f
+                from.alpha = 1f
+                from.scaleX = 1f
+                from.scaleY = 1f
+            }.start()
         dots.invalidate()
         performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+    }
+
+    /** The drag let go short of a flip: everything springs back. */
+    private fun settleBack() {
+        val cur = widgets[index]
+        cur.animate().translationY(0f).alpha(1f).scaleX(1f).scaleY(1f).setDuration(460).setInterpolator(Spring(0.45f)).start()
+        val pk = peek ?: return
+        peek = null
+        val h = height.toFloat()
+        pk.animate().translationY(h * peekDir).alpha(0.4f).setDuration(280).withEndAction {
+            if (pk !== widgets[index]) pk.visibility = INVISIBLE
+            pk.translationY = 0f
+            pk.alpha = 1f
+            pk.scaleX = 1f
+            pk.scaleY = 1f
+        }.start()
+    }
+
+    /** While dragging: the widget follows your finger and the next one slides in behind it. */
+    private fun follow(dy: Float) {
+        val h = height.toFloat().coerceAtLeast(1f)
+        val dir = if (dy < 0) 1 else -1
+        val to = widgets[Math.floorMod(index + dir, widgets.size)]
+        if (peek !== to) {
+            peek?.let { if (it !== widgets[index]) it.visibility = INVISIBLE }
+            peek = to
+            peekDir = dir
+            to.animate().cancel()
+            to.visibility = VISIBLE
+        }
+        val f = (abs(dy) / h).coerceAtMost(1f)
+        val cur = widgets[index]
+        cur.animate().cancel()
+        cur.translationY = dy
+        cur.alpha = 1f - 0.6f * f
+        cur.scaleX = 1f - 0.06f * f
+        cur.scaleY = cur.scaleX
+        to.translationY = h * dir + dy
+        to.alpha = 0.4f + 0.6f * f
+        to.scaleX = 0.94f + 0.06f * f
+        to.scaleY = to.scaleX
     }
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
@@ -581,18 +645,27 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
                 downX = e.rawX
                 downY = e.rawY
                 swiping = false
+                tracker?.recycle()
+                tracker = android.view.VelocityTracker.obtain()
+                tracker?.addMovement(e)
                 // Ask the home screen to wait: the swipe may be ours.
                 if (widgets.size > 1) parent?.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
+                tracker?.addMovement(e)
                 val dx = e.rawX - downX
                 val dy = e.rawY - downY
+                // Moving at all means this isn't a long-press (the cell above can't
+                // see these moves while we hold the touch, so tell it here).
+                if (abs(dx) > slop || abs(dy) > slop) stopLongPress()
                 if (widgets.size > 1 && !swiping) {
                     if (abs(dx) > slop && abs(dx) > abs(dy)) {
                         // Sideways: let the page turn.
                         parent?.requestDisallowInterceptTouchEvent(false)
-                    } else if (abs(dy) > slop * 1.5f && abs(dy) > abs(dx)) {
+                    } else if (abs(dy) > slop && abs(dy) > abs(dx)) {
                         swiping = true
+                        stopLongPress()
+                        downY = e.rawY
                         return true
                     }
                 }
@@ -604,10 +677,20 @@ class WidgetStack(context: Context, val stackId: String, private val widgets: Li
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!swiping) return super.onTouchEvent(e)
-        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
-            val dy = e.rawY - downY
-            if (abs(dy) > dp(24)) flip(if (dy < 0) 1 else -1)
-            swiping = false
+        tracker?.addMovement(e)
+        val dy = e.rawY - downY
+        when (e.actionMasked) {
+            MotionEvent.ACTION_MOVE -> follow(dy)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                tracker?.computeCurrentVelocity(1000)
+                val vy = tracker?.yVelocity ?: 0f
+                tracker?.recycle()
+                tracker = null
+                val far = abs(dy) > height * 0.22f
+                val fling = abs(vy) > 700f && (vy < 0) == (dy < 0)
+                if (e.actionMasked == MotionEvent.ACTION_UP && dy != 0f && (far || fling)) flip(if (dy < 0) 1 else -1) else settleBack()
+                swiping = false
+            }
         }
         return true
     }

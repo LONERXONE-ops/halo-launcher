@@ -94,9 +94,10 @@ class LiquidTouch(private val view: View) : Runnable {
         val now = System.nanoTime()
         val dt = if (lastFrame == 0L) 1f / 60f else ((now - lastFrame) / 1e9f).coerceIn(0.001f, 0.032f)
         lastFrame = now
-        // Damped springs (ratio 0.5, stiffness 300): quick, with a small wobble.
-        val k = 300f
-        val c = 2f * 0.5f * kotlin.math.sqrt(k)
+        // Damped springs: snappy (stiffness 420) and bouncy (damping 0.36),
+        // so it overshoots and wobbles a couple of times before settling.
+        val k = 420f
+        val c = 2f * 0.36f * kotlin.math.sqrt(k)
         fun step(x: Float, v: Float, target: Float): Pair<Float, Float> {
             val a = -k * (x - target) - c * v
             val nv = v + a * dt
@@ -131,15 +132,15 @@ class LiquidTouch(private val view: View) : Runnable {
         val h = view.height.toFloat().coerceAtLeast(1f)
         val minD = minOf(w, h)
         val maxD = maxOf(w, h)
-        val p = pressT.coerceIn(-0.2f, 1.3f)
+        val p = pressT.coerceIn(-0.35f, 1.4f)
         // Swells by about 4dp (a touch more for small things like icons).
-        val grow = 1f + view.dpf(if (minD < view.dpf(90f)) 6f else 4f) / h * p
+        val grow = 1f + view.dpf(if (minD < view.dpf(90f)) 9f else 6f) / h * p
         // Leans after the finger, with growing resistance.
-        view.translationX = baseTX + minD * tanh(0.05f * offX / minD)
-        view.translationY = baseTY + minD * tanh(0.05f * offY / minD)
+        view.translationX = baseTX + minD * tanh(0.07f * offX / minD)
+        view.translationY = baseTY + minD * tanh(0.07f * offY / minD)
         // Stretches along the drag.
         val ang = atan2(offY, offX)
-        val stretch = view.dpf(4f) / h
+        val stretch = view.dpf(7f) / h
         view.scaleX = baseSX * (grow + stretch * abs(cos(ang) * offX / maxD) * (w / h).coerceAtMost(1f))
         view.scaleY = baseSY * (grow + stretch * abs(sin(ang) * offY / maxD) * (h / w).coerceAtMost(1f))
         surface()?.press = p.coerceIn(0f, 1f)

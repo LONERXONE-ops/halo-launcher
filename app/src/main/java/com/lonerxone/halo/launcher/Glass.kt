@@ -124,7 +124,32 @@ object Glass {
     fun frost(): BitmapShader? = blurredShader
 
     /** The lightly softened background for clear glass (falls back to the frost). */
-    fun clear(): BitmapShader? = clearShader ?: blurredShader
+    fun clear(): BitmapShader? = previewBack ?: clearShader ?: blurredShader
+
+    /**
+     * Trying a wallpaper on (the wallpaper browser): the glass clock bends
+     * that picture and everything takes its colour, until [endPreview].
+     */
+    @Volatile var previewBack: BitmapShader? = null
+        private set
+    @Volatile var previewColour: Int? = null
+        private set
+
+    /** [shot] is the screen as previewed, [scale] its size against the window, placed at [x],[y]. */
+    fun preview(shot: Bitmap, x: Float, y: Float, scale: Float) {
+        previewBack = BitmapShader(shot, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(Matrix().apply {
+                setScale(1f / scale, 1f / scale)
+                postTranslate(x, y)
+            })
+        }
+        previewColour = average(shot)
+    }
+
+    fun endPreview() {
+        previewBack = null
+        previewColour = null
+    }
 
     private fun clearOf(full: Bitmap): BitmapShader {
         val half = Bitmap.createScaledBitmap(full, (full.width / 2).coerceAtLeast(1), (full.height / 2).coerceAtLeast(1), true)
@@ -140,6 +165,7 @@ object Glass {
 
     /** The background itself, unblurred (for glass digits, which bend it clearly). */
     fun sharp(): BitmapShader? {
+        previewBack?.let { return it }
         val b = backdrop ?: return null
         if (sharpOf !== b) {
             sharpOf = b
@@ -164,6 +190,8 @@ object Glass {
      * glass and Tinted icons can match it.
      */
     fun wallColor(c: Context): Int? {
+        // A wallpaper being tried on wins while it's shown.
+        previewColour?.let { return it }
         // A picture you chose wins.
         val pic = backdrop
         if (pic != null) {

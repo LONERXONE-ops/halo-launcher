@@ -289,11 +289,12 @@ abstract class TextArt(context: Context) : View(context) {
         }
         val hb = hard ?: return
         val sb = soft ?: return
-        val back = Glass.sharp()
+        val back = Glass.clear() ?: Glass.sharp()
         getLocationInWindow(loc)
         val hs = hardShader ?: return
         val ss = softShader ?: return
-        val rs = if (!preview && back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
+        // Previews use the real lens too (they sample the picture at their place on screen).
+        val rs = if (back != null && Build.VERSION.SDK_INT >= 33 && !broken) {
             (sharedText as? RuntimeShader) ?: try {
                 RuntimeShader(GLASS_TEXT).also { sharedText = it }
             } catch (_: Throwable) {
@@ -310,10 +311,12 @@ abstract class TextArt(context: Context) : View(context) {
             rs.setInputShader("soft", ss)
             rs.setFloatUniform("origin", loc[0].toFloat(), loc[1].toFloat())
             val big = runs.maxOfOrNull { it.paint.textSize } ?: 60f
-            rs.setFloatUniform("bend", big * 0.5f)
+            rs.setFloatUniform("bend", big * 0.32f)
             rs.setFloatUniform("stepPx", max(1.5f, big * 0.02f))
             val hc = Palette.GLASS_TINT
             rs.setFloatUniform("hue", Color.red(hc) / 255f, Color.green(hc) / 255f, Color.blue(hc) / 255f, Palette.GLASS_TINT_AMT)
+            val gc = Glass.glintColor
+            rs.setFloatUniform("glint", Color.red(gc) / 255f, Color.green(gc) / 255f, Color.blue(gc) / 255f, Glass.shine)
             shaderPaint.shader = rs
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), shaderPaint)
         } else {
@@ -351,31 +354,44 @@ abstract class TextArt(context: Context) : View(context) {
             uniform float bend;
             uniform float stepPx;
             uniform float4 hue;
+            uniform float4 glint;
 
             half4 main(float2 p) {
                 float cov = float(hard.eval(p).a);
                 if (cov < 0.004) return half4(0.0);
-                float h = float(soft.eval(p).a);
+                // How thick the glass is here (1 deep inside a letter, 0 at its edge)
+                // and which way its surface slopes.
+                float h = clamp(float(soft.eval(p).a) * 1.25, 0.0, 1.0);
                 float hx = float(soft.eval(p + float2(stepPx, 0.0)).a) - float(soft.eval(p - float2(stepPx, 0.0)).a);
                 float hy = float(soft.eval(p + float2(0.0, stepPx)).a) - float(soft.eval(p - float2(0.0, stepPx)).a);
                 float2 g = float2(hx, hy);
                 float gl = length(g) + 0.0001;
-                float rim = 1.0 - clamp(h * 1.6, 0.0, 1.0);
-                float2 off = -g * bend;
+                float2 n = g / gl;
+                // The same rounded edge as the glass panes: the bend grows steeply
+                // towards the rim (a quarter circle), pulling the picture in round it.
+                float x = 1.0 - h;
+                float curve = 1.0 - sqrt(max(1.0 - x * x, 0.0));
+                float2 off = n * curve * bend;
                 float2 q = origin + p + off;
-                float3 col;
-                col.r = float(image.eval(q + off * 0.08).r);
-                col.g = float(image.eval(q).g);
-                col.b = float(image.eval(q - off * 0.08).b);
-                col = mix(col, float3(1.0), 0.14 + 0.16 * rim);
-                col = mix(col, hue.rgb * 1.5, hue.a * 0.7);
-                float2 L = normalize(float2(-0.55, -0.85));
-                float facing = clamp(gl * 6.0, 0.0, 1.0);
-                float spec = pow(max(dot(-g / gl, L), 0.0), 2.5) * facing;
-                float dark = pow(max(dot(g / gl, L), 0.0), 2.0) * facing;
-                col += float3(spec * 0.55);
-                col *= 1.0 - dark * 0.22;
-                return half4(half3(col * cov), half(cov));
+                float3 col = float3(image.eval(q).rgb);
+                // Vibrancy, then a milky lift so the time always reads.
+                float lum = dot(col, float3(0.213, 0.715, 0.072));
+                col = mix(float3(lum), col, 1.45);
+                col = mix(col, float3(1.0), 0.20 + 0.12 * (1.0 - h));
+                col = mix(col, hue.rgb * 1.5, hue.a * 0.6);
+                // A crisp line of light along the edges facing the top left (and,
+                // fainter, the bottom right), and a soft glow inside the curve.
+                float2 L = normalize(float2(-1.0, -1.0));
+                float facing = dot(-n, L);
+                float lit = pow(abs(facing), 1.2) * (facing > 0.0 ? 1.0 : 0.5) * clamp(gl * 8.0, 0.0, 1.0);
+                float edge = 1.0 - smoothstep(0.0, 0.18, h);
+                float glow = 1.0 - smoothstep(0.0, 0.55, h);
+                float shine = 1.0 + glint.a * 0.8;
+                float3 lc = mix(float3(1.0), glint.rgb, glint.a * 0.5);
+                col += lc * (edge * 0.55 + glow * glow * 0.18) * lit * shine;
+                // A soft shade on the far side gives the letters depth.
+                col *= 1.0 - 0.12 * glow * clamp(-facing, 0.0, 1.0);
+                return half4(half3(clamp(col, 0.0, 1.0) * cov), half(cov));
             }
         """
 
