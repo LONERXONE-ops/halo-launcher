@@ -388,6 +388,12 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
     private var scrubbing = false
     private var key: String? = null
     private var queueKey = ""
+    private var songRow: View? = null
+    private var progRow: View? = null
+    private var controlsRow: View? = null
+    private var queuePanel: View? = null
+    /** The rows cascade in on open and when the queue changes (not on every tick). */
+    private var cascade = true
     private val ui = android.os.Handler(android.os.Looper.getMainLooper())
     private val listener: () -> Unit = { ui.post { update() } }
     private val ticker = object : Runnable {
@@ -451,11 +457,14 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
                 }
             }
             clipToOutline = true
-            setBackgroundColor(Color.rgb(14, 14, 16))
             elevation = dpf(16f)
         }
-        back = ImageView(c)
-        scrim = View(c)
+        // Liquid Glass with the Liquid Glass theme: the card bends your wallpaper
+        // at its rim and catches the light, with the song's cover glowing through.
+        val glass = Glass.enabled(c) && Glass.backdrop != null
+        k.background = if (glass) GlassDrawable(k, radius, darkness = 0.4f, bendPx = dpf(18f)) else android.graphics.drawable.ColorDrawable(Color.rgb(14, 14, 16))
+        back = ImageView(c).apply { if (glass) alpha = 0.6f }
+        scrim = View(c).apply { if (glass) alpha = 0.75f }
         k.addView(back)
         k.addView(scrim)
 
@@ -557,12 +566,15 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
                 setColor(Color.WHITE)
             }
             setOnClickListener {
-                it.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).withEndAction {
-                    it.animate().scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(2f)).start()
+                it.animate().scaleX(0.84f).scaleY(0.84f).setDuration(80).withEndAction {
+                    it.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(android.view.animation.OvershootInterpolator(3.2f)).start()
                 }.start()
                 command("play_pause")
             }
         }
+        controlsRow = controls
+        songRow = song
+        progRow = prog
         controls.addView(ctl(R.drawable.ic_prev, "prev"), LinearLayout.LayoutParams(dp(44), dp(44)))
         controls.addView(play, LinearLayout.LayoutParams(dp(50), dp(50)).apply {
             marginStart = dp(20)
@@ -581,15 +593,23 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             addView(list)
         }
         val maxList = dp(156)
-        col.addView(object : FrameLayout(c) {
+        val maxList2 = dp(196)
+        // The queue sits in its own pane of glass: a soft light tint with a
+        // bright hairline on top, like a smaller sheet resting on the card.
+        val qPanel = object : FrameLayout(c) {
             override fun onMeasure(wm: Int, hm: Int) {
-                super.onMeasure(wm, MeasureSpec.makeMeasureSpec(maxList, MeasureSpec.AT_MOST))
+                super.onMeasure(wm, MeasureSpec.makeMeasureSpec(maxList2, MeasureSpec.AT_MOST))
             }
         }.apply {
             addView(sc)
-            background = c.round(Color.argb(46, 0, 0, 0), dpf(18f))
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+            background = android.graphics.drawable.LayerDrawable(arrayOf(
+                c.round(Color.argb(34, 255, 255, 255), dpf(22f)).apply { setStroke(dp(1), Color.argb(38, 255, 255, 255)) },
+                android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(30, 255, 255, 255), Color.TRANSPARENT)).apply { cornerRadius = dpf(22f) },
+            ))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+        }
+        queuePanel = qPanel
+        col.addView(qPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
         val handle = View(c).apply { background = c.round(Color.argb(130, 255, 255, 255), dpf(2f)) }
         col.addView(handle, LinearLayout.LayoutParams(dp(36), dp(4)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
@@ -663,8 +683,8 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             return
         }
         revealAnim = android.animation.ValueAnimator.ofFloat(from, to).apply {
-            duration = if (opening) 620L else 280L
-            interpolator = if (opening) Spring(0.22f) else android.view.animation.PathInterpolator(0.5f, 0f, 0.7f, 1f)
+            duration = if (opening) 720L else 300L
+            interpolator = if (opening) Spring(0.35f) else android.view.animation.PathInterpolator(0.5f, 0f, 0.7f, 1f)
             addUpdateListener {
                 reveal = it.animatedValue as Float
                 k.invalidateOutline()
@@ -678,11 +698,19 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             })
             start()
         }
-        // The cover pops as the card opens.
+        // The cover pops as the card opens, then each part drops in after the last.
         if (opening) {
             cover.scaleX = 0.6f
             cover.scaleY = 0.6f
-            cover.animate().scaleX(1f).scaleY(1f).setStartDelay(160).setDuration(560).setInterpolator(Spring(0.45f)).start()
+            cover.animate().scaleX(1f).scaleY(1f).setStartDelay(160).setDuration(620).setInterpolator(android.view.animation.OvershootInterpolator(2.4f)).start()
+            listOfNotNull(songRow, progRow, controlsRow, queuePanel).forEachIndexed { i, v ->
+                v.alpha = 0f
+                v.translationY = -dpf(14f)
+                v.scaleX = 0.96f
+                v.scaleY = 0.96f
+                v.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setStartDelay(150L + i * 55L).setDuration(520L)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.6f)).start()
+            }
         }
     }
 
@@ -745,6 +773,12 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
         tick()
     }
 
+    /**
+     * Up next, redesigned: a header with how many songs are coming, then each
+     * song as a row with its number in a soft round chip, the title and
+     * artist, and a play glyph; tap one to play it (it bounces and lights
+     * up). The rows cascade in one after another with a springy settle.
+     */
     private fun drawQueue(m: HaloLink.Music) {
         list.removeAllViews()
         val q = HaloLink.queue
@@ -753,44 +787,67 @@ class MusicSheet(private val anchor: View, private val command: (String) -> Unit
             list.addView(c.text(12f, Color.argb(170, 255, 255, 255), lines = 2).apply {
                 text = "$name doesn't share what's up next."
                 gravity = Gravity.CENTER
-                setPadding(dp(10), dp(4), dp(10), 0)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
             })
             return
         }
-        list.addView(c.text(10.5f, Color.argb(190, 255, 255, 255), bold = true, caps = true).apply {
-            text = "Up next"
-            setPadding(dp(6), dp(4), 0, dp(6))
-        })
         val at = q.indexOfFirst { it.id == HaloLink.queueActive }
-        for ((i, t) in q.withIndex()) {
-            // The song playing is already at the top of the card.
-            if (at >= 0 && i <= at) continue
-            val now = i == at
+        val coming = q.withIndex().filter { at < 0 || it.index > at }
+        val head = LinearLayout(c).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(4), dp(6), dp(6))
+        }
+        head.addView(c.text(10.5f, Color.argb(200, 255, 255, 255), bold = true, caps = true).apply { text = "Up next" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        head.addView(c.text(10.5f, Color.WHITE, bold = true).apply {
+            text = if (coming.size == 1) "1 song" else "${coming.size} songs"
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            background = c.round(Color.argb(46, 255, 255, 255), dpf(9f))
+        })
+        list.addView(head)
+        var n = 0
+        for ((i, t) in coming) {
+            n++
             val row = LinearLayout(c).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(7), dp(10), dp(7))
-                background = if (now) c.round(Color.argb(50, 255, 255, 255), dpf(14f)) else null
+                setPadding(dp(8), dp(7), dp(10), dp(7))
+                background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(Color.argb(46, 255, 255, 255)), null, c.round(Color.WHITE, dpf(16f)))
                 setOnClickListener {
-                    it.bounce()
+                    it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80).withEndAction {
+                        it.animate().scaleX(1f).scaleY(1f).setDuration(460).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
+                    }.start()
                     command("queue_play:" + t.id)
                 }
             }
-            row.addView(if (now) ImageView(c).apply {
-                setImageResource(R.drawable.ic_music)
-                imageTintList = ColorStateList.valueOf(Color.WHITE)
-            } else c.text(11.5f, Color.argb(160, 255, 255, 255), bold = true).apply {
-                text = (i - maxOf(at, 0)).toString()
+            row.addView(c.text(11.5f, Color.WHITE, bold = true).apply {
+                text = (i - maxOf(at, 0)).toString().takeIf { at >= 0 } ?: (i + 1).toString()
                 gravity = Gravity.CENTER
-            }, LinearLayout.LayoutParams(dp(18), dp(18)))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Color.argb(40, 255, 255, 255))
+                }
+            }, LinearLayout.LayoutParams(dp(26), dp(26)))
             val tx = LinearLayout(c).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), 0, 0, 0)
+                setPadding(dp(12), 0, dp(8), 0)
             }
-            tx.addView(c.text(14f, Color.WHITE, bold = now).apply { text = t.title })
-            if (t.sub.isNotEmpty()) tx.addView(c.text(11.5f, Color.argb(170, 255, 255, 255)).apply { text = t.sub })
+            tx.addView(c.text(14f, Color.WHITE, bold = n == 1).apply { text = t.title })
+            if (t.sub.isNotEmpty()) tx.addView(c.text(11.5f, Color.argb(165, 255, 255, 255)).apply { text = t.sub })
             row.addView(tx, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(ImageView(c).apply {
+                setImageResource(R.drawable.ic_play)
+                imageTintList = ColorStateList.valueOf(Color.argb(150, 255, 255, 255))
+            }, LinearLayout.LayoutParams(dp(14), dp(14)))
             list.addView(row)
+            if (cascade && n <= 8) {
+                row.alpha = 0f
+                row.translationY = dpf(16f)
+                row.scaleX = 0.95f
+                row.scaleY = 0.95f
+                row.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setStartDelay(260L + n * 45L).setDuration(480L)
+                    .setInterpolator(android.view.animation.OvershootInterpolator(1.8f)).start()
+            }
         }
     }
 
