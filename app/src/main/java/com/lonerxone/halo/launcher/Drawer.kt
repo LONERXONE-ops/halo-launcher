@@ -71,6 +71,9 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     private var imeBottom = 0
     /** Beyond apps: a calculator answer, and searching the web or the Play Store. */
     private val extras: LinearLayout
+    /** Arranging: the hint at the top and the Done button. */
+    private val arrangeHint: TextView
+    private val doneBtn: TextView
 
     private val pages: HomePager
     private val dots: ListDots
@@ -309,8 +312,6 @@ class Drawer(context: Context, private val host: Host) : FrameLayout(context) {
     }
 
     private var imeAnimating = false
-    private lateinit var arrangeHint: TextView
-    private lateinit var doneBtn: TextView
 
     private fun placePill() {
         val lp = pill.layoutParams as? LayoutParams ?: return
