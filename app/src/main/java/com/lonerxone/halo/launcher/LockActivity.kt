@@ -154,12 +154,12 @@ class LockActivity : Activity(), WidgetActions {
         // Back doesn't skip the lock screen.
     }
 
-    /** With Halo's own status bar on, the phone's one hides here (Halo draws its own over this screen). */
+    /** The phone's own status bar shows; the navigation bar hides (swipe to bring it back). */
     private fun applyBars() {
         val c = window.insetsController ?: return
         c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         c.hide(WindowInsets.Type.navigationBars())
-        if (HaloLink.sbOn) c.hide(WindowInsets.Type.statusBars()) else c.show(WindowInsets.Type.statusBars())
+        c.show(WindowInsets.Type.statusBars())
     }
 
     // =====================================================================

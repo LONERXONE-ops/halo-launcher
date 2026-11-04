@@ -357,7 +357,7 @@ class SettingsActivity : Activity() {
             Triple("Gestures", "gesture swipe double tap lock long press hold edit", Page.GESTURES),
             Triple("Hold to edit", "long press delay edit mode hold time", Page.GESTURES),
             Triple("Weather", "weather city location temperature", Page.WEATHER),
-            Triple("Halo", "halo island link status bar", Page.HALO),
+            Triple("Halo", "halo island link", Page.HALO),
             Triple("Backup and restore", "backup restore file export import", Page.BACKUP),
             Triple("About", "about credits licences version lonerxone", Page.ABOUT),
         )
