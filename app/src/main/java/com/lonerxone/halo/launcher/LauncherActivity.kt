@@ -194,6 +194,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         }
         root.postDelayed({ onMinute() }, 300L)
         root.postDelayed({ updateMusicPresence() }, 450L)
+        if (haloPending) root.postDelayed({ onHalo() }, 400L)
         Steps.start(this) { refreshWidgets("steps") }
         HaloLink.command(this, "request_state")
         Weather.refresh(this) { onWeather() }
@@ -254,6 +255,14 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
     override fun onPause() {
         super.onPause()
         musicTick?.let { ui.removeCallbacks(it) }
+    }
+
+    // The phone is running short of memory: give some back so Android keeps the home screen alive
+    // (a killed launcher is the slowest return home of all). Icons reload from their saved copies.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        @Suppress("DEPRECATION")
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE && !visibleNow) Icons.trim()
     }
 
     override fun onStop() {
@@ -442,13 +451,22 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         dots.position = f
         Motion.applyPages(grids, f, Motion.page(this))
         pager.invalidateGlass()
+        // The phone's wallpaper follows the pages: one call per real change (it's a message to the system).
+        val o = f.coerceIn(0f, 1f)
+        if (kotlin.math.abs(o - lastOffset) < 0.004f && o != 0f && o != 1f) return
+        lastOffset = o
         try {
-            val wm = WallpaperManager.getInstance(this)
-            wm.setWallpaperOffsetSteps(1f, 0f)
-            wm.setWallpaperOffsets(root.windowToken, f.coerceIn(0f, 1f), 0f)
+            val wm = wallMan ?: WallpaperManager.getInstance(this).also {
+                wallMan = it
+                it.setWallpaperOffsetSteps(1f, 0f)
+            }
+            wm.setWallpaperOffsets(root.windowToken, o, 0f)
         } catch (_: Exception) {
         }
     }
+
+    private var wallMan: WallpaperManager? = null
+    private var lastOffset = -1f
 
     /** The home screen settles in: clock, weather, player, then the dock icons one by one. */
     private fun animateIn() {
@@ -709,7 +727,16 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         if (p != pager.current) pager.snapTo(p)
     }
 
+    /** Halo's news came in while an app was open: caught up on coming home instead. */
+    private var haloPending = false
+
     private fun onHalo() {
+        // Behind an app: nothing to redraw (and no ticking in the background). Catch up on return.
+        if (!visibleNow) {
+            haloPending = true
+            return
+        }
+        haloPending = false
         refreshWidgets("music")
         startMusicTick()
         updateBadges()
@@ -814,6 +841,7 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
         if (AppRepo.apps.isEmpty()) return
         rebuildDock()
         drawer.refresh()
+        badgesShown = null
         updateBadges()
     }
 
@@ -898,8 +926,15 @@ class LauncherActivity : Activity(), Drawer.Host, WidgetActions, Editor.Host, Fo
 
     private fun dockBadges() = Prefs.get(this).getBoolean(Prefs.DOCK_BADGES, true)
 
+    private var badgesShown: Map<String, Int>? = null
+    private var badgesOn: Boolean? = null
+
     private fun updateBadges() {
         val on = dockBadges()
+        // Halo sends its state often (music, notifications): only touch the icons when the counts changed.
+        if (badgesShown == HaloLink.badges && badgesOn == on) return
+        badgesShown = HaloLink.badges
+        badgesOn = on
         for (i in 0 until dock.childCount) ((dock.getChildAt(i) as? Cell)?.content as? AppIconView)?.let { it.badge = if (on) HaloLink.badges[it.app.pkg] ?: 0 else 0 }
         drawer.updateBadges()
     }

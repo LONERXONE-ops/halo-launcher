@@ -209,6 +209,12 @@ abstract class BaseWidget(context: Context, protected val actions: WidgetActions
         super.onDetachedFromWindow()
     }
 
+    // Out of sight (an app is open over the home screen): the breathing rests.
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) breathe.cancel() else if (glowDrawable != null && !breathe.isStarted) breathe.start()
+    }
+
     /** A small icon before the title. */
     private val headIcon = ImageView(context).apply {
         imageTintList = ColorStateList.valueOf(Palette.SILVER)
@@ -486,6 +492,12 @@ class Capsule(context: Context) : View(context) {
     override fun onDetachedFromWindow() {
         run.cancel()
         super.onDetachedFromWindow()
+    }
+
+    // The charging light only runs while you can see it.
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility != VISIBLE) run.cancel() else if (charging && !run.isStarted) run.start()
     }
 
     override fun onDraw(c: android.graphics.Canvas) {
@@ -907,6 +919,12 @@ class TimerWidget(c: Context, a: WidgetActions) : BaseWidget(c, a, "Timer") {
     override fun onDetachedFromWindow() {
         removeCallbacks(ticker)
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        removeCallbacks(ticker)
+        if (visibility == VISIBLE && running()) post(ticker)
     }
 
     override fun refresh() {

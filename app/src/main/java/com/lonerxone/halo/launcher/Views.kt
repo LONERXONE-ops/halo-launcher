@@ -166,7 +166,20 @@ class AppIconView(
         }
     }
 
+    // The shortened name, worked out once per width (not on every frame).
+    private var ellText = ""
+    private var ellFor = ""
+    private var ellW = -1
+
     private fun ellipsize(s: String, w: Int): String {
+        if (s == ellFor && w == ellW) return ellText
+        ellFor = s
+        ellW = w
+        ellText = shorten(s, w)
+        return ellText
+    }
+
+    private fun shorten(s: String, w: Int): String {
         if (labelPaint.measureText(s) <= w) return s
         var e = s
         while (e.length > 1 && labelPaint.measureText("$e…") > w) e = e.dropLast(1)

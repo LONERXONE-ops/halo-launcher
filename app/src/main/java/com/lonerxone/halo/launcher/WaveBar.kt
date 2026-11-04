@@ -17,6 +17,7 @@ import kotlin.math.sin
  * when paused), the rest is a quiet straight line. Drag along it to seek.
  */
 class WaveBar(context: Context) : View(context) {
+    private val seen = android.graphics.Rect()
     var fraction = 0f
         set(v) {
             field = v.coerceIn(0f, 1f)
@@ -92,7 +93,8 @@ class WaveBar(context: Context) : View(context) {
         val tw = dpf(5f)
         canvas.drawRoundRect(x - tw / 2f, cy - th / 2f, x + tw / 2f, cy + th / 2f, tw / 2f, tw / 2f, thumb)
 
-        if ((playing || amp > 0.01f) && isShown) postInvalidateOnAnimation() else last = 0L
+        // Keeps rippling only while it's on screen (not on another home page or under an app).
+        if ((playing || amp > 0.01f) && isShown && getGlobalVisibleRect(seen)) postInvalidateOnAnimation() else last = 0L
     }
 
     override fun onAttachedToWindow() {

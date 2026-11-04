@@ -235,29 +235,6 @@ object Prefs {
         else -> 750L
     }
 
-    // ----- Lock screen (Settings → Lock screen) -----
-    const val LOCK_ON = "lock_on"
-    /** 0 Classic (date over the time), 1 Stacked (big hours over minutes), 2 Side (on the left). */
-    const val LOCK_LAYOUT = "lock_layout"
-    const val LOCK_CLOCK_SIZE = "lock_clock_size"
-    /** Up to two widget ids. */
-    const val LOCK_WIDGETS = "lock_widgets"
-    /** 0 Show, 1 Just how many, 2 Hidden. */
-    const val LOCK_NOTES = "lock_notes"
-    const val LOCK_MUSIC = "lock_music"
-    /** Bottom shortcuts: 0 none, 1 flashlight, 2 camera. */
-    const val LOCK_LEFT = "lock_left"
-    const val LOCK_RIGHT = "lock_right"
-    /** 0 Same picture as home, 1 the phone's lock wallpaper. */
-    const val LOCK_WALL = "lock_wall"
-    /** Depth clock: the wallpaper's subject in front of the time. */
-    const val LOCK_DEPTH = "lock_depth"
-    /** 0 Gentle, 1 Normal, 2 Strong. */
-    const val LOCK_DEPTH_SENS = "lock_depth_sens"
-    /** 0 Top, 1 Lower (more room for the subject above it, like One UI). */
-    const val LOCK_CLOCK_POS = "lock_clock_pos"
-    /** 0 Above the notifications (bottom), 1 Under the clock. */
-    const val LOCK_MUSIC_POS = "lock_music_pos"
     /** Your own order for the app list (app keys and folder ids); empty = A to Z. */
     const val DRAWER_ORDER = "drawer_order"
     /** Notification counts on the dock's apps. */

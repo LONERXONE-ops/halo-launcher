@@ -231,6 +231,9 @@ object Icons {
     }
 
     /** From memory, else from the disk cache (fast enough to do right away); null = render it. */
+    /** Shrinks the in-memory icons to a third (memory is short); they reload from disk as needed. */
+    fun trim() = cache.trimToSize(cache.maxSize() / 3)
+
     fun cachedOrDisk(ctx: Context, app: App, style: Int, size: Int): Result? {
         cached(app, style, size)?.let { return it }
         val f = diskFile(ctx, app, style, size)
