@@ -1520,16 +1520,18 @@ class SettingsActivity : Activity() {
         val halo = HaloLink.installed(this)
         // Like One UI: the lock screen big at the top; tap a part of it to jump to its settings.
         val anchors = HashMap<String, View>()
-        val pv = lockPreview { part -> anchors[part]?.let { a -> scroll?.smoothScrollTo(0, (a.top - dp(12)).coerceAtLeast(0)) } }
+        // Tap the preview (any part of it) to edit the lock screen itself, like One UI.
+        val edit = { startActivity(Intent(this, LockEditActivity::class.java)) }
+        val pv = lockPreview { if (on) edit() }
+        pv.setOnClickListener { if (on) edit() }
         col.addView(pv, LinearLayout.LayoutParams(dp(200), dp(410)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(4)
             bottomMargin = dp(6)
         })
-        if (on) col.addView(text(12f, Palette.GREY).apply {
-            text = "Tap the clock, widgets, notifications or shortcuts to change them"
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(12))
+        if (on) col.addView(button("Edit lock screen") { edit() }, LinearLayout.LayoutParams(dp(220), dp(46)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(16)
         })
         col.addView(group(switchRow("Halo lock screen", if (halo) "Shows when you wake the phone" else "Needs Halo (it puts the lock screen up)", Prefs.LOCK_ON, false) {
             HaloLink.command(this, "lockscreen", if (p.getBoolean(Prefs.LOCK_ON, false)) "1" else "0")
@@ -1589,11 +1591,11 @@ class SettingsActivity : Activity() {
         col.addView(grid)
         note(col, "Up to two, under the clock. They're the same widgets as your home screen.")
         // ----- Notifications and music -----
-        section(col, "Notifications and music")
+        section(col, "Now Bar")
         anchors["notes"] = col.getChildAt(col.childCount - 1)
-        chips(col, "Notifications", Prefs.LOCK_NOTES, listOf("Show", "Just how many", "Hidden"), def = 0)
+        chips(col, "Notifications", Prefs.LOCK_NOTES, listOf("In the Now Bar", "Just how many", "Hidden"), def = 0)
         col.addView(group(switchRow("What's playing", "The music card while a song plays", Prefs.LOCK_MUSIC, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
-        if (p.getBoolean(Prefs.LOCK_MUSIC, true)) chips(col, "Player sits", Prefs.LOCK_MUSIC_POS, listOf("At the bottom", "Under the clock"), def = 0)
+        if (p.getBoolean(Prefs.LOCK_MUSIC, true)) chips(col, "Player sits", Prefs.LOCK_MUSIC_POS, listOf("In the Now Bar", "Under the clock"), def = 0)
         // ----- Shortcuts -----
         section(col, "Shortcuts")
         anchors["shortcuts"] = col.getChildAt(col.childCount - 1)
@@ -1667,15 +1669,14 @@ class SettingsActivity : Activity() {
             gravity = Gravity.CENTER
             background = surface(dpf(12f), 0.3f)
         }.part("notes"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(8) })
-        if (p.getInt(Prefs.LOCK_NOTES, 0) != 2) st.addView(View(this).apply { background = surface(dpf(12f), 0.32f) }.part("notes"), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40), Gravity.BOTTOM).apply {
-            setMargins(dp(10), 0, dp(10), dp(52))
-        })
-        if (p.getBoolean(Prefs.LOCK_MUSIC, true) && !musicTop) st.addView(text(8f, Palette.INK, bold = true).apply {
-            text = "Now playing"
+        // The Now Bar between the shortcuts (music and notifications, like One UI).
+        val barOn = (p.getBoolean(Prefs.LOCK_MUSIC, true) && !musicTop) || p.getInt(Prefs.LOCK_NOTES, 0) == 0
+        if (barOn) st.addView(text(7.5f, Color.WHITE, bold = true).apply {
+            text = if (p.getBoolean(Prefs.LOCK_MUSIC, true) && !musicTop) "Now playing" else "Notifications"
             gravity = Gravity.CENTER
-            background = surface(dpf(12f), 0.3f)
-        }.part("notes"), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30), Gravity.BOTTOM).apply {
-            setMargins(dp(10), 0, dp(10), dp(98))
+            background = round(Color.argb(200, 70, 72, 30), dpf(13f))
+        }.part("notes"), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26), Gravity.BOTTOM).apply {
+            setMargins(dp(48), 0, dp(48), dp(16))
         })
         for ((g, k) in listOf(Gravity.START to Prefs.LOCK_LEFT, Gravity.END to Prefs.LOCK_RIGHT)) {
             val kind = p.getInt(k, if (k == Prefs.LOCK_LEFT) 1 else 2)

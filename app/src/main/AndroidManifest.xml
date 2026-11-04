@@ -172,6 +172,13 @@
             android:taskAffinity="com.lonerxone.halo.launcher.settings" />
 
         <activity
+            android:name=".LockEditActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:taskAffinity="com.lonerxone.halo.launcher.settings"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <activity
             android:name=".WidgetPickActivity"
             android:exported="false" />
 

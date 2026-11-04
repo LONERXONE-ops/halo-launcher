@@ -63,6 +63,7 @@ class LockActivity : Activity(), WidgetActions {
     private lateinit var notesBox: LinearLayout
     private var music: MusicCard? = null
     private lateinit var topCol: LinearLayout
+    private lateinit var nowBar: NowBar
     private var depth: DepthLayer? = null
     private lateinit var shade: View
     private lateinit var bottom: FrameLayout
@@ -262,7 +263,7 @@ class LockActivity : Activity(), WidgetActions {
             clipChildren = false
             setPadding(dp(14), 0, dp(14), 0)
         }
-        content.addView(lower, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply { bottomMargin = dp(124) })
+        content.addView(lower, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply { bottomMargin = dp(150) })
         notesBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             clipChildren = false
@@ -271,16 +272,26 @@ class LockActivity : Activity(), WidgetActions {
 
         // Bottom: two shortcuts you hold to use, and the swipe-up hint between them.
         bottom = FrameLayout(this).apply { clipChildren = false }
-        content.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(96), Gravity.BOTTOM).apply { bottomMargin = dp(18) })
+        content.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(132), Gravity.BOTTOM).apply { bottomMargin = dp(12) })
         shortcut(Gravity.START, p().getInt(Prefs.LOCK_LEFT, 1))
         shortcut(Gravity.END, p().getInt(Prefs.LOCK_RIGHT, 2))
+        // The Now Bar (One UI): what's playing, then your notifications, swiped through sideways.
+        nowBar = NowBar(this, { cmd, arg -> if (cmd == "open_music") unlock { HaloLink.command(this, cmd) } else HaloLink.command(this, cmd, arg) }) { n ->
+            unlock { HaloLink.command(this, "open_notif", n.key) }
+        }
+        nowBar.visibility = View.GONE
+        bottom.addView(nowBar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(92), Gravity.BOTTOM).apply {
+            marginStart = dp(96)
+            marginEnd = dp(96)
+            bottomMargin = dp(13)
+        })
         hint = text(13f, Color.argb(220, 255, 255, 255), bold = true).apply {
             text = "Swipe up to open"
             gravity = Gravity.CENTER
         }
         bottom.addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(22) })
         val handle = View(this).apply { background = round(Color.argb(220, 255, 255, 255), dpf(3f)) }
-        bottom.addView(handle, FrameLayout.LayoutParams(dp(120), dp(5), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(6) })
+        bottom.addView(handle, FrameLayout.LayoutParams(dp(120), dp(5), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(2) })
         // The hint breathes gently, inviting the swipe.
         android.animation.ObjectAnimator.ofFloat(hint, View.TRANSLATION_Y, 0f, -dpf(5f), 0f).apply {
             duration = 1800L
@@ -386,7 +397,7 @@ class LockActivity : Activity(), WidgetActions {
         bottom.addView(btn, FrameLayout.LayoutParams(dp(54), dp(54), gravity or Gravity.BOTTOM).apply {
             marginStart = dp(34)
             marginEnd = dp(34)
-            bottomMargin = dp(6)
+            bottomMargin = dp(18)
         })
     }
 
@@ -399,7 +410,8 @@ class LockActivity : Activity(), WidgetActions {
         applyBars()
         // What's playing.
         val m = HaloLink.music
-        if (p().getBoolean(Prefs.LOCK_MUSIC, true) && m != null) {
+        val inBar = p().getInt(Prefs.LOCK_MUSIC_POS, 0) == 0
+        if (p().getBoolean(Prefs.LOCK_MUSIC, true) && m != null && !inBar) {
             if (music == null) {
                 val card = MusicCard(this) { cmd -> HaloLink.command(this, cmd) }
                 music = card
@@ -420,6 +432,21 @@ class LockActivity : Activity(), WidgetActions {
             card?.animate()?.alpha(0f)?.translationY(dpf(20f))?.setDuration(220)?.withEndAction { (card.parent as? ViewGroup)?.removeView(card) }?.start()
         }
         drawNotes()
+        // The Now Bar: music (when it lives there) and notifications (when shown in full).
+        val barMusic = if (p().getBoolean(Prefs.LOCK_MUSIC, true) && inBar) m else null
+        val barNotes = if (p().getInt(Prefs.LOCK_NOTES, 0) == 0) HaloLink.notes.sortedByDescending { it.time }.take(12) else emptyList()
+        nowBar.set(barMusic, barNotes)
+        val show = nowBar.showing
+        if (show && nowBar.visibility != View.VISIBLE) {
+            nowBar.visibility = View.VISIBLE
+            nowBar.alpha = 0f
+            nowBar.scaleX = 0.6f
+            nowBar.scaleY = 0.6f
+            nowBar.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(560).setInterpolator(OvershootInterpolator(2f)).start()
+        } else if (!show && nowBar.visibility == View.VISIBLE) {
+            nowBar.animate().alpha(0f).scaleX(0.7f).scaleY(0.7f).setDuration(200).withEndAction { nowBar.visibility = View.GONE }.start()
+        }
+        hint.visibility = if (show) View.INVISIBLE else View.VISIBLE
     }
 
     private var notesKey = ""
@@ -436,7 +463,8 @@ class LockActivity : Activity(), WidgetActions {
         if (key == notesKey) return
         notesKey = key
         notesBox.removeAllViews()
-        if (mode == 2 || all.isEmpty()) return
+        // Show: they're in the Now Bar at the bottom (swipe through them there).
+        if (mode != 1 || all.isEmpty()) return
         if (mode == 1) {
             val apps = all.map { it.app }.distinct().size
             notesBox.addView(text(14f, Color.WHITE, bold = true).apply {
