@@ -62,6 +62,9 @@ class LockActivity : Activity(), WidgetActions {
     private lateinit var lower: LinearLayout
     private lateinit var notesBox: LinearLayout
     private var music: MusicCard? = null
+    private lateinit var topCol: LinearLayout
+    private var depth: DepthLayer? = null
+    private lateinit var shade: View
     private lateinit var bottom: FrameLayout
     private lateinit var hint: TextView
     private lateinit var charge: LinearLayout
@@ -179,16 +182,18 @@ class LockActivity : Activity(), WidgetActions {
         root.addView(back, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         loadPicture(sw, sh)
         // Soft shade at the top and bottom so the clock and cards always read.
-        root.addView(View(this).apply {
+        shade = View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(110, 0, 0, 0), Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(130, 0, 0, 0)))
-        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        root.addView(shade, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         content = FrameLayout(this).apply { clipChildren = false }
         root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         val layout = p().getInt(Prefs.LOCK_LAYOUT, 0)
         val size = listOf(0.8f, 1f, 1.22f)[p().getInt(Prefs.LOCK_CLOCK_SIZE, 1).coerceIn(0, 2)]
-        val top = dp(56)
+        // Top like iOS, or lower like One UI (room for the picture's subject above it).
+        val top = if (p().getInt(Prefs.LOCK_CLOCK_POS, 0) == 1) (sh * 0.15f).toInt() else dp(56)
         val side = dp(24)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -196,6 +201,7 @@ class LockActivity : Activity(), WidgetActions {
             setPadding(side, top, side, 0)
         }
         content.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        topCol = col
         date = DateFace(this, forceStyle = if (layout == 0) 1 else -1).apply {
             alignOverride = if (layout == 2) 0 else 1
         }
@@ -282,6 +288,21 @@ class LockActivity : Activity(), WidgetActions {
             interpolator = android.view.animation.AccelerateDecelerateInterpolator()
             start()
         }
+
+        // Depth clock: the picture's subject over the time (but under the cards).
+        if (p().getBoolean(Prefs.LOCK_DEPTH, false)) {
+            val d = DepthLayer(this, back, shade, clock)
+            depth = d
+            root.addView(d, root.indexOfChild(content) + 1, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            root.post { buildDepth() }
+        }
+    }
+
+    /** Finds the subject in the picture shown now (again after the picture loads). */
+    private fun buildDepth() {
+        val d = depth ?: return
+        if (back.drawable == null) return
+        d.build(p().getInt(Prefs.LOCK_DEPTH_SENS, 1)) { }
     }
 
     /** Your lock wallpaper if Android lets us read it (and you chose it), else the home picture. */
@@ -318,6 +339,7 @@ class LockActivity : Activity(), WidgetActions {
                 Glass.backdrop?.let { back.setImageBitmap(it) }
                 Palette.adapt(this)
                 root.invalidateGlass()
+                root.post { buildDepth() }
             }
         }
     }
@@ -381,7 +403,12 @@ class LockActivity : Activity(), WidgetActions {
             if (music == null) {
                 val card = MusicCard(this) { cmd -> HaloLink.command(this, cmd) }
                 music = card
-                lower.addView(card, 0, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(10) })
+                if (p().getInt(Prefs.LOCK_MUSIC_POS, 0) == 1) {
+                    // Under the clock (and widgets), like iOS's big player.
+                    topCol.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { topMargin = dp(18) })
+                } else {
+                    lower.addView(card, 0, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(150)).apply { bottomMargin = dp(10) })
+                }
                 card.alpha = 0f
                 card.translationY = dpf(30f)
                 card.animate().alpha(1f).translationY(0f).setDuration(520).setInterpolator(OvershootInterpolator(1.4f)).start()
@@ -390,7 +417,7 @@ class LockActivity : Activity(), WidgetActions {
         } else if (music != null) {
             val card = music
             music = null
-            card?.animate()?.alpha(0f)?.translationY(dpf(20f))?.setDuration(220)?.withEndAction { lower.removeView(card) }?.start()
+            card?.animate()?.alpha(0f)?.translationY(dpf(20f))?.setDuration(220)?.withEndAction { (card.parent as? ViewGroup)?.removeView(card) }?.start()
         }
         drawNotes()
     }

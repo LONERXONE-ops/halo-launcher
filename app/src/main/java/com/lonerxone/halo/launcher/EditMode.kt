@@ -192,6 +192,17 @@ class Cell(
         removeCallbacks(longPress)
     }
 
+    /**
+     * Something inside took the touch for itself: a widget's list scrolling
+     * (Samsung's Reminders, a to-do list), a slider. That's never a hold, so
+     * no edit mode. (The cell stops seeing the finger move once a list takes
+     * over, which is why scrolling a list used to drop you into editing.)
+     */
+    override fun requestDisallowInterceptTouchEvent(disallow: Boolean) {
+        if (disallow) removeCallbacks(longPress)
+        super.requestDisallowInterceptTouchEvent(disallow)
+    }
+
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         if (placeholder) return false
         when (e.actionMasked) {
@@ -199,7 +210,7 @@ class Cell(
                 downX = e.rawX
                 downY = e.rawY
                 dragging = false
-                if (!editor.editing && longPressEdits) postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                if (!editor.editing && longPressEdits) postDelayed(longPress, Prefs.holdToEdit(context))
             }
             MotionEvent.ACTION_MOVE -> if (hypot(e.rawX - downX, e.rawY - downY) > slop * 2.5f) removeCallbacks(longPress)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)

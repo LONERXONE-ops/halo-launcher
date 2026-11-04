@@ -67,6 +67,7 @@ class SettingsActivity : Activity() {
             "icons" -> Page.ICONS
             "gestures" -> Page.GESTURES
             "motion" -> Page.MOTION
+            "lock" -> Page.LOCK
             else -> Page.MENU
         }
         if (AppRepo.apps.isEmpty()) {
@@ -157,8 +158,42 @@ class SettingsActivity : Activity() {
                 insets
             }
         }
-        setContentView(sv)
+        // One UI: the big title scrolls away and a small bar with the title fades in at the top.
+        val frame = FrameLayout(this)
+        frame.addView(sv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), 0, dp(16), dp(8))
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(250, 0, 0, 0), Color.argb(235, 0, 0, 0), Color.argb(0, 0, 0, 0)))
+            alpha = 0f
+            visibility = View.INVISIBLE
+        }
+        if (page != Page.MENU) bar.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_back)
+            imageTintList = ColorStateList.valueOf(Palette.INK)
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            background = round(Palette.TILE2, dpf(19f))
+            setOnClickListener { go(Page.MENU) }
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(12) })
+        bar.addView(text(18f, Palette.INK, bold = true).apply { text = if (page == Page.MENU) "Halo Launcher" else page.title })
+        frame.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
+        bar.setOnApplyWindowInsetsListener { v, insets ->
+            val t = insets.getInsets(WindowInsets.Type.systemBars()).top
+            v.setPadding(v.paddingLeft, t + dp(6), v.paddingRight, dp(14))
+            insets
+        }
+        fun fade(y: Int) {
+            val start = (titleBottom - dp(70)).coerceAtLeast(dp(40))
+            val a = ((y - start) / dpf(46f)).coerceIn(0f, 1f)
+            bar.alpha = a
+            bar.visibility = if (a > 0.01f) View.VISIBLE else View.INVISIBLE
+            bar.translationY = -dpf(8f) * (1f - a)
+        }
+        sv.setOnScrollChangeListener { _, _, y, _, _ -> fade(y) }
+        setContentView(frame)
         scroll = sv
+        sv.post { fade(sv.scrollY) }
         // Back to where you were before the first frame is drawn (a post showed one frame at the top).
         if (keepY > 0) sv.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
@@ -178,7 +213,11 @@ class SettingsActivity : Activity() {
         shown = page
     }
 
+    /** Where the page's big title ends (the small bar fades in past it). */
+    private var titleBottom = 0
+
     private fun header(col: LinearLayout) {
+        titleBottom = dp(260)
         if (page == Page.MENU) {
             col.addView(ImageView(this).apply { setImageResource(R.drawable.logo_launcher) }, LinearLayout.LayoutParams(dp(76), dp(76)).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
@@ -202,6 +241,8 @@ class SettingsActivity : Activity() {
             }
             (hero.parent as? ViewGroup)?.removeView(hero)
             col.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(210)).apply { bottomMargin = dp(14) })
+            titleBottom = dp(150)
+            searchBox(col)
             return
         }
         val back = ImageView(this).apply {
@@ -215,11 +256,15 @@ class SettingsActivity : Activity() {
         // Like Halo: the page's colour tile, a big title and one short line under it.
         val (icon, key) = pageIcon()
         val tc = tileColour(key)
+        // One UI: a tall, calm space with the big title low in it, easy to reach.
+        val tall = (resources.displayMetrics.heightPixels * 0.2f).toInt().coerceAtLeast(dp(120))
         val head = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(28), dp(4), dp(20))
+            gravity = Gravity.BOTTOM
+            minimumHeight = tall
+            setPadding(dp(4), dp(20), dp(4), dp(22))
         }
+        titleBottom = dp(42) + tall
         head.addView(ImageView(this).apply {
             setImageResource(icon)
             imageTintList = if (icon == R.drawable.ic_halo) null else ColorStateList.valueOf(Color.WHITE)
@@ -227,13 +272,95 @@ class SettingsActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(lighten(tc), tc)).apply { cornerRadius = dpf(16f) }
         }, LinearLayout.LayoutParams(dp(52), dp(52)).apply { marginEnd = dp(16) })
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(text(28f, Palette.INK, bold = true).apply { text = page.title })
+        texts.addView(text(32f, Palette.INK, bold = true).apply { text = page.title })
         subtitle()?.let { st -> texts.addView(text(14f, Palette.GREY, lines = 2).apply {
             text = st
             setPadding(0, dp(2), 0, 0)
         }) }
         head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(head)
+    }
+
+    /**
+     * Search, like the phone's own settings: type and every page and setting
+     * that matches shows up; tap one to go there.
+     */
+    private fun searchBox(col: LinearLayout) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), 0, dp(10), 0)
+            background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+        }
+        box.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_search)
+            imageTintList = ColorStateList.valueOf(Palette.GREY)
+        }, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(10) })
+        val field = EditText(this).apply {
+            hint = "Search settings"
+            setHintTextColor(Palette.GREY)
+            setTextColor(Palette.INK)
+            textSize = 15f
+            background = null
+            isSingleLine = true
+            setPadding(0, 0, 0, 0)
+        }
+        box.addView(field, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        col.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { bottomMargin = dp(10) })
+        val results = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        col.addView(results)
+        val first = col.childCount
+        field.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                val q = e?.toString().orEmpty().trim().lowercase()
+                for (i in first until col.childCount) col.getChildAt(i).visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
+                results.removeAllViews()
+                results.visibility = if (q.isEmpty()) View.GONE else View.VISIBLE
+                if (q.isEmpty()) return
+                val hits = searchIndex.filter { (t, words, _) -> t.lowercase().contains(q) || words.contains(q) }.take(12)
+                if (hits.isEmpty()) {
+                    results.addView(text(14f, Palette.GREY).apply {
+                        text = "Nothing called that"
+                        gravity = Gravity.CENTER
+                        setPadding(0, dp(24), 0, dp(24))
+                    })
+                    return
+                }
+                results.addView(group(*hits.map { (t, _, pg) ->
+                    row(t, pg.title, chevron()) {
+                        if (pg == Page.MENU) startActivity(Intent(this@SettingsActivity, WallpaperActivity::class.java)) else go(pg)
+                    }
+                }.toTypedArray()))
+            }
+        })
+    }
+
+    /** Every setting by name, the words people use for it, and its page. */
+    private val searchIndex: List<Triple<String, String, Page>> by lazy {
+        listOf(
+            Triple("Liquid Glass or Solid", "theme glass solid blur frost dispersion shine tint dark light", Page.THEME),
+            Triple("Wallpapers", "wallpaper picture background browse daily photos", Page.MENU),
+            Triple("Background picture", "background hero picture photo", Page.LOOK),
+            Triple("Animations", "animation motion open close page transition bounce speed", Page.MOTION),
+            Triple("Clock face and colour", "clock time date font colour color glass hours seconds", Page.CLOCK),
+            Triple("Icons and icon packs", "icon pack shape size labels themed", Page.ICONS),
+            Triple("Dock", "dock bar bottom apps badges", Page.DOCK),
+            Triple("Widgets", "widget battery weather calendar music notes stack", Page.WIDGETS),
+            Triple("App list", "drawer app list sort order columns horizontal vertical search", Page.DRAWER),
+            Triple("Lock screen", "lock screen depth clock widgets shortcuts flashlight camera notifications music", Page.LOCK),
+            Triple("Depth effect", "depth subject clock behind wallpaper", Page.LOCK),
+            Triple("Gestures", "gesture swipe double tap lock long press hold edit", Page.GESTURES),
+            Triple("Hold to edit", "long press delay edit mode hold time", Page.GESTURES),
+            Triple("Weather", "weather city location temperature", Page.WEATHER),
+            Triple("Halo", "halo island link status bar", Page.HALO),
+            Triple("Backup and restore", "backup restore file export import", Page.BACKUP),
+            Triple("About", "about credits licences version lonerxone", Page.ABOUT),
+        )
     }
 
     /** One short line under each page's title. */
@@ -311,7 +438,7 @@ class SettingsActivity : Activity() {
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { bottomMargin = dp(12) })
         }
         col.addView(updateCard())
-        section(col, "Look")
+        section(col, "Home screen")
         col.addView(group(
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
             nav(R.drawable.ic_image, "Wallpapers", "Browse, search, your photos, change daily") { startActivity(Intent(this, WallpaperActivity::class.java)) },
@@ -322,7 +449,10 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_apps, "App list", (if (Prefs.get(this).getInt(Prefs.DRAWER_LAYOUT, 0) == 1) "Horizontal" else "Vertical") + " · " + (if (Prefs.get(this).getInt(Prefs.DRAWER_COLS, 0) == 1) "5" else "4") + " across") { go(Page.DRAWER) },
             nav(R.drawable.ic_dock, "Dock", "${Prefs.list(this, Prefs.DOCK).size.takeIf { it > 0 } ?: 5} apps · " + DockBar.NAMES.getOrElse(DockBar.style(this)) { "Glass" }) { go(Page.DOCK) },
             nav(R.drawable.ic_widgets, "Widgets", "${HomeWidgets.ALL.count { Prefs.widgetOn(this, it.id) }} on page 2") { go(Page.WIDGETS) },
-            nav(R.drawable.ic_clock, "Lock screen", if (Prefs.get(this).getBoolean(Prefs.LOCK_ON, false)) listOf("Classic", "Stacked", "Side")[Prefs.get(this).getInt(Prefs.LOCK_LAYOUT, 0).coerceIn(0, 2)] + " · on" else "Off") { go(Page.LOCK) },
+        ))
+        section(col, "Lock screen")
+        col.addView(group(
+            nav(R.drawable.ic_clock, "Lock screen", if (Prefs.get(this).getBoolean(Prefs.LOCK_ON, false)) listOf("Classic", "Stacked", "Side")[Prefs.get(this).getInt(Prefs.LOCK_LAYOUT, 0).coerceIn(0, 2)] + (if (Prefs.get(this).getBoolean(Prefs.LOCK_DEPTH, false)) " · depth" else "") + " · on" else "Off") { go(Page.LOCK) },
         ))
         section(col, "Use")
         col.addView(group(
@@ -1388,10 +1518,18 @@ class SettingsActivity : Activity() {
         val p = Prefs.get(this)
         val on = p.getBoolean(Prefs.LOCK_ON, false)
         val halo = HaloLink.installed(this)
-        col.addView(lockPreview(), LinearLayout.LayoutParams(dp(180), dp(360)).apply {
+        // Like One UI: the lock screen big at the top; tap a part of it to jump to its settings.
+        val anchors = HashMap<String, View>()
+        val pv = lockPreview { part -> anchors[part]?.let { a -> scroll?.smoothScrollTo(0, (a.top - dp(12)).coerceAtLeast(0)) } }
+        col.addView(pv, LinearLayout.LayoutParams(dp(200), dp(410)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             topMargin = dp(4)
-            bottomMargin = dp(14)
+            bottomMargin = dp(6)
+        })
+        if (on) col.addView(text(12f, Palette.GREY).apply {
+            text = "Tap the clock, widgets, notifications or shortcuts to change them"
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(12))
         })
         col.addView(group(switchRow("Halo lock screen", if (halo) "Shows when you wake the phone" else "Needs Halo (it puts the lock screen up)", Prefs.LOCK_ON, false) {
             HaloLink.command(this, "lockscreen", if (p.getBoolean(Prefs.LOCK_ON, false)) "1" else "0")
@@ -1402,11 +1540,23 @@ class SettingsActivity : Activity() {
             col.addView(button("Try it") { startActivity(Intent(this, LockActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(12) })
             return
         }
-        chips(col, "Layout", Prefs.LOCK_LAYOUT, listOf("Classic", "Stacked", "Side"), def = 0)
-        chips(col, "Clock size", Prefs.LOCK_CLOCK_SIZE, listOf("Small", "Medium", "Large"), def = 1)
-        note(col, "The clock uses your face, colour and glass from Clock & date.")
-        // Widgets: tap to add or take off (two at most).
+        // ----- Clock -----
+        section(col, "Clock")
+        anchors["clock"] = col.getChildAt(col.childCount - 1)
+        chips(col, "Style", Prefs.LOCK_LAYOUT, listOf("Classic", "Stacked", "Side"), def = 0)
+        chips(col, "Size", Prefs.LOCK_CLOCK_SIZE, listOf("Small", "Medium", "Large"), def = 1)
+        chips(col, "Position", Prefs.LOCK_CLOCK_POS, listOf("Top", "Lower"), def = 0)
+        col.addView(group(
+            switchRow("Depth effect", "Your wallpaper's subject in front of the time", Prefs.LOCK_DEPTH, false) { render() },
+            nav(R.drawable.ic_clock, "Face, colour and glass", ClockFaces.current(this).name) { go(Page.CLOCK) },
+        ), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        if (p.getBoolean(Prefs.LOCK_DEPTH, false)) {
+            chips(col, "Depth sensitivity", Prefs.LOCK_DEPTH_SENS, listOf("Gentle", "Normal", "Strong"), def = 1)
+            note(col, "Works best with a clear subject (a person, mountains, a building) against a plain sky or wall, with the clock Stacked and Lower. It finds the subject by colour, so busy pictures may not work, and it turns itself off when the subject would hide too much of the time.")
+        }
+        // ----- Widgets -----
         section(col, "Widgets")
+        anchors["widgets"] = col.getChildAt(col.childCount - 1)
         val chosen = Prefs.list(this, Prefs.LOCK_WIDGETS)
         val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         var row: LinearLayout? = null
@@ -1438,25 +1588,34 @@ class SettingsActivity : Activity() {
         if (rem != 0) repeat(3 - rem) { row?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = dp(8) }) }
         col.addView(grid)
         note(col, "Up to two, under the clock. They're the same widgets as your home screen.")
+        // ----- Notifications and music -----
+        section(col, "Notifications and music")
+        anchors["notes"] = col.getChildAt(col.childCount - 1)
         chips(col, "Notifications", Prefs.LOCK_NOTES, listOf("Show", "Just how many", "Hidden"), def = 0)
         col.addView(group(switchRow("What's playing", "The music card while a song plays", Prefs.LOCK_MUSIC, true) { render() }), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+        if (p.getBoolean(Prefs.LOCK_MUSIC, true)) chips(col, "Player sits", Prefs.LOCK_MUSIC_POS, listOf("At the bottom", "Under the clock"), def = 0)
+        // ----- Shortcuts -----
+        section(col, "Shortcuts")
+        anchors["shortcuts"] = col.getChildAt(col.childCount - 1)
         chips(col, "Bottom left", Prefs.LOCK_LEFT, listOf("None", "Flashlight", "Camera"), def = 1)
         chips(col, "Bottom right", Prefs.LOCK_RIGHT, listOf("None", "Flashlight", "Camera"), def = 2)
         note(col, "Hold a shortcut to use it (a tap shows how), so it never goes off in your pocket.")
-        chips(col, "Wallpaper", Prefs.LOCK_WALL, listOf("Same as home", "Your lock wallpaper"), def = 0)
+        // ----- Wallpaper -----
+        section(col, "Wallpaper")
+        chips(col, "Picture", Prefs.LOCK_WALL, listOf("Same as home", "Your lock wallpaper"), def = 0)
         if (p.getInt(Prefs.LOCK_WALL, 0) == 1 && Build.VERSION.SDK_INT < 34) note(col, "Your Android version doesn't share the lock wallpaper with apps, so it uses the home picture.")
         col.addView(button("Try it") { startActivity(Intent(this, LockActivity::class.java)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(16) })
     }
 
     /** A small phone showing the lock screen as set: picture, date, clock, widgets and the bottom bar. */
-    private fun lockPreview(): View {
+    private fun lockPreview(onPart: (String) -> Unit = {}): View {
         val p = Prefs.get(this)
-        val st = stage(dpf(22f))
+        val st = stage(dpf(24f))
         val layout = p.getInt(Prefs.LOCK_LAYOUT, 0)
         val size = listOf(0.8f, 1f, 1.22f)[p.getInt(Prefs.LOCK_CLOCK_SIZE, 1).coerceIn(0, 2)]
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(22), dp(12), 0)
+            setPadding(dp(12), if (p.getInt(Prefs.LOCK_CLOCK_POS, 0) == 1) dp(62) else dp(24), dp(12), 0)
         }
         val date = DateFace(this, forceStyle = if (layout == 0) 1 else -1).apply {
             preview = true
@@ -1472,7 +1631,14 @@ class SettingsActivity : Activity() {
             1 -> (dp(96) * size).toInt()
             else -> (dp(84) * size).toInt()
         }
-        val cw = if (layout == 2) dp(100) else ViewGroup.LayoutParams.MATCH_PARENT
+        val cw = if (layout == 2) dp(110) else ViewGroup.LayoutParams.MATCH_PARENT
+        // Tap the clock (or anything) to jump to its settings, with a little press.
+        fun View.part(name: String) = apply {
+            pressable()
+            setOnClickListener { onPart(name) }
+        }
+        clock.part("clock")
+        date.part("clock")
         if (layout == 1) {
             col.addView(clock, LinearLayout.LayoutParams(cw, ch))
             col.addView(date, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
@@ -1488,14 +1654,28 @@ class SettingsActivity : Activity() {
                     text = HomeWidgets.ALL.firstOrNull { it.id == id }?.name.orEmpty()
                     gravity = Gravity.CENTER
                     background = surface(dpf(12f), 0.3f)
-                }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { if (i > 0) marginStart = dp(6) })
+                }.part("widgets"), LinearLayout.LayoutParams(0, dp(56), 1f).apply { if (i > 0) marginStart = dp(6) })
             }
             if (ws.size == 1) row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
             col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         }
         st.addView(col)
-        if (p.getInt(Prefs.LOCK_NOTES, 0) != 2) st.addView(View(this).apply { background = surface(dpf(12f), 0.32f) }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40), Gravity.BOTTOM).apply {
+        // What's playing and notifications at the bottom (or the player under the clock).
+        val musicTop = p.getBoolean(Prefs.LOCK_MUSIC, true) && p.getInt(Prefs.LOCK_MUSIC_POS, 0) == 1
+        if (musicTop) col.addView(text(8f, Palette.INK, bold = true).apply {
+            text = "Now playing"
+            gravity = Gravity.CENTER
+            background = surface(dpf(12f), 0.3f)
+        }.part("notes"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)).apply { topMargin = dp(8) })
+        if (p.getInt(Prefs.LOCK_NOTES, 0) != 2) st.addView(View(this).apply { background = surface(dpf(12f), 0.32f) }.part("notes"), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40), Gravity.BOTTOM).apply {
             setMargins(dp(10), 0, dp(10), dp(52))
+        })
+        if (p.getBoolean(Prefs.LOCK_MUSIC, true) && !musicTop) st.addView(text(8f, Palette.INK, bold = true).apply {
+            text = "Now playing"
+            gravity = Gravity.CENTER
+            background = surface(dpf(12f), 0.3f)
+        }.part("notes"), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30), Gravity.BOTTOM).apply {
+            setMargins(dp(10), 0, dp(10), dp(98))
         })
         for ((g, k) in listOf(Gravity.START to Prefs.LOCK_LEFT, Gravity.END to Prefs.LOCK_RIGHT)) {
             val kind = p.getInt(k, if (k == Prefs.LOCK_LEFT) 1 else 2)
@@ -1505,7 +1685,7 @@ class SettingsActivity : Activity() {
                 imageTintList = ColorStateList.valueOf(Color.WHITE)
                 setPadding(dp(6), dp(6), dp(6), dp(6))
                 background = surface(dpf(13f), 0.32f)
-            }, FrameLayout.LayoutParams(dp(26), dp(26), g or Gravity.BOTTOM).apply { setMargins(dp(16), 0, dp(16), dp(16)) })
+            }.part("shortcuts"), FrameLayout.LayoutParams(dp(26), dp(26), g or Gravity.BOTTOM).apply { setMargins(dp(16), 0, dp(16), dp(16)) })
         }
         st.addView(View(this).apply { background = round(Color.argb(220, 255, 255, 255), dpf(2f)) }, FrameLayout.LayoutParams(dp(44), dp(3), Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(8) })
         return st
@@ -1744,6 +1924,8 @@ class SettingsActivity : Activity() {
             info(R.drawable.ic_touch, "Long-press", "Edit the home screen: drag anything, resize widgets, remove things. On an app icon: its shortcuts"),
             info(R.drawable.ic_home, "Home button", "Back to page 1 and closes the app list"),
         ))
+        chips(col, "Hold to edit", Prefs.EDIT_HOLD, listOf("Quick", "Normal", "Long"), def = 1)
+        note(col, "How long you hold the home screen or a widget before editing starts. Scrolling inside a widget (a reminders or to-do list) never starts it.")
         section(col, "Swipe down opens")
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for ((i, pair) in listOf("Halo" to "The island's notification center", "Android" to "The normal notification shade").withIndex()) {

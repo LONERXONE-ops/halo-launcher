@@ -226,6 +226,15 @@ object Prefs {
     const val DRAWER_GROUPS = "drawer_groups"
     /** Experimental chromatic dispersion on Liquid Glass. */
     const val GLASS_DISPERSE = "glass_disperse"
+    /** How long to hold before editing starts: 0 Quick, 1 Normal, 2 Long (Settings → Gestures). */
+    const val EDIT_HOLD = "edit_hold"
+
+    fun holdToEdit(c: Context): Long = when (get(c).getInt(EDIT_HOLD, 1)) {
+        0 -> 450L
+        2 -> 1100L
+        else -> 750L
+    }
+
     // ----- Lock screen (Settings → Lock screen) -----
     const val LOCK_ON = "lock_on"
     /** 0 Classic (date over the time), 1 Stacked (big hours over minutes), 2 Side (on the left). */
@@ -241,6 +250,14 @@ object Prefs {
     const val LOCK_RIGHT = "lock_right"
     /** 0 Same picture as home, 1 the phone's lock wallpaper. */
     const val LOCK_WALL = "lock_wall"
+    /** Depth clock: the wallpaper's subject in front of the time. */
+    const val LOCK_DEPTH = "lock_depth"
+    /** 0 Gentle, 1 Normal, 2 Strong. */
+    const val LOCK_DEPTH_SENS = "lock_depth_sens"
+    /** 0 Top, 1 Lower (more room for the subject above it, like One UI). */
+    const val LOCK_CLOCK_POS = "lock_clock_pos"
+    /** 0 Above the notifications (bottom), 1 Under the clock. */
+    const val LOCK_MUSIC_POS = "lock_music_pos"
     /** Your own order for the app list (app keys and folder ids); empty = A to Z. */
     const val DRAWER_ORDER = "drawer_order"
     /** Notification counts on the dock's apps. */
