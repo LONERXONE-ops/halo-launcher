@@ -38,7 +38,7 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private enum class Page(val title: String) {
         MENU("Settings"), THEME("Theme"), LOOK("Background"), CLOCK("Clock & date"), MOTION("Animations"), ICONS("Icons"), DOCK("Dock"),
-        WIDGETS("Widgets"), DRAWER("App list"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), ABOUT("About"),
+        WIDGETS("Widgets"), DRAWER("App list"), GESTURES("Gestures"), WEATHER("Weather"), HALO("Halo"), BACKUP("Backup & restore"), UPDATES("Updates"), ABOUT("About"),
     }
 
     private var page = Page.MENU
@@ -67,6 +67,7 @@ class SettingsActivity : Activity() {
             "icons" -> Page.ICONS
             "gestures" -> Page.GESTURES
             "motion" -> Page.MOTION
+            "updates" -> Page.UPDATES
             else -> Page.MENU
         }
         if (AppRepo.apps.isEmpty()) {
@@ -141,6 +142,7 @@ class SettingsActivity : Activity() {
             Page.HALO -> haloPage(col)
             Page.BACKUP -> backupPage(col)
             Page.ABOUT -> aboutPage(col)
+            Page.UPDATES -> updatesPage(col)
         }
         val sv = ScrollView(this).apply {
             // Fades out at the edges instead of cutting things off.
@@ -355,6 +357,7 @@ class SettingsActivity : Activity() {
             Triple("Weather", "weather city location temperature", Page.WEATHER),
             Triple("Halo", "halo island link", Page.HALO),
             Triple("Backup and restore", "backup restore file export import", Page.BACKUP),
+            Triple("Updates", "update version new download install", Page.UPDATES),
             Triple("About", "about credits licences version lonerxone", Page.ABOUT),
         )
     }
@@ -373,6 +376,7 @@ class SettingsActivity : Activity() {
         Page.WEATHER -> "Where the weather comes from"
         Page.HALO -> "Your dynamic island"
         Page.BACKUP -> "Keep your whole setup in a file"
+        Page.UPDATES -> "Straight from GitHub"
         else -> null
     }
 
@@ -414,6 +418,7 @@ class SettingsActivity : Activity() {
         Page.WEATHER -> R.drawable.w_sun to "Weather"
         Page.HALO -> R.drawable.ic_halo to "Halo"
         Page.BACKUP -> R.drawable.ic_arrow_down to "Backup & restore"
+        Page.UPDATES -> R.drawable.ic_update to "Updates"
         else -> R.drawable.ic_info to "About"
     }
 
@@ -431,7 +436,13 @@ class SettingsActivity : Activity() {
                 }
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { bottomMargin = dp(12) })
         }
-        col.addView(updateCard())
+        // A new version: a bright card on top. Otherwise it's a row under Use.
+        val rel = latest
+        if (rel != null && rel.build > Updater.buildOf(version())) {
+            col.addView(group(nav(R.drawable.ic_update, "Updates", "${rel.tag} is out · see what's new") { go(Page.UPDATES) }))
+        } else if (latest == null && updateStatus == "Not checked yet") {
+            window.decorView.post { check() }
+        }
         section(col, "Home screen")
         col.addView(group(
             nav(R.drawable.ic_glass, "Theme", if (Glass.enabled(this)) "Liquid Glass" else "Solid") { go(Page.THEME) },
@@ -459,160 +470,199 @@ class SettingsActivity : Activity() {
             nav(R.drawable.ic_info, "Take the tour", "How Halo Launcher works, and what every setting does") {
                 startActivity(Intent(this, OnboardingActivity::class.java))
             },
+            nav(R.drawable.ic_update, "Updates", "v${version()} · " + when {
+                downloading >= 0f -> "downloading"
+                latest != null && latest!!.build > Updater.buildOf(version()) -> "${latest!!.tag} is out"
+                updateStatus == "You're up to date" -> "up to date"
+                else -> updateStatus.lowercase()
+            }) { go(Page.UPDATES) },
             nav(R.drawable.ic_info, "About", "Credits and licences") { go(Page.ABOUT) },
         ))
+    }
+
+    private var ringView: UpdateRing? = null
+    private var haloLatest: Updater.Release? = null
+    private var haloChecking = false
+    private var dlStart = 0L
+
+    /**
+     * Updates: the logo in a ring that says where things stand (spinning
+     * while it checks, filling while it downloads, green when up to date,
+     * breathing when an update is ready), one big button, the download's
+     * size, speed and time left, what's new in its sections, and Halo's
+     * version beside it.
+     */
+    private fun updatesPage(col: LinearLayout) {
+        if (latest == null && updateStatus == "Not checked yet") window.decorView.post { check() }
+        val rel = latest
+        val newer = rel != null && rel.build > Updater.buildOf(version())
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(26), dp(20), dp(20))
+            background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+        }
+        val ringBox = FrameLayout(this)
+        val ring = UpdateRing(this).apply {
+            state = when {
+                downloading >= 0f -> UpdateRing.State.DOWNLOADING
+                updateStatus == "Checking…" -> UpdateRing.State.CHECKING
+                newer -> UpdateRing.State.READY
+                updateStatus == "You're up to date" -> UpdateRing.State.UP_TO_DATE
+                else -> UpdateRing.State.IDLE
+            }
+            progress = downloading.coerceAtLeast(0f)
+        }
+        ringView = ring
+        ringBox.addView(ring, FrameLayout.LayoutParams(dp(132), dp(132)))
+        ringBox.addView(ImageView(this).apply { setImageResource(R.drawable.logo_launcher) }, FrameLayout.LayoutParams(dp(88), dp(88), Gravity.CENTER))
+        hero.addView(ringBox, LinearLayout.LayoutParams(dp(132), dp(132)))
+        hero.addView(text(24f, Palette.INK, bold = true).apply {
+            text = if (newer && rel != null) "${rel.tag} is ready" else "Halo Launcher v${version()}"
+            gravity = Gravity.CENTER
+            setPadding(0, dp(14), 0, 0)
+        })
+        val sub = when {
+            downloading >= 0f -> pctText(downloading, rel)
+            newer -> "You have v${version()}" + if (rel != null && rel.size > 0) "  ·  ${"%.1f".format(rel.size / 1_048_576.0)} MB download" else ""
+            updateStatus == "You're up to date" -> "You're on the latest version"
+            else -> updateStatus
+        }
+        hero.addView(text(13.5f, Palette.GREY, lines = 3).apply {
+            text = sub
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, 0)
+        }.also { pctView = it; statusView = it })
+        val btnText = when {
+            downloading >= 0f -> null
+            newer && rel != null -> "Download and install"
+            updateStatus == "Checking…" -> "Checking…"
+            else -> "Check for updates"
+        }
+        if (btnText != null) {
+            hero.addView(button(btnText) {
+                when {
+                    newer && rel != null -> install(rel)
+                    updateStatus != "Checking…" -> check()
+                }
+            }.also { progressView = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { topMargin = dp(18) })
+        } else {
+            progressView = null
+            hero.addView(text(12f, Palette.GREY).apply {
+                text = "Android will ask you to confirm when it's downloaded"
+                gravity = Gravity.CENTER
+                setPadding(0, dp(14), 0, 0)
+            })
+        }
+        col.addView(hero)
+        ringBox.scaleX = 0.8f
+        ringBox.scaleY = 0.8f
+        ringBox.alpha = 0f
+        ringBox.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(520).setInterpolator(android.view.animation.OvershootInterpolator(2f)).start()
+
+        val (headline, sections) = ReleaseNotes.parse(rel?.notes.orEmpty())
+        if (sections.isNotEmpty() || headline.isNotEmpty()) {
+            section(col, if (newer && rel != null) "What's new in ${rel.tag}" else "In this version")
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(18), dp(20), dp(16))
+                background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
+            }
+            if (headline.isNotEmpty()) box.addView(text(16f, Palette.INK, bold = true, lines = 3).apply {
+                text = headline
+                setPadding(0, 0, 0, dp(6))
+            })
+            var i = 0
+            for (sec in sections) {
+                if (sec.title.isNotEmpty()) box.addView(text(11.5f, Palette.GREY, bold = true).apply {
+                    text = sec.title.uppercase()
+                    letterSpacing = 0.08f
+                    setPadding(0, dp(14), 0, dp(4))
+                })
+                for (pt in sec.points) {
+                    val r = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(0, dp(5), 0, dp(5))
+                    }
+                    r.addView(View(this).apply { background = round(if (newer) Palette.GREEN else Palette.GREY, dpf(3f)) }, LinearLayout.LayoutParams(dp(6), dp(6)).apply {
+                        topMargin = dp(7)
+                        marginEnd = dp(12)
+                    })
+                    r.addView(text(13.5f, Palette.SILVER, lines = 8).apply {
+                        text = pt
+                        setLineSpacing(0f, 1.2f)
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    box.addView(r)
+                    r.alpha = 0f
+                    r.translationY = dpf(10f)
+                    r.animate().alpha(1f).translationY(0f).setStartDelay(120L + (i++).coerceAtMost(14) * 35L).setDuration(360).setInterpolator(DecelerateInterpolator(2f)).start()
+                }
+            }
+            col.addView(box)
+        }
+
+        // Halo, beside it.
+        section(col, "Halo")
+        val haloPkg = "com.lonerxone.halo"
+        val installed = try {
+            packageManager.getPackageInfo(haloPkg, 0).versionName
+        } catch (_: Exception) {
+            null
+        }
+        val hl = haloLatest
+        if (hl == null && !haloChecking) {
+            haloChecking = true
+            Updater.check(repo = "LONERXONE-ops/halo") { r ->
+                haloChecking = false
+                if (r is Updater.Check.Ok) {
+                    haloLatest = r.release
+                    if (page == Page.UPDATES) render()
+                }
+            }
+        }
+        val haloNewer = installed != null && hl != null && hl.build > Updater.buildOf(installed)
+        val summary = when {
+            installed == null -> "Not installed · the dynamic island made for this launcher"
+            haloNewer && hl != null -> "v$installed installed · ${hl.tag} is out"
+            hl != null -> "v$installed · up to date"
+            else -> "v$installed"
+        }
+        col.addView(group(nav(R.drawable.ic_halo, if (haloNewer) "Update Halo" else "Halo", summary) {
+            try {
+                if (installed != null) {
+                    startActivity(Intent().setClassName(haloPkg, "$haloPkg.MainActivity").putExtra("page", "updates").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } else {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/LONERXONE-ops/halo/releases/latest")))
+                }
+            } catch (_: Exception) {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/LONERXONE-ops/halo/releases/latest")))
+                } catch (_: Exception) {
+                }
+            }
+        }))
+        note(col, "Halo checks for new versions of both apps every few hours and sends a notification when one is out.")
     }
 
     /** Pages open with their title and one line now (see header); no wall of text. */
     private fun explain(@Suppress("UNUSED_PARAMETER") col: LinearLayout) {}
 
-    private var notesOpen = false
-    private var barView: UpdateBar? = null
     private var pctView: TextView? = null
 
-    /**
-     * The update card: your version big, a chip saying where you stand,
-     * "What's new" folding open into a list of what changed, a bar filling to
-     * 100% while it downloads, and one button for the next step.
-     */
-    private fun updateCard(): View {
-        val rel = latest
-        val newer = rel != null && rel.build > Updater.buildOf(version())
-        val c = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = round(Palette.TILE, dpf(24f)).apply { setStroke(dp(1), Color.argb(16, 255, 255, 255)) }
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            layoutTransition = android.animation.LayoutTransition().apply { enableTransitionType(android.animation.LayoutTransition.CHANGING) }
-        }
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        left.addView(text(11f, Palette.GREY, caps = true).apply { text = "Halo Launcher" })
-        left.addView(text(24f, Palette.INK, bold = true).apply {
-            text = "v" + version()
-            setPadding(0, dp(2), 0, 0)
-        })
-        top.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val (chipText, chipColor) = when {
-            downloading >= 0f -> "Downloading" to 0xFF5AAAFF.toInt()
-            newer -> "${rel?.tag} is out" to Palette.GREEN
-            updateStatus == "You're up to date" -> "Up to date" to Palette.GREEN
-            else -> updateStatus.take(26) to Palette.GREY
-        }
-        top.addView(text(12f, chipColor, bold = true).apply {
-            text = chipText
-            setPadding(dp(12), dp(6), dp(12), dp(6))
-            background = round(Color.argb(30, Color.red(chipColor), Color.green(chipColor), Color.blue(chipColor)), dpf(14f))
-        }.also { statusView = it })
-        c.addView(top)
-
-        if (downloading >= 0f) {
-            val bar = UpdateBar(this).apply { set(downloading, animate = false) }
-            barView = bar
-            c.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(10)).apply { topMargin = dp(16) })
-            val info = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, dp(8), 0, 0)
-            }
-            info.addView(text(12.5f, Palette.GREY).apply { text = "Downloading ${rel?.tag ?: ""}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            info.addView(text(12.5f, Palette.INK, bold = true).apply { text = pctText(downloading, rel) }.also { pctView = it })
-            c.addView(info)
-        } else {
-            barView = null
-            pctView = null
-        }
-
-        if (newer && rel != null) {
-            val points = whatsNew(rel.notes)
-            if (points.isNotEmpty()) {
-                c.addView(View(this).apply { setBackgroundColor(Palette.GRAPHITE) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = dp(14) })
-                val head = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(12), 0, dp(12))
-                    isClickable = true
-                }
-                head.addView(text(15f, Palette.INK, bold = true).apply { text = "What's new in ${rel.tag}" }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                val chev = ImageView(this).apply {
-                    setImageResource(R.drawable.ic_chevron)
-                    imageTintList = ColorStateList.valueOf(Palette.GREY)
-                    rotation = if (notesOpen) 270f else 90f
-                }
-                head.addView(chev, LinearLayout.LayoutParams(dp(20), dp(20)))
-                val list = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(0, 0, 0, dp(6))
-                    visibility = if (notesOpen) View.VISIBLE else View.GONE
-                }
-                for (pt in points) {
-                    val r = LinearLayout(this).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        setPadding(0, dp(5), 0, dp(5))
-                    }
-                    r.addView(View(this).apply { background = round(Palette.GREEN, dpf(3f)) }, LinearLayout.LayoutParams(dp(6), dp(6)).apply {
-                        topMargin = dp(7)
-                        marginEnd = dp(12)
-                    })
-                    r.addView(text(13.5f, Palette.SILVER, lines = 6).apply {
-                        text = pt
-                        setLineSpacing(0f, 1.2f)
-                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                    list.addView(r)
-                }
-                head.setOnClickListener {
-                    notesOpen = !notesOpen
-                    chev.animate().rotation(if (notesOpen) 270f else 90f).setDuration(260L).setInterpolator(DecelerateInterpolator(2f)).start()
-                    if (notesOpen) {
-                        list.visibility = View.VISIBLE
-                        list.alpha = 0f
-                        list.translationY = -dpf(8f)
-                        list.animate().alpha(1f).translationY(0f).setDuration(260L).start()
-                    } else {
-                        list.visibility = View.GONE
-                    }
-                }
-                c.addView(head)
-                c.addView(list)
-            }
-        }
-
-        val btnText = when {
-            downloading >= 0f -> null
-            newer && rel != null -> "Download & install ${rel.tag}" + if (rel.size > 0) "  ·  ${"%.1f".format(rel.size / 1_048_576.0)} MB" else ""
-            updateStatus == "Checking…" -> "Checking…"
-            else -> "Check for updates"
-        }
-        if (btnText != null) {
-            c.addView(button(btnText) {
-                when {
-                    newer && rel != null -> install(rel)
-                    updateStatus != "Checking…" -> check()
-                }
-            }.also { progressView = it }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(14) })
-        } else {
-            progressView = null
-        }
-        return c
-    }
-
+    /** "42%  ·  7.6 of 18.0 MB  ·  1.2 MB/s  ·  9s left" */
     private fun pctText(f: Float, rel: Updater.Release?): String {
         val pct = (f * 100).toInt().coerceIn(0, 100)
         val size = rel?.size ?: 0L
-        return if (size > 0) "$pct%  ·  ${"%.1f".format(size * f / 1_048_576.0)} of ${"%.1f".format(size / 1_048_576.0)} MB" else "$pct%"
-    }
-
-    /** A release's notes as short points, without the commit sign-off lines. */
-    private fun whatsNew(notes: String): List<String> {
-        val body = notes.lines().filterNot { l ->
-            val t = l.trim()
-            t.startsWith("Co-Authored-By", true) || t.startsWith("Claude-Session", true) || t.startsWith("http") || t.isBlank()
-        }.joinToString(" ")
-        return body.split(Regex("[;\\n]|(?<=[a-z])\\. ")).map { it.trim().trimEnd('.') }
-            .filter { it.length > 3 }
-            .map { it.replaceFirstChar { ch -> ch.uppercase() } }
-            .take(10)
+        if (size <= 0) return "$pct%"
+        val done = size * f
+        val secs = (android.os.SystemClock.elapsedRealtime() - dlStart) / 1000.0
+        val speed = if (secs > 0.5) done / secs else 0.0
+        val left = if (speed > 0) ((size - done) / speed).toInt() else -1
+        return buildString {
+            append("$pct%  ·  ${"%.1f".format(done / 1_048_576.0)} of ${"%.1f".format(size / 1_048_576.0)} MB")
+            if (speed > 0) append("  ·  ${"%.1f".format(speed / 1_048_576.0)} MB/s")
+            if (left >= 0) append("  ·  ${if (left >= 60) "${left / 60}m ${left % 60}s" else "${left}s"} left")
+        }
     }
 
     // =====================================================================
@@ -1907,6 +1957,7 @@ class SettingsActivity : Activity() {
         "Backup & restore" to 0xFF30B0C7.toInt(),
         "Hidden apps" to 0xFF636366.toInt(),
         "Take the tour" to 0xFFFF6B6B.toInt(),
+        "Updates" to 0xFF34C759.toInt(),
         "About" to 0xFF48484A.toInt(),
     )
 
@@ -2207,7 +2258,7 @@ class SettingsActivity : Activity() {
                 is Updater.Check.NotPublic -> updateStatus = "Updates need the GitHub repo to be public"
                 is Updater.Check.Error -> updateStatus = "Couldn't check: ${r.message.take(40)}"
             }
-            if (page == Page.MENU) render()
+            if (page == Page.MENU || page == Page.UPDATES) render()
         }
     }
 
@@ -2218,18 +2269,20 @@ class SettingsActivity : Activity() {
             return
         }
         downloading = 0f
+        dlStart = android.os.SystemClock.elapsedRealtime()
         updateStatus = "Downloading ${rel.tag}"
-        render()
+        if (page != Page.UPDATES) go(Page.UPDATES) else render()
         Updater.install(this, rel, progress = { f ->
             downloading = if (f >= 1f) -1f else f
             updateStatus = if (f >= 1f) "Confirm the install" else "Downloading ${rel.tag}"
-            // Progress only changes two texts; rebuilding the whole menu every
-            // percent made it flicker and jump (in your recording).
-            val bar = barView
-            if (f < 1f && bar != null && bar.isAttachedToWindow) {
-                bar.set(f, animate = true)
+            // Progress only changes the ring and one line; rebuilding the whole
+            // page every percent made it flicker and jump.
+            val ring = ringView
+            if (f < 1f && ring != null && ring.isAttachedToWindow) {
+                ring.progress = f
+                ring.invalidate()
                 pctView?.text = pctText(f, rel)
-            } else if (page == Page.MENU) {
+            } else if (page == Page.MENU || page == Page.UPDATES) {
                 render()
             }
         }, failed = { msg ->
