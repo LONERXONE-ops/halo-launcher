@@ -630,7 +630,7 @@ class SettingsActivity : Activity() {
         col.addView(group(nav(R.drawable.ic_halo, if (haloNewer) "Update Halo" else "Halo", summary) {
             try {
                 if (installed != null) {
-                    startActivity(Intent().setClassName(haloPkg, "$haloPkg.MainActivity").putExtra("page", "updates").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    startActivity(Intent().setClassName(haloPkg, "$haloPkg.MainActivity").putExtra("page", "updates").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
                 } else {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/LONERXONE-ops/halo/releases/latest")))
                 }
